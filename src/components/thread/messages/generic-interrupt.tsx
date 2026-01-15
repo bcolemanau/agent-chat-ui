@@ -4,21 +4,7 @@ import { ChevronDown, ChevronUp, Check, X } from "lucide-react";
 import { useStreamContext } from "@/providers/Stream";
 import { Button } from "@/components/ui/button";
 
-function isComplexValue(value: any): boolean {
-  return Array.isArray(value) || (typeof value === "object" && value !== null);
-}
-
-function isUrl(value: any): boolean {
-  if (typeof value !== "string") return false;
-  // Use a safe regex instead of the URL constructor which seems to be causing issues
-  // in this environment despite the try-catch block.
-  try {
-    return /^https?:\/\/[^\s/$.?#].\S*$/i.test(value);
-  } catch {
-    return false;
-  }
-}
-
+import { isComplexValue, isUrl } from "./generic-interrupt-utils";
 
 function renderInterruptStateItem(value: any): React.ReactNode {
   try {
@@ -54,6 +40,7 @@ function renderInterruptStateItem(value: any): React.ReactNode {
   }
 }
 
+
 export function GenericInterruptView({
   interrupt,
 }: {
@@ -76,7 +63,7 @@ export function GenericInterruptView({
       if (decision === "approve") {
         await stream.submit({}, {
           command: {
-            resume: null
+            resume: { action: "approve" }
           }
         });
       } else {

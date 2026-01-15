@@ -4,7 +4,6 @@ import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
-import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
 import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
@@ -34,7 +33,9 @@ function CustomComponent({
   const { values } = useStreamContext();
 
   const customComponents = values.ui?.filter(
-    (ui) => ui.metadata?.message_id === message.id,
+    (ui) =>
+      (ui.metadata?.message_id && ui.metadata?.message_id === message.id) ||
+      (ui.metadata?.tool_call_id && (message as any).tool_call_id && ui.metadata?.tool_call_id === (message as any).tool_call_id)
   );
 
   if (!customComponents?.length) return null;
@@ -53,14 +54,7 @@ function CustomComponent({
           );
         }
 
-        return (
-          <LoadExternalComponent
-            key={customComponent.id}
-            stream={thread}
-            message={customComponent}
-            meta={{ ui: customComponent, artifact }}
-          />
-        );
+        return null;
       })}
     </Fragment>
   );
@@ -174,6 +168,12 @@ export function AssistantMessage({
         {isToolResult ? (
           <>
             <ToolResult message={message} />
+            {message && (
+              <CustomComponent
+                message={message}
+                thread={thread}
+              />
+            )}
             <Interrupt
               interrupt={threadInterrupt}
               isLastMessage={isLastMessage}
