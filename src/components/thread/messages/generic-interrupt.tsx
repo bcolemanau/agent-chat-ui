@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Check, X } from "lucide-react";
+import { useStreamContext } from "@/providers/Stream";
+import { Button } from "@/components/ui/button";
 
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
@@ -8,34 +10,47 @@ function isComplexValue(value: any): boolean {
 
 function isUrl(value: any): boolean {
   if (typeof value !== "string") return false;
+  // Use a safe regex instead of the URL constructor which seems to be causing issues
+  // in this environment despite the try-catch block.
   try {
-    new URL(value);
-    return value.startsWith("http://") || value.startsWith("https://");
+    return /^https?:\/\/[^\s/$.?#].\S*$/i.test(value);
   } catch {
     return false;
   }
 }
 
+
 function renderInterruptStateItem(value: any): React.ReactNode {
-  if (isComplexValue(value)) {
-    return (
-      <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm">
-        {JSON.stringify(value, null, 2)}
-      </code>
-    );
-  } else if (isUrl(value)) {
-    return (
-      <a
-        href={value}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="break-all text-blue-600 underline hover:text-blue-800"
-      >
-        {value}
-      </a>
-    );
-  } else {
+  try {
+    if (value === null || value === undefined) {
+      return <span className="text-gray-400 italic">null</span>;
+    }
+
+    if (isComplexValue(value)) {
+      return (
+        <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm">
+          {JSON.stringify(value, null, 2)}
+        </code>
+      );
+    }
+
+    if (isUrl(value)) {
+      return (
+        <a
+          href={value}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="break-all text-blue-600 underline hover:text-blue-800"
+        >
+          {value}
+        </a>
+      );
+    }
+
     return String(value);
+  } catch (error) {
+    console.error("Error rendering interrupt item:", error, value);
+    return <span className="text-red-500 text-xs">Error</span>;
   }
 }
 
@@ -45,8 +60,43 @@ export function GenericInterruptView({
   interrupt: Record<string, any> | Record<string, any>[];
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const stream = useStreamContext();
+  const [isResuming, setIsResuming] = useState(false);
+
+  console.log("[GenericInterruptView] Rendering interrupt:", interrupt);
+
+  const handleResume = async (decision: "approve" | "reject") => {
+    try {
+      setIsResuming(true);
+
+      // For a standard LangGraph interrupt, we can resume by submitting the answer.
+      // If it's a simple breakpoint, an empty object or null is usually enough to continue.
+      // However, we'll try to follow the Decision pattern if possible.
+
+      if (decision === "approve") {
+        await stream.submit({}, {
+          command: {
+            resume: null
+          }
+        });
+      } else {
+        // For reject, we might want to go to a specific node or just stop.
+        // For now, let's try to pass an error if it's a tool-related interrupt.
+        await stream.submit({}, {
+          command: {
+            resume: { error: "User rejected this tool call." }
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Error resuming graph:", error);
+    } finally {
+      setIsResuming(false);
+    }
+  };
 
   const contentStr = JSON.stringify(interrupt, null, 2);
+
   const contentLines = contentStr.split("\n");
   const shouldTruncate = contentLines.length > 4 || contentStr.length > 500;
 
@@ -96,6 +146,28 @@ export function GenericInterruptView({
       <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-medium text-gray-900">Human Interrupt</h3>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+              onClick={() => handleResume("approve")}
+              disabled={isResuming}
+            >
+              <Check className="mr-1 h-3 w-3" />
+              Approve
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800"
+              onClick={() => handleResume("reject")}
+              disabled={isResuming}
+            >
+              <X className="mr-1 h-3 w-3" />
+              Reject
+            </Button>
+          </div>
         </div>
       </div>
       <motion.div
@@ -144,16 +216,16 @@ export function GenericInterruptView({
         </div>
         {(shouldTruncate ||
           (Array.isArray(interrupt) && interrupt.length > 5)) && (
-          <motion.button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex w-full cursor-pointer items-center justify-center border-t-[1px] border-gray-200 py-2 text-gray-500 transition-all duration-200 ease-in-out hover:bg-gray-50 hover:text-gray-600"
-            initial={{ scale: 1 }}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            {isExpanded ? <ChevronUp /> : <ChevronDown />}
-          </motion.button>
-        )}
+            <motion.button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="flex w-full cursor-pointer items-center justify-center border-t-[1px] border-gray-200 py-2 text-gray-500 transition-all duration-200 ease-in-out hover:bg-gray-50 hover:text-gray-600"
+              initial={{ scale: 1 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              {isExpanded ? <ChevronUp /> : <ChevronDown />}
+            </motion.button>
+          )}
       </motion.div>
     </div>
   );
