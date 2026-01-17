@@ -26,6 +26,7 @@ import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 import { useBranding } from "./Branding";
+import { useSession } from "next-auth/react";
 
 export type StateType = {
   messages: Message[];
@@ -245,44 +246,16 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const finalAssistantId = assistantId || envAssistantId;
   const { branding } = useBranding();
 
-  // Auto-login for Democracy (Daikin Identity)
+  // Sync Session Token from NextAuth
+  const { data: session } = useSession();
+
   useEffect(() => {
-    const autoLogin = async () => {
-      // Only auto-login if:
-      // 1. No key is present
-      // 2. OR the key looks like a stale LangSmith token (starts with lsv2_ or gsmith)
-      //    We want to replace these with our fresh JWT for the Daikin flow.
-      const isStaleKey = !apiKey || (typeof apiKey === "string" && (apiKey.startsWith("lsv2_") || apiKey.startsWith("gsmith")));
-
-      if (isStaleKey && finalApiUrl) {
-        try {
-          console.log("[AutoLogin] Detected stale or missing key, fetching fresh identity...");
-          // Attempt to get a demo token from the proxy
-          const res = await fetch(`${finalApiUrl}/auth/token`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              customer_id: "daikin",
-              project_id: "demo-web-01",
-              role: "admin"
-            })
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            if (data.access_token) {
-              console.log("[AutoLogin] Success: Generated fresh JWT");
-              setApiKey(data.access_token);
-            }
-          }
-        } catch (e) {
-          console.warn("[AutoLogin] Failed to fetch token:", e);
-        }
-      }
-    };
-
-    autoLogin();
-  }, [finalApiUrl, apiKey]);
+    if (session?.user?.idToken) {
+      console.log("[StreamProvider] Syncing API Key from Google ID Token");
+      // Use the ID token from Google Auth
+      _setApiKey(session.user.idToken);
+    }
+  }, [session]);
 
   // Show the form if we: don't have an API URL, or don't have an assistant ID
   if (!finalApiUrl || !finalAssistantId) {

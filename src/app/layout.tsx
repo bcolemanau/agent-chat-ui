@@ -18,6 +18,7 @@ export const metadata: Metadata = {
 };
 
 import { BrandingProvider } from "@/providers/Branding";
+import { NextAuthProvider } from "@/providers/NextAuthProvider";
 
 export default function RootLayout({
   children,
@@ -28,13 +29,15 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          <BrandingProvider>
-            <NuqsAdapter>
-              <TooltipProvider>
-                {children}
-              </TooltipProvider>
-            </NuqsAdapter>
-          </BrandingProvider>
+          <NextAuthProvider>
+            <BrandingProvider>
+              <NuqsAdapter>
+                <TooltipProvider>
+                  {children}
+                </TooltipProvider>
+              </NuqsAdapter>
+            </BrandingProvider>
+          </NextAuthProvider>
         </ThemeProvider>
       </body>
     </html>

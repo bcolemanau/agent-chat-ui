@@ -51,6 +51,7 @@ import {
 } from "./artifact";
 import { ThemeToggle } from "../theme-toggle";
 import { ProductPanel } from "../product-panel/ProductPanel";
+import { UserMenu } from "./user-menu";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -224,33 +225,7 @@ export function Thread() {
     setContentBlocks([]);
   };
 
-  const handleAuth = async () => {
-    try {
-      toast.info("Authenticating...");
-      const res = await fetch(`${apiUrl}/auth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customer_id: "daikin",
-          project_id: "demo-web-01",
-          role: "admin",
-        }),
-      });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.access_token) {
-          setApiKey(data.access_token);
-          toast.success("Authenticated as Daikin Admin");
-        }
-      } else {
-        const error = await res.text();
-        toast.error("Authentication failed: " + error);
-      }
-    } catch (e) {
-      toast.error("Auth error: " + (e as Error).message);
-    }
-  };
 
   const handleRegenerate = (
     parentCheckpoint: Checkpoint | null | undefined,
@@ -342,15 +317,7 @@ export function Thread() {
               </div>
               <div className="absolute top-2 right-4 flex items-center gap-4">
                 <ThemeToggle />
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip="Manual Auth"
-                  variant="ghost"
-                  onClick={handleAuth}
-                >
-                  <Fingerprint className="size-5" />
-                </TooltipIconButton>
+                <UserMenu />
                 <TooltipIconButton
                   size="lg"
                   className="p-4"
@@ -408,15 +375,7 @@ export function Thread() {
                 <div className="flex items-center gap-4">
                   <ThemeToggle />
                 </div>
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip="Manual Auth"
-                  variant="ghost"
-                  onClick={handleAuth}
-                >
-                  <Fingerprint className="size-5" />
-                </TooltipIconButton>
+                <UserMenu />
                 <TooltipIconButton
                   size="lg"
                   className="p-4"

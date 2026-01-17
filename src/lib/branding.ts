@@ -1,6 +1,7 @@
 export interface ClientBranding {
   name: string;
   brand_title: string;
+  logo_url?: string;
   colors: {
     primary: string;
     secondary: string;
@@ -37,6 +38,7 @@ export const defaultBranding: ClientBranding = {
 export const daikinBranding: ClientBranding = {
   name: "Daikin",
   brand_title: "Reflexion | Daikin",
+  logo_url: "/daikin_logo.png", // Assuming we will add this asset or use remote URL
   colors: {
     primary: "#009FDE",
     secondary: "#69C6EF",

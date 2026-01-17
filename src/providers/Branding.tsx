@@ -5,6 +5,7 @@ import { ClientBranding, getBranding } from "@/lib/branding";
 
 interface BrandingContextType {
     branding: ClientBranding;
+    loading: boolean;
 }
 
 const BrandingContext = createContext<BrandingContextType | undefined>(undefined);
@@ -17,6 +18,7 @@ export function BrandingProvider({
     client?: string;
 }) {
     const [branding, setBranding] = useState<ClientBranding>(getBranding(client));
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         // Apply branding styles to CSS variables
@@ -25,14 +27,11 @@ export function BrandingProvider({
         root.style.setProperty("--radius", branding.style.border_radius);
         root.style.setProperty("--radius-button", branding.style.button_radius);
 
-        // We can add more mappings here as needed
-        // For OKLCH colors, we might need a converter if the theme expects OKLCH
-        // But since we are overriding with hex, standard CSS variables should support it
-        // if the tailwind config is set up correctly.
+        setLoading(false);
     }, [branding]);
 
     return (
-        <BrandingContext.Provider value={{ branding }}>
+        <BrandingContext.Provider value={{ branding, loading }}>
             {children}
         </BrandingContext.Provider>
     );
