@@ -37,9 +37,27 @@ export const authOptions: NextAuthOptions = {
         async jwt({ token, account, user }) {
             // On initial sign in
             if (account && user) {
-                // 1. Look up Organization/Role info
+                // 1. Look up Organization/Role info from Backend
                 const userEmail = user.email;
-                const config = getUserConfig(userEmail);
+                let config = getUserConfig(userEmail);
+
+                try {
+                    const backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
+                    const resp = await fetch(`${backendUrl}/auth/profile?email=${userEmail}`);
+                    if (resp.ok) {
+                        const profile = await resp.json();
+                        config = {
+                            customerId: profile.customerId || config.customerId,
+                            projectId: config.projectId || "demo-project", // Default project if not in profile
+                            role: profile.role || config.role
+                        };
+                        console.log(`[AUTH] Fetched profile for ${userEmail}:`, config);
+                    } else {
+                        console.warn(`[AUTH] Backend profile lookup failed for ${userEmail}: ${resp.status}`);
+                    }
+                } catch (e) {
+                    console.error("[AUTH] Error connecting to backend for profile lookup:", e);
+                }
 
                 token.customerId = config.customerId;
                 token.projectId = config.projectId;

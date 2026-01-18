@@ -1,5 +1,5 @@
 
-export type UserRole = "admin" | "user" | "guest";
+export type UserRole = "admin" | "user" | "guest" | "reflexion_admin" | "customer_admin" | "ReflexionAdministrator" | "CustomerAdministrator";
 
 export interface UserConfig {
     customerId: string;
