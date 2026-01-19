@@ -37,18 +37,20 @@ export default function RootLayout({
           <NextAuthProvider>
             <BrandingProvider>
               <NuqsAdapter>
-                <TooltipProvider>
-                  <Toaster />
-                  <ErrorBoundary>
-                    <ThreadProvider>
-                      <StreamProvider>
-                        <ArtifactProvider>
-                          {children}
-                        </ArtifactProvider>
-                      </StreamProvider>
-                    </ThreadProvider>
-                  </ErrorBoundary>
-                </TooltipProvider>
+                <React.Suspense fallback={<></>}>
+                  <TooltipProvider>
+                    <Toaster />
+                    <ErrorBoundary>
+                      <ThreadProvider>
+                        <StreamProvider>
+                          <ArtifactProvider>
+                            {children}
+                          </ArtifactProvider>
+                        </StreamProvider>
+                      </ThreadProvider>
+                    </ErrorBoundary>
+                  </TooltipProvider>
+                </React.Suspense>
               </NuqsAdapter>
             </BrandingProvider>
           </NextAuthProvider>
