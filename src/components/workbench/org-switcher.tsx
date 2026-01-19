@@ -25,8 +25,7 @@ export function OrgSwitcher() {
 
     const fetchOrganizations = React.useCallback(async () => {
         try {
-            const backendUrl = process.env.NEXT_PUBLIC_LANGGRAPH_API_URL || 'https://reflexion-staging.up.railway.app';
-            const resp = await fetch(`${backendUrl}/auth/organizations`);
+            const resp = await fetch('/api/organizations');
             if (resp.ok) {
                 const data = await resp.json();
                 setOrganizations(data);
