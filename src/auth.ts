@@ -52,7 +52,11 @@ export const authOptions: NextAuthOptions = {
                     const profileUrl = `${backendUrl}/auth/profile?email=${userEmail}`;
                     console.log(`[AUTH] Fetching profile from: ${profileUrl}`);
 
-                    const resp = await fetch(profileUrl);
+                    const resp = await fetch(profileUrl, {
+                        headers: {
+                            "X-Api-Key": process.env.LANGSMITH_API_KEY!
+                        }
+                    });
                     if (resp.ok) {
                         const profile = await resp.json();
                         config = {
