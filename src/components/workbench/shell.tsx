@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { Sidebar } from "./sidebar";
 import { UserMenu } from "@/components/thread/user-menu";
 import { Breadcrumbs } from "./breadcrumbs";
+import { OrgSwitcher } from "./org-switcher";
 
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     return (
@@ -21,11 +22,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                         </Suspense>
                     </div>
                     <div className="flex items-center gap-4">
-                        {/* Placeholder for project context context selector later */}
-                        <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-muted/50 rounded-full text-xs font-semibold text-muted-foreground">
-                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                            Active Project: Daikin Phase 1
-                        </div>
+                        <OrgSwitcher />
                         <UserMenu />
                     </div>
                 </header>
