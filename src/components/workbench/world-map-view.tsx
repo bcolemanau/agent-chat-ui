@@ -213,7 +213,7 @@ export function WorldMapView() {
             .attr('stroke', '#888')
             .attr('stroke-width', 1.5)
             .attr('marker-end', 'url(#arrowhead)')
-            .style('opacity', d => d.is_active === false ? 0.05 : 0.5);
+            .style('opacity', d => d.is_active === false ? 0.15 : 0.5);
 
         const node = g.append('g')
             .attr('class', 'nodes')
