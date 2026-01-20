@@ -61,13 +61,13 @@ export function OrgSwitcher() {
     return (
         <div className="flex items-center gap-2">
             <Select value={selectedOrgId} onValueChange={handleValueChange}>
-                <SelectTrigger className="w-[180px] h-9 bg-zinc-900 border-zinc-800 text-zinc-300">
-                    <Building2 className="w-4 h-4 mr-2 text-zinc-500" />
+                <SelectTrigger className="w-[180px] h-9 bg-background border-border text-foreground">
+                    <Building2 className="w-4 h-4 mr-2 text-muted-foreground" />
                     <SelectValue placeholder="Organization" />
                 </SelectTrigger>
-                <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-300">
+                <SelectContent className="bg-background border-border text-foreground">
                     {organizations.map((org) => (
-                        <SelectItem key={org.id} value={org.id} className="focus:bg-zinc-800 focus:text-zinc-100">
+                        <SelectItem key={org.id} value={org.id} className="focus:bg-muted focus:text-foreground">
                             {org.name}
                         </SelectItem>
                     ))}

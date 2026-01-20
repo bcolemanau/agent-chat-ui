@@ -58,17 +58,17 @@ export function ProjectSwitcher() {
             value={threadId || "new"}
             onValueChange={(val) => setThreadId(val === "new" ? null : val)}
         >
-            <SelectTrigger className="w-[180px] bg-zinc-900 border-zinc-800 text-zinc-300 h-9">
+            <SelectTrigger className="w-[180px] bg-background border-border text-foreground h-9">
                 <Briefcase className="w-4 h-4 mr-2 text-blue-500" />
                 <SelectValue placeholder="Select Project" />
             </SelectTrigger>
-            <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-300">
+            <SelectContent className="bg-background border-border text-foreground">
                 {projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id} className="focus:bg-zinc-800 focus:text-zinc-100 italic">
+                    <SelectItem key={project.id} value={project.id} className="focus:bg-muted focus:text-foreground italic">
                         {project.name}
                     </SelectItem>
                 ))}
-                <SelectItem value="new" className="focus:bg-zinc-800 focus:text-zinc-100 font-medium border-t border-zinc-800 mt-1">
+                <SelectItem value="new" className="focus:bg-muted focus:text-foreground font-medium border-t border-border mt-1">
                     <div className="flex items-center gap-2">
                         <Plus className="w-3.5 h-3.5" />
                         New Project

@@ -6,20 +6,21 @@ import { UserMenu } from "@/components/thread/user-menu";
 import { Breadcrumbs } from "./breadcrumbs";
 import { OrgSwitcher } from "./org-switcher";
 import { useStreamContext } from "@/providers/Stream";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Thread } from "@/components/thread";
-import { MessageSquare, Map as MapIcon, Workflow, Activity, ChevronRight, Briefcase } from "lucide-react";
+import { MessageSquare, Map as MapIcon, Workflow, Activity, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQueryState } from "nuqs";
-import { ProjectSwitcher } from "./project-switcher";
 import { cn } from "@/lib/utils";
+import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "@/components/thread/artifact";
+import { PanelLeft, FileText, Layout, GitGraph } from "lucide-react";
 
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
     const activeAgent = (stream as any)?.values?.active_agent || "supervisor";
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
     const [isChatOpen, setIsChatOpen] = useState(false);
+    const [isArtifactOpen, closeArtifact] = useArtifactOpen();
 
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
@@ -28,121 +29,140 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
             {/* Main Content Area */}
             <div className="flex-1 flex flex-col h-full min-w-0">
-                {/* Top Header */}
-                <header className="h-14 border-b flex items-center justify-between px-6 bg-background/50 backdrop-blur-md z-20">
-                    <div className="flex items-center gap-6">
-                        <Suspense fallback={<div className="h-4 w-24 bg-muted animate-pulse rounded" />}>
+                {/* Level 1: Global Context Header */}
+                <header className="h-14 border-b flex items-center justify-between px-6 bg-background z-20 shrink-0">
+                    <div className="flex items-center gap-4">
+                        <Suspense fallback={<div className="h-4 w-32 bg-muted animate-pulse rounded" />}>
                             <Breadcrumbs />
                         </Suspense>
+                    </div>
 
-                        <div className="h-6 w-[1px] bg-zinc-800" />
-
+                    <div className="flex items-center gap-3">
                         {/* Workflow Status */}
-                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 shadow-sm">
+                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted/50 border border-border shadow-sm mr-2">
                             <Activity className={cn(
                                 "w-3.5 h-3.5",
                                 stream.isLoading ? "text-amber-500 animate-pulse" : "text-emerald-500"
                             )} />
-                            <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">
+                            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                                 Mode:
                             </span>
-                            <span className="text-xs font-semibold text-zinc-200 capitalize">
+                            <span className="text-xs font-semibold text-foreground capitalize">
                                 {activeAgent}
                             </span>
                         </div>
-                    </div>
 
-                    <div className="flex items-center gap-3">
-                        {/* View Mode Toggle */}
-                        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className={cn(
-                                            "h-7 px-2.5 gap-1.5 transition-all text-xs",
-                                            viewMode === "map" ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-500 hover:text-zinc-300"
-                                        )}
-                                        onClick={() => setViewMode("map")}
-                                    >
-                                        <MapIcon className="w-3.5 h-3.5" />
-                                        Map
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Knowledge Graph View</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className={cn(
-                                            "h-7 px-2.5 gap-1.5 transition-all text-xs",
-                                            viewMode === "workflow" ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-500 hover:text-zinc-300"
-                                        )}
-                                        onClick={() => setViewMode("workflow")}
-                                    >
-                                        <Workflow className="w-3.5 h-3.5" />
-                                        Workflow
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Process Orientation View</TooltipContent>
-                            </Tooltip>
-                        </div>
-
-                        <div className="h-6 w-[1px] bg-zinc-800 mx-1" />
-
-                        <ProjectSwitcher />
-
-                        <div className="h-6 w-[1px] bg-zinc-800 mx-1" />
-
-                        <OrgSwitcher />
-
-                        <div className="h-6 w-[1px] bg-zinc-800 mx-1" />
+                        <div className="h-6 w-[1px] bg-border mx-1" />
 
                         {/* Chat Sidebar Trigger */}
-                        <Sheet open={isChatOpen} onOpenChange={setIsChatOpen}>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <SheetTrigger asChild>
-                                        <Button
-                                            variant="outline"
-                                            size="icon"
-                                            className={cn(
-                                                "h-9 w-9 border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 relative transition-all",
-                                                isChatOpen && "ring-2 ring-primary ring-offset-2 ring-offset-background"
-                                            )}
-                                        >
-                                            <MessageSquare className="w-4 h-4 text-zinc-400" />
-                                            {stream.isLoading && (
-                                                <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                                                    <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-                                                </span>
-                                            )}
-                                        </Button>
-                                    </SheetTrigger>
-                                </TooltipTrigger>
-                                <TooltipContent>Contextual Agent Chat</TooltipContent>
-                            </Tooltip>
-                            <SheetContent side="right" className="w-[450px] sm:w-[540px] p-0 border-l-zinc-800 bg-zinc-950">
-                                <Thread embedded hideArtifacts />
-                            </SheetContent>
-                        </Sheet>
-
-                        <div className="h-6 w-[1px] bg-zinc-800 mx-1" />
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setIsChatOpen(!isChatOpen)}
+                                    className={cn(
+                                        "h-9 w-9 text-muted-foreground hover:text-foreground relative transition-all",
+                                        isChatOpen && "bg-muted text-foreground"
+                                    )}
+                                >
+                                    <MessageSquare className="w-4 h-4" />
+                                    {stream.isLoading && (
+                                        <span className="absolute top-2 right-2 flex h-2 w-2">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                                        </span>
+                                    )}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Contextual Agent Chat</TooltipContent>
+                        </Tooltip>
 
                         <UserMenu />
                     </div>
                 </header>
 
-                {/* Content Stage */}
-                <main className="flex-1 overflow-auto relative bg-[#0a0a0a]">
-                    <div className="h-full w-full custom-scrollbar">
-                        {children}
+                {/* Level 2: Project View Tabs */}
+                <div className="h-12 border-b flex items-center px-6 bg-muted/10 shrink-0">
+                    <div className="flex items-center space-x-1">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                                "h-8 px-3 gap-2 text-xs font-medium transition-all",
+                                viewMode === "map" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                            )}
+                            onClick={() => setViewMode("map")}
+                        >
+                            <MapIcon className="w-3.5 h-3.5" />
+                            Map
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                                "h-8 px-3 gap-2 text-xs font-medium transition-all",
+                                viewMode === "workflow" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                            )}
+                            onClick={() => setViewMode("workflow")}
+                        >
+                            <GitGraph className="w-3.5 h-3.5" />
+                            Workflow
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                                "h-8 px-3 gap-2 text-xs font-medium transition-all",
+                                viewMode === "artifacts" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                            )}
+                            onClick={() => setViewMode("artifacts")}
+                        >
+                            <FileText className="w-3.5 h-3.5" />
+                            Artifacts
+                        </Button>
                     </div>
-                </main>
+                </div>
+
+                {/* Level 3: Content Stage */}
+                <div className="flex-1 flex overflow-hidden">
+                    <main className="flex-1 overflow-auto relative bg-background custom-scrollbar">
+                        <div className="h-full w-full">
+                            {isArtifactOpen ? (
+                                <div className="h-full w-full flex flex-col">
+                                    <div className="flex items-center justify-between border-b px-6 py-3 bg-background/50 backdrop-blur-sm sticky top-0 z-10">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mr-2">Artifact Viewer</span>
+                                            <ArtifactTitle className="text-sm font-medium" />
+                                        </div>
+                                        <Button variant="ghost" size="sm" onClick={closeArtifact} className="h-8 w-8 p-0">
+                                            <X className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                    <div className="flex-1 overflow-auto p-6">
+                                        <ArtifactContent className="max-w-4xl mx-auto bg-background border rounded-lg shadow-sm min-h-[500px]" />
+                                    </div>
+                                </div>
+                            ) : (
+                                children
+                            )}
+                        </div>
+                    </main>
+
+                    {isChatOpen && (
+                        <aside className="w-[450px] border-l bg-background flex flex-col animate-in slide-in-from-right duration-300 shadow-xl z-30">
+                            <div className="flex items-center justify-between p-3 border-b bg-muted/30">
+                                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contextual Agent Chat</span>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsChatOpen(false)}>
+                                    <X className="w-3.5 h-3.5" />
+                                </Button>
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                                <Thread embedded hideArtifacts />
+                            </div>
+                        </aside>
+                    )}
+                </div>
             </div>
 
             <style jsx global>{`

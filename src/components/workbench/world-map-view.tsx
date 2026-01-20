@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Activity, Globe, GitGraph } from 'lucide-react';
+import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Activity, Globe, GitGraph, FileText } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
 import { useQueryState } from 'nuqs';
@@ -120,7 +120,7 @@ export function WorldMapView() {
             .attr('markerHeight', 6)
             .append('path')
             .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
-            .attr('fill', '#444');
+            .attr('fill', '#888');
 
         const nodes = data.nodes.map(d => ({ ...d }));
         const links = data.links.map(d => ({ ...d }));
@@ -136,7 +136,7 @@ export function WorldMapView() {
             .selectAll('line')
             .data(links)
             .enter().append('line')
-            .attr('stroke', '#333')
+            .attr('stroke', '#888')
             .attr('stroke-width', 1.5)
             .attr('marker-end', 'url(#arrowhead)');
 
@@ -177,7 +177,7 @@ export function WorldMapView() {
             .attr('dx', 16)
             .attr('dy', 4)
             .text(d => d.name)
-            .attr('fill', '#ccc')
+            .attr('fill', 'gray')
             .style('font-size', '10px')
             .style('font-weight', '500')
             .style('pointer-events', 'none');
@@ -209,19 +209,57 @@ export function WorldMapView() {
             );
         }, 500);
 
-    }, [data]);
+    }, [data, viewMode]);
+
+    // Artifacts View Component
+    const ArtifactsView = () => {
+        const artifacts = data?.nodes.filter(n => n.type === 'ARTIFACT') || [];
+
+        return (
+            <div className="absolute inset-0 flex flex-col bg-background p-6 overflow-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {artifacts.length > 0 ? (
+                        artifacts.map(artifact => (
+                            <div key={artifact.id} className="border border-border rounded-lg p-4 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer" onClick={() => setSelectedNode(artifact)}>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <FileText className="w-4 h-4 text-blue-500" />
+                                    <h3 className="font-semibold text-sm truncate">{artifact.name}</h3>
+                                </div>
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                    {artifact.description || "No description available."}
+                                </p>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="col-span-full flex flex-col items-center justify-center text-muted-foreground py-12">
+                            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                                <FileText className="w-6 h-6 opacity-20" />
+                            </div>
+                            <p>No artifacts found in this project.</p>
+                        </div>
+                    )}
+                </div>
+                <div className="absolute bottom-6 left-6 z-20 pointer-events-none">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
+                        <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Artifacts View</span>
+                    </div>
+                </div>
+            </div>
+        );
+    };
 
     return (
-        <div className="h-full w-full flex flex-col bg-[#050505] overflow-hidden">
+        <div className="h-full w-full flex flex-col bg-background overflow-hidden">
             {/* Toolbar */}
-            <div className="h-12 border-b border-white/5 bg-white/[0.02] flex items-center justify-between px-4 z-20">
+            <div className="h-12 border-b border-border bg-muted/30 flex items-center justify-between px-4 z-20">
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1 bg-white/5 rounded-md p-1">
-                        <UIButton variant="ghost" size="sm" className="h-7 text-xs px-3 bg-white/10 text-white">Full Map</UIButton>
+                    <div className="flex items-center gap-1 bg-muted rounded-md p-1">
+                        <UIButton variant="ghost" size="sm" className="h-7 text-xs px-3 bg-background shadow-sm text-foreground">Full Map</UIButton>
                         <UIButton variant="ghost" size="sm" className="h-7 text-xs px-3 text-muted-foreground">Focus</UIButton>
                     </div>
-                    <div className="h-4 w-px bg-white/10 ml-2" />
-                    <UIButton variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-white" onClick={fetchData}>
+                    <div className="h-4 w-px bg-border ml-2" />
+                    <UIButton variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground" onClick={fetchData}>
                         <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
                         <span className="text-xs">Refresh</span>
                     </UIButton>
@@ -237,7 +275,7 @@ export function WorldMapView() {
                         <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <input
                             placeholder="Search nodes..."
-                            className="bg-white/5 border border-white/10 rounded-md py-1 pl-8 pr-3 text-xs focus:outline-none focus:border-primary/50 transition-all w-48"
+                            className="bg-muted border border-border rounded-md py-1 pl-8 pr-3 text-xs focus:outline-none focus:border-primary/50 transition-all w-48 text-foreground"
                         />
                     </div>
                 </div>
@@ -246,18 +284,18 @@ export function WorldMapView() {
             {/* Canvas Area */}
             <div ref={containerRef} className="flex-1 relative overflow-hidden" onClick={() => setSelectedNode(null)}>
                 {viewMode === 'workflow' ? (
-                    <div className="absolute inset-0 flex flex-col bg-[#0a0a0a]">
+                    <div className="absolute inset-0 flex flex-col bg-background">
                         {!visualizationHtml ? (
-                            <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 gap-4">
+                            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
                                 <Activity className="w-12 h-12 opacity-20" />
                                 <div className="text-center">
-                                    <h3 className="text-sm font-medium text-zinc-300">No active orientation</h3>
-                                    <p className="text-xs text-zinc-600 mt-1 max-w-[200px]">Ask the agent to "show orientation" to see the project workflow here.</p>
+                                    <h3 className="text-sm font-medium text-foreground">No active orientation</h3>
+                                    <p className="text-xs text-muted-foreground mt-1 max-w-[200px]">Ask the agent to "show orientation" to see the project workflow here.</p>
                                 </div>
                                 <UIButton
                                     variant="outline"
                                     size="sm"
-                                    className="mt-4 border-zinc-800 text-xs"
+                                    className="mt-4 border-border text-xs"
                                     onClick={() => setViewMode('map')}
                                 >
                                     Switch to Map View
@@ -269,8 +307,7 @@ export function WorldMapView() {
                                     <html>
                                         <head>
                                             <style>
-                                                body { margin: 0; background: #0a0a0a; color: white; font-family: sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-                                                /* Override mermaid colors if possible via CSS if the html contains it, or trust the generated HTML */
+                                                body { margin: 0; background: transparent; color: inherit; font-family: sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
                                             </style>
                                         </head>
                                         <body>
@@ -278,21 +315,23 @@ export function WorldMapView() {
                                         </body>
                                     </html>
                                 `}
-                                className="w-full h-full border-none shadow-2xl"
+                                className="w-full h-full border-none"
                                 title="Workflow Orientation"
                             />
                         )}
                         <div className="absolute bottom-6 left-6 z-20">
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-full shadow-lg">
-                                <GitGraph className="w-3.5 h-3.5 text-zinc-400" />
-                                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Workflow State Mode</span>
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
+                                <GitGraph className="w-3.5 h-3.5 text-muted-foreground" />
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Workflow State Mode</span>
                             </div>
                         </div>
                     </div>
+                ) : viewMode === 'artifacts' ? (
+                    <ArtifactsView />
                 ) : (
                     <>
                         {loading && !data && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-[#050505] z-30">
+                            <div className="absolute inset-0 flex items-center justify-center bg-background z-30">
                                 <div className="text-center">
                                     <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                                     <p className="text-xs text-muted-foreground">Initializing Knowledge Graph...</p>
@@ -301,10 +340,10 @@ export function WorldMapView() {
                         )}
 
                         {error && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-[#050505] z-30 p-6 text-center">
+                            <div className="absolute inset-0 flex items-center justify-center bg-background z-30 p-6 text-center">
                                 <div>
-                                    <p className="text-red-500 mb-4 font-mono text-sm leading-relaxed max-w-md mx-auto">Error: {error}</p>
-                                    <UIButton onClick={fetchData} variant="outline" className="border-zinc-800">Retry Connection</UIButton>
+                                    <p className="text-destructive mb-4 font-mono text-sm leading-relaxed max-w-md mx-auto">Error: {error}</p>
+                                    <UIButton onClick={fetchData} variant="outline" className="border-border">Retry Connection</UIButton>
                                 </div>
                             </div>
                         )}
@@ -312,9 +351,9 @@ export function WorldMapView() {
                         <svg ref={svgRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
 
                         <div className="absolute bottom-6 left-6 z-20">
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-full shadow-lg">
-                                <Globe className="w-3.5 h-3.5 text-zinc-400" />
-                                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Knowledge Graph Mode</span>
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
+                                <Globe className="w-3.5 h-3.5 text-muted-foreground" />
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Graph Mode</span>
                             </div>
                         </div>
                     </>
@@ -322,35 +361,35 @@ export function WorldMapView() {
 
                 {/* Selected Node Details */}
                 {selectedNode && (
-                    <div className="absolute top-4 right-4 w-72 bg-zinc-900/90 backdrop-blur-md border border-zinc-800 rounded-xl p-5 z-20 shadow-2xl animate-in slide-in-from-right-4 duration-300">
+                    <div className="absolute top-4 right-4 w-72 bg-background/90 backdrop-blur-md border border-border rounded-xl p-5 z-20 shadow-2xl animate-in slide-in-from-right-4 duration-300">
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 block">
                                     {typeConfig[selectedNode.type]?.label || selectedNode.type}
                                 </span>
-                                <h3 className="text-lg font-bold text-white leading-tight">{selectedNode.name}</h3>
+                                <h3 className="text-lg font-bold text-foreground leading-tight">{selectedNode.name}</h3>
                             </div>
                         </div>
                         <div className="space-y-4">
-                            <p className="text-xs text-zinc-400 leading-relaxed">
+                            <p className="text-xs text-muted-foreground leading-relaxed">
                                 {selectedNode.description || "No detailed description available for this node."}
                             </p>
 
                             {selectedNode.properties && (
                                 <div className="space-y-2">
-                                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight">Technical Specs</span>
+                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Technical Specs</span>
                                     <div className="grid grid-cols-2 gap-2">
                                         {Object.entries(selectedNode.properties).slice(0, 4).map(([k, v]: [any, any]) => (
-                                            <div key={k} className="bg-white/5 rounded p-2">
-                                                <div className="text-[9px] text-zinc-500 uppercase">{k}</div>
-                                                <div className="text-[10px] text-zinc-300 truncate">{String(v)}</div>
+                                            <div key={k} className="bg-muted rounded p-2">
+                                                <div className="text-[9px] text-muted-foreground uppercase">{k}</div>
+                                                <div className="text-[10px] text-foreground truncate">{String(v)}</div>
                                             </div>
                                         ))}
                                     </div>
                                 </div>
                             )}
 
-                            <UIButton variant="outline" className="w-full text-[10px] h-8 border-zinc-800 bg-white/5 hover:bg-white/10">
+                            <UIButton variant="outline" className="w-full text-[10px] h-8 border-border bg-muted/50 hover:bg-muted">
                                 View Detailed Methodology
                             </UIButton>
                         </div>
@@ -359,13 +398,13 @@ export function WorldMapView() {
 
                 {/* Floating Controls */}
                 <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
-                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-white rounded-lg backdrop-blur-md">
+                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
                         <ZoomIn className="h-4 w-4" />
                     </UIButton>
-                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-white rounded-lg backdrop-blur-md">
+                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
                         <ZoomOut className="h-4 w-4" />
                     </UIButton>
-                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-white rounded-lg backdrop-blur-md">
+                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
                         <Maximize className="h-4 w-4" />
                     </UIButton>
                 </div>
