@@ -54,6 +54,13 @@ export function WorldMapView() {
     const [selectedNode, setSelectedNode] = useState<Node | null>(null);
     const [threadId] = useQueryState("threadId");
 
+    const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [artifactHistory, setArtifactHistory] = useState<any[] | null>(null);
+    const [loadingHistory, setLoadingHistory] = useState(false);
+    const [historicalContent, setHistoricalContent] = useState<string | null>(null);
+    const [isFocusMode, setIsFocusMode] = useState(false);
+
     // Auto-toggle to workflow when a new visualization arrives
     useEffect(() => {
         if (visualizationHtml && viewMode !== 'workflow') {
@@ -62,24 +69,86 @@ export function WorldMapView() {
         }
     }, [visualizationHtml]);
 
+    const fetchArtifactHistory = async (nodeId: string) => {
+        try {
+            setLoadingHistory(true);
+            const orgContext = localStorage.getItem('reflexion_org_context');
+            const headers: Record<string, string> = {};
+            if (orgContext) headers['X-Organization-Context'] = orgContext;
+            const url = threadId ? `/api/artifact/history?node_id=${nodeId}&thread_id=${threadId}` : `/api/artifact/history?node_id=${nodeId}`;
+            const res = await fetch(url, { headers });
+            if (res.ok) {
+                const json = await res.json();
+                setArtifactHistory(json.versions);
+            }
+        } catch (e) { console.error('Artifact history fetch error:', e); }
+        finally { setLoadingHistory(false); }
+    };
+
+    const fetchHistoricalVersion = async (nodeId: string, version: string) => {
+        try {
+            const orgContext = localStorage.getItem('reflexion_org_context');
+            const headers: Record<string, string> = {};
+            if (orgContext) headers['X-Organization-Context'] = orgContext;
+            const url = threadId
+                ? `/api/artifact/content?node_id=${nodeId}&version=${version}&thread_id=${threadId}`
+                : `/api/artifact/content?node_id=${nodeId}&version=${version}`;
+            const res = await fetch(url, { headers });
+            if (res.ok) {
+                const json = await res.json();
+                setHistoricalContent(json.content);
+            }
+        } catch (e) { console.error('Historical content fetch error:', e); }
+    };
+
+    useEffect(() => {
+        if (selectedNode?.type === 'ARTIFACT') {
+            fetchArtifactHistory(selectedNode.id);
+            setHistoricalContent(null);
+        } else {
+            setArtifactHistory(null);
+            setHistoricalContent(null);
+        }
+    }, [selectedNode]);
+
+    const fetchKgHistory = async () => {
+        try {
+            const orgContext = localStorage.getItem('reflexion_org_context');
+            const headers: Record<string, string> = {};
+            if (orgContext) headers['X-Organization-Context'] = orgContext;
+            const url = threadId ? `/api/project/history?thread_id=${threadId}` : '/api/project/history';
+            const res = await fetch(url, { headers });
+            if (res.ok) setKgHistory(await res.json());
+        } catch (e) { console.error('History fetch error:', e); }
+    };
+
     const fetchData = async () => {
         try {
             setLoading(true);
             setError(null);
-
             const orgContext = localStorage.getItem('reflexion_org_context');
             const headers: Record<string, string> = {};
-            if (orgContext) {
-                headers['X-Organization-Context'] = orgContext;
+            if (orgContext) headers['X-Organization-Context'] = orgContext;
+
+            let url = threadId ? `/api/kg-data?thread_id=${threadId}` : '/api/kg-data';
+            if (isFocusMode) {
+                url += threadId ? `&focus=true` : `?focus=true`;
             }
 
-            const url = threadId ? `/api/kg-data?thread_id=${threadId}` : '/api/kg-data';
             const res = await fetch(url, { headers });
             if (!res.ok) throw new Error('Failed to fetch graph data');
             const json = await res.json();
+            console.log('[WorldMapView] Fetched data:', {
+                thread_id: json.metadata?.thread_id,
+                node_count: json.nodes?.length,
+                inactive_count: json.nodes?.filter((n: any) => n.is_active === false).length,
+                active_count: json.nodes?.filter((n: any) => n.is_active === true).length,
+                null_is_active: json.nodes?.filter((n: any) => n.is_active === undefined).length
+            });
             setData(json);
+            fetchKgHistory();
         } catch (err: any) {
-            console.error('Fetch error:', err);
+            console.error('[WorldMapView] Fetch error:', err);
             setError(err.message);
         } finally {
             setLoading(false);
@@ -88,7 +157,7 @@ export function WorldMapView() {
 
     useEffect(() => {
         fetchData();
-    }, [threadId]);
+    }, [threadId, isFocusMode]);
 
     useEffect(() => {
         if (!data || !svgRef.current || !containerRef.current) return;
@@ -125,6 +194,11 @@ export function WorldMapView() {
         const nodes = data.nodes.map(d => ({ ...d }));
         const links = data.links.map(d => ({ ...d }));
 
+        console.log('[WorldMapView] Initializing Simulation with:', {
+            node_count: nodes.length,
+            inactive_nodes: nodes.filter(n => n.is_active === false).map(n => n.id)
+        });
+
         const simulation = d3.forceSimulation<Node>(nodes)
             .force('link', d3.forceLink<Node, Link>(links).id(d => d.id).distance(150))
             .force('charge', d3.forceManyBody().strength(-800))
@@ -138,7 +212,8 @@ export function WorldMapView() {
             .enter().append('line')
             .attr('stroke', '#888')
             .attr('stroke-width', 1.5)
-            .attr('marker-end', 'url(#arrowhead)');
+            .attr('marker-end', 'url(#arrowhead)')
+            .style('opacity', d => d.is_active === false ? 0.05 : 0.5);
 
         const node = g.append('g')
             .attr('class', 'nodes')
@@ -146,6 +221,8 @@ export function WorldMapView() {
             .data(nodes)
             .enter().append('g')
             .attr('class', 'node')
+            .style('opacity', d => d.is_active === false ? 0.15 : 1)
+            .style('filter', d => d.is_active === false ? 'grayscale(1) blur(1px)' : 'none')
             .on('click', (event, d) => {
                 setSelectedNode(d);
                 event.stopPropagation();
@@ -176,8 +253,8 @@ export function WorldMapView() {
         node.append('text')
             .attr('dx', 16)
             .attr('dy', 4)
-            .text(d => d.name)
-            .attr('fill', 'gray')
+            .text(d => `${d.name}${d.is_active === false ? ' (inactive)' : ''}`)
+            .attr('fill', d => d.is_active === false ? '#94a3b8' : 'gray')
             .style('font-size', '10px')
             .style('font-weight', '500')
             .style('pointer-events', 'none');
@@ -221,9 +298,16 @@ export function WorldMapView() {
                     {artifacts.length > 0 ? (
                         artifacts.map(artifact => (
                             <div key={artifact.id} className="border border-border rounded-lg p-4 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer" onClick={() => setSelectedNode(artifact)}>
-                                <div className="flex items-center gap-2 mb-2">
-                                    <FileText className="w-4 h-4 text-blue-500" />
-                                    <h3 className="font-semibold text-sm truncate">{artifact.name}</h3>
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <FileText className="w-4 h-4 text-blue-500" />
+                                        <h3 className="font-semibold text-sm truncate max-w-[120px]">{artifact.name}</h3>
+                                    </div>
+                                    {artifact.properties?.versions > 0 && (
+                                        <span className="text-[10px] bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full font-medium">
+                                            v{artifact.properties.versions + 1}
+                                        </span>
+                                    )}
                                 </div>
                                 <p className="text-xs text-muted-foreground line-clamp-2">
                                     {artifact.description || "No description available."}
@@ -255,9 +339,34 @@ export function WorldMapView() {
             <div className="h-12 border-b border-border bg-muted/30 flex items-center justify-between px-4 z-20">
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1 bg-muted rounded-md p-1">
-                        <UIButton variant="ghost" size="sm" className="h-7 text-xs px-3 bg-background shadow-sm text-foreground">Full Map</UIButton>
-                        <UIButton variant="ghost" size="sm" className="h-7 text-xs px-3 text-muted-foreground">Focus</UIButton>
+                        <UIButton
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                                "h-7 text-xs px-3 transition-all",
+                                !isFocusMode ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                            )}
+                            onClick={() => setIsFocusMode(false)}
+                        >
+                            Full Map
+                        </UIButton>
+                        <UIButton
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                                "h-7 text-xs px-3 transition-all",
+                                isFocusMode ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                            )}
+                            onClick={() => setIsFocusMode(true)}
+                        >
+                            Focus
+                        </UIButton>
                     </div>
+                    {kgHistory && (
+                        <div className="flex items-center gap-2 px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 rounded-md">
+                            <span className="text-[10px] font-bold text-blue-500 tracking-wider">KG v{kgHistory.total}</span>
+                        </div>
+                    )}
                     <div className="h-4 w-px bg-border ml-2" />
                     <UIButton variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground" onClick={fetchData}>
                         <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
@@ -361,7 +470,7 @@ export function WorldMapView() {
 
                 {/* Selected Node Details */}
                 {selectedNode && (
-                    <div className="absolute top-4 right-4 w-72 bg-background/90 backdrop-blur-md border border-border rounded-xl p-5 z-20 shadow-2xl animate-in slide-in-from-right-4 duration-300">
+                    <div className="absolute top-4 right-4 w-80 bg-background/90 backdrop-blur-md border border-border rounded-xl p-5 z-20 shadow-2xl animate-in slide-in-from-right-4 duration-300 max-h-[80vh] overflow-y-auto">
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 block">
@@ -369,22 +478,70 @@ export function WorldMapView() {
                                 </span>
                                 <h3 className="text-lg font-bold text-foreground leading-tight">{selectedNode.name}</h3>
                             </div>
+                            <UIButton variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedNode(null)}>
+                                <ZoomOut className="h-3.5 w-3.5" />
+                            </UIButton>
                         </div>
-                        <div className="space-y-4">
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                                {selectedNode.description || "No detailed description available for this node."}
-                            </p>
 
-                            {selectedNode.properties && (
-                                <div className="space-y-2">
-                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Technical Specs</span>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {Object.entries(selectedNode.properties).slice(0, 4).map(([k, v]: [any, any]) => (
-                                            <div key={k} className="bg-muted rounded p-2">
-                                                <div className="text-[9px] text-muted-foreground uppercase">{k}</div>
-                                                <div className="text-[10px] text-foreground truncate">{String(v)}</div>
+                        <div className="space-y-4">
+                            {!historicalContent ? (
+                                <>
+                                    <p className="text-xs text-muted-foreground leading-relaxed">
+                                        {selectedNode.description || "No detailed description available for this node."}
+                                    </p>
+
+                                    {selectedNode.properties && (
+                                        <div className="space-y-2">
+                                            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Technical Specs</span>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {Object.entries(selectedNode.properties).slice(0, 4).map(([k, v]: [any, any]) => (
+                                                    <div key={k} className="bg-muted rounded p-2">
+                                                        <div className="text-[9px] text-muted-foreground uppercase">{k}</div>
+                                                        <div className="text-[10px] text-foreground truncate">{String(v)}</div>
+                                                    </div>
+                                                ))}
                                             </div>
-                                        ))}
+                                        </div>
+                                    )}
+
+                                    {selectedNode.type === 'ARTIFACT' && artifactHistory && artifactHistory.length > 0 && (
+                                        <div className="space-y-3 pt-4 border-t border-border">
+                                            <div className="flex items-center gap-2">
+                                                <Activity className="w-3 h-3 text-blue-500" />
+                                                <span className="text-[10px] font-bold text-muted-foreground uppercase">Version History</span>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                {artifactHistory.map((v: any) => (
+                                                    <div
+                                                        key={v.id}
+                                                        className="flex items-center justify-between p-2 rounded bg-muted/30 hover:bg-muted transition-colors cursor-pointer group"
+                                                        onClick={() => fetchHistoricalVersion(selectedNode.id, v.id)}
+                                                    >
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[10px] font-medium text-foreground">{v.id}</span>
+                                                            <span className="text-[9px] text-muted-foreground">{v.timestamp}</span>
+                                                        </div>
+                                                        <UIButton variant="ghost" size="sm" className="h-6 px-2 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            View
+                                                        </UIButton>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-blue-500 uppercase">Historical Preview</span>
+                                        <UIButton variant="ghost" size="sm" className="h-6 text-[9px]" onClick={() => setHistoricalContent(null)}>
+                                            Back to Current
+                                        </UIButton>
+                                    </div>
+                                    <div className="bg-muted/50 rounded-lg p-3 border border-border">
+                                        <div className="prose prose-invert prose-xs max-h-[40vh] overflow-y-auto whitespace-pre-wrap text-[11px] font-mono leading-relaxed">
+                                            {historicalContent}
+                                        </div>
                                     </div>
                                 </div>
                             )}

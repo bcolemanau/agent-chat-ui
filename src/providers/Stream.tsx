@@ -42,6 +42,7 @@ export type StateType = {
   context?: Record<string, unknown>;
   active_agent?: "supervisor" | "hydrator";
   visualization_html?: string;
+  workbench_view?: "map" | "workflow" | "artifacts" | "discovery" | "settings";
 };
 
 const useTypedStream = useStream<
@@ -112,6 +113,15 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+
+  // Load Org Context for Headers
+  const [orgContext, setOrgContext] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOrgContext(localStorage.getItem("reflexion_org_context"));
+    }
+  }, []);
+
   const rawStream = useTypedStream({
     apiUrl,
     apiKey: apiKey ?? undefined,

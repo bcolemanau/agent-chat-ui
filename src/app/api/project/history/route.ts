@@ -11,18 +11,15 @@ export async function GET(req: Request) {
         }
 
         const { searchParams } = new URL(req.url);
-        const threadId = searchParams.get("thread_id") || "default";
+        const threadId = searchParams.get("thread_id");
 
-        // Build the backend URL
-        let backendUrl = process.env.LANGGRAPH_API_URL || "https://reflexion-staging.up.railway.app";
+        let backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
         if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
 
-        const focus = searchParams.get("focus");
-        let targetUrl = `${backendUrl}/kg/data?thread_id=${threadId}`;
-        if (focus) targetUrl += `&focus=${focus}`;
+        const targetUrl = threadId
+            ? `${backendUrl}/project/history?thread_id=${threadId}`
+            : `${backendUrl}/project/history`;
 
-        // Extract organization context from headers sent by the client
-        // The client-side fetch should include the X-Organization-Context header
         const orgContext = req.headers.get("X-Organization-Context");
 
         const headers: Record<string, string> = {
@@ -34,27 +31,18 @@ export async function GET(req: Request) {
             headers["X-Organization-Context"] = orgContext;
         }
 
-        console.log(`[PROXY] Fetching KG data from ${targetUrl} (Org Context: ${orgContext})`);
-
         const resp = await fetch(targetUrl, { headers });
 
         if (!resp.ok) {
             const errorText = await resp.text();
-            console.error(`[PROXY] Backend error: ${resp.status} - ${errorText}`);
             return NextResponse.json({ error: "Backend error" }, { status: resp.status });
         }
 
         const data = await resp.json();
-        const inactiveCount = data.nodes?.filter((n: any) => n.is_active === false).length || 0;
-        console.log(`[PROXY] Delivered ${data.nodes?.length} nodes to client (${inactiveCount} inactive)`);
-        return NextResponse.json(data, {
-            headers: {
-                'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-            }
-        });
+        return NextResponse.json(data);
 
     } catch (error: any) {
-        console.error("[PROXY] KG Data fetch failed:", error);
+        console.error("[PROXY] Project history failed:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }

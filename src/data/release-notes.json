@@ -1,5 +1,34 @@
 [
     {
+        "id": "v1.3.0",
+        "version": "1.3.0",
+        "date": "2026-01-20",
+        "title": "Rich Versioning & Human-in-the-Loop Diff Review",
+        "description": "Major upgrade bringing full historical visibility, semantic diffs, and enhanced model stability.",
+        "features": [
+            {
+                "name": "Artifact & KG Versioning",
+                "description": "Explorable history for artifacts and Knowledge Graph (KG vX badge). View past iterations directly in the sidebar with read-only previews."
+            },
+            {
+                "name": "Advanced Diff Review",
+                "description": "Rich Human-in-the-Loop (HITL) approval flow. New nodes are highlighted in Green, modified in Amber, and removed in Red. AI-generated semantic summaries for large changes."
+            },
+            {
+                "name": "LLM Fallback & Stability",
+                "description": "Automatic fallback to OpenAI (GPT-4o) if Anthropic services are unavailable. Standardized project paths and fixed critical NameError bugs."
+            },
+            {
+                "name": "Refined Workspace UX",
+                "description": "The workbench has received a significant visual and functional overhaul. Features include a unified Product Panel for viewing Backlog and Release Notes, glassmorphism-inspired detail cards, and an automated view-switching system that ensures the most relevant graph or workflow is always visible."
+            },
+            {
+                "name": "Strategic Tools",
+                "description": "Direct GitHub integration for creating feature requests and managing issue comments from within the workspace."
+            }
+        ]
+    },
+    {
         "id": "v1.2.0",
         "version": "1.2.0",
         "date": "2026-01-16",

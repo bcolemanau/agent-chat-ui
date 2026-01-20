@@ -1,9 +1,14 @@
 import { WorkbenchShell } from "@/components/workbench/shell";
+import { RecordingProvider } from "@/providers/RecordingProvider";
 
 export default function WorkbenchLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    return <WorkbenchShell>{children}</WorkbenchShell>;
+    return (
+        <RecordingProvider>
+            <WorkbenchShell>{children}</WorkbenchShell>
+        </RecordingProvider>
+    );
 }

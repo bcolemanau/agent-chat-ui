@@ -51,7 +51,7 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { ThemeToggle } from "../theme-toggle";
-import { ProductPanel } from "../product-panel/ProductPanel";
+
 import { UserMenu } from "./user-menu";
 
 function StickyToBottomContent(props: {
@@ -127,7 +127,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     handlePaste,
   } = useFileUpload();
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
-  const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
+
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
   const stream = useStreamContext();
@@ -207,8 +207,11 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
 
     const toolMessages = ensureToolCallsHaveResponses(safeMessages);
 
-    const context =
-      Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
+    const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+    const context = {
+      ...(Object.keys(artifactContext).length > 0 ? artifactContext : {}),
+      ...(orgContext ? { user_id: orgContext } : {})
+    };
 
     (stream as any).submit(
       { messages: [...toolMessages, newHumanMessage], context },
@@ -327,26 +330,22 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                 )}
               </div>
               <div className="absolute top-2 right-4 flex items-center gap-4">
-                <ThemeToggle />
-                <UserMenu />
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip="Open Workbench"
-                  variant="ghost"
-                  onClick={() => window.location.href = "/workbench/map"}
-                >
-                  <LayoutDashboard className="size-5" />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip="What's New"
-                  variant="ghost"
-                  onClick={() => setReleaseNotesOpen(true)}
-                >
-                  <Sparkles className="size-5" />
-                </TooltipIconButton>
+                {!embedded && (
+                  <>
+                    <ThemeToggle />
+                    <UserMenu />
+                    <TooltipIconButton
+                      size="lg"
+                      className="p-4"
+                      tooltip="Open Workbench"
+                      variant="ghost"
+                      onClick={() => window.location.href = "/workbench/map"}
+                    >
+                      <LayoutDashboard className="size-5" />
+                    </TooltipIconButton>
+                  </>
+                )}
+
               </div>
             </div>
           )}
@@ -392,28 +391,22 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
               </div>
 
               <div className="flex items-center gap-4">
-                <div className="flex items-center gap-4">
-                  <ThemeToggle />
-                </div>
-                <UserMenu />
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip="Open Workbench"
-                  variant="ghost"
-                  onClick={() => window.location.href = "/workbench/map"}
-                >
-                  <LayoutDashboard className="size-5" />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip="What's New"
-                  variant="ghost"
-                  onClick={() => setReleaseNotesOpen(true)}
-                >
-                  <Sparkles className="size-5" />
-                </TooltipIconButton>
+                {!embedded && (
+                  <div className="flex items-center gap-4">
+                    <ThemeToggle />
+                    <UserMenu />
+                    <TooltipIconButton
+                      size="lg"
+                      className="p-4"
+                      tooltip="Open Workbench"
+                      variant="ghost"
+                      onClick={() => window.location.href = "/workbench/map"}
+                    >
+                      <LayoutDashboard className="size-5" />
+                    </TooltipIconButton>
+                  </div>
+                )}
+
                 <TooltipIconButton
                   size="lg"
                   className="p-4"
@@ -606,7 +599,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
           </div>
         )}
       </div>
-      <ProductPanel open={releaseNotesOpen} onClose={() => setReleaseNotesOpen(false)} />
+
     </div>
   );
 }
