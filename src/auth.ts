@@ -86,12 +86,46 @@ export const authOptions: NextAuthOptions = {
                     role: config.role,
                 };
 
-                // Sign with the shared secret
-                // IMPORTANT: Backend must use the same secret (REFLEXION_JWT_SECRET)
                 token.idToken = jwt.sign(backendPayload, process.env.NEXTAUTH_SECRET!, {
                     algorithm: "HS256",
                     expiresIn: "24h"
                 });
+            } else if (token.customerId && token.projectId && token.email) {
+                // Maintenance: Check if idToken is expired or expiring soon (e.g. within 1 hour)
+                // If so, mint a new one so the user's session remains valid for backend calls
+                let shouldRefresh = !token.idToken;
+
+                if (token.idToken) {
+                    try {
+                        const decoded = jwt.decode(token.idToken) as any;
+                        if (decoded && decoded.exp) {
+                            const now = Math.floor(Date.now() / 1000);
+                            // Refresh if expired or expiring in < 1 hour
+                            if (decoded.exp - now < 3600) {
+                                shouldRefresh = true;
+                            }
+                        } else {
+                            shouldRefresh = true;
+                        }
+                    } catch (e) {
+                        shouldRefresh = true;
+                    }
+                }
+
+                if (shouldRefresh) {
+                    const backendPayload = {
+                        sub: token.email,
+                        email: token.email,
+                        customer_id: token.customerId,
+                        project_id: token.projectId,
+                        role: token.role,
+                    };
+                    token.idToken = jwt.sign(backendPayload, process.env.NEXTAUTH_SECRET!, {
+                        algorithm: "HS256",
+                        expiresIn: "24h"
+                    });
+                    // console.log(`[AUTH] Refreshed expired/stale idToken for ${token.email}`);
+                }
             }
             return token;
         },
