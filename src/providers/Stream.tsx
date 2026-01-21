@@ -268,8 +268,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   useEffect(() => {
     if (session?.user?.idToken) {
       console.log("[StreamProvider] Syncing API Key from Google ID Token");
-      // Use the ID token from Google Auth
-      _setApiKey(session.user.idToken);
+      // Use the ID token from Google Auth - MUST persist to localStorage via setApiKey wrapper
+      setApiKey(session.user.idToken);
     }
   }, [session]);
 
