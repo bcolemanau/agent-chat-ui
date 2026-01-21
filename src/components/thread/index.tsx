@@ -213,6 +213,12 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
       ...(orgContext ? { user_id: orgContext } : {})
     };
 
+    console.log("[Thread] Submitting new human message:", {
+      content: newHumanMessage.content,
+      context,
+      toolMessagesCount: toolMessages.length
+    });
+
     (stream as any).submit(
       { messages: [...toolMessages, newHumanMessage], context },
       {
@@ -434,10 +440,16 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                 <>
                   {safeMessages
                     .filter((m) => {
+                      const hasContentString = typeof m.content === 'string' && m.content.length > 0;
+                      const hasContentArray = Array.isArray(m.content) && m.content.length > 0;
+                      const hasStandardToolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) && (m.tool_calls as any[]).length > 0;
+                      const hasAnthropicToolCalls = Array.isArray(m.content) && m.content.some(c => (c as any).type === "tool_use");
+
                       return (
                         m?.id && !m.id.startsWith(DO_NOT_RENDER_ID_PREFIX) &&
                         (m as any).type !== "ui" &&
-                        m.type !== "tool"
+                        m.type !== "tool" &&
+                        (m.type !== "ai" || hasContentString || hasContentArray || hasStandardToolCalls || hasAnthropicToolCalls)
                       );
                     })
                     .map((message, index) =>

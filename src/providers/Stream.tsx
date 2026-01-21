@@ -128,6 +128,7 @@ const StreamSession = ({
     assistantId: assistantId || "reflexion",
     threadId: threadId || undefined,
     fetchStateHistory: !!threadId,
+    defaultHeaders: orgContext ? { "X-Organization-Context": orgContext } : undefined,
     onCustomEvent: (event, options) => {
       console.log("[Stream] Custom event received:", event);
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
@@ -141,9 +142,11 @@ const StreamSession = ({
       console.error("[Stream] SDK Error:", error);
     },
     onThreadId: (id) => {
-      console.log("[Stream] Thread ID changed to:", id);
-      setThreadId(id);
-      sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      if (id && id !== threadId) {
+        console.log("[Stream] Thread ID changed to:", id);
+        setThreadId(id);
+        sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      }
     },
   });
 

@@ -43,8 +43,16 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
     if (!apiUrl || !assistantId) return [];
+
+    // Read organization context from localStorage
+    const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+    const headers: Record<string, string> = {};
+    if (orgContext) {
+      headers['X-Organization-Context'] = orgContext;
+    }
+
     // apiUrl could be null from useQueryState, createClient expects string
-    const client = createClient(apiUrl || "", getApiKey() ?? undefined);
+    const client = createClient(apiUrl || "", getApiKey() ?? undefined, headers);
 
     const threads = await client.threads.search({
       metadata: {

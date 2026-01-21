@@ -37,39 +37,35 @@ export const authOptions: NextAuthOptions = {
         async jwt({ token, account, user }) {
             // On initial sign in
             if (account && user) {
+                // Preserve standard profile fields
+                token.name = user.name;
+                token.email = user.email;
+                token.picture = user.image;
+
                 // 1. Look up Organization/Role info from Backend
                 const userEmail = user.email;
                 let config = getUserConfig(userEmail);
 
                 try {
                     let backendUrl = process.env.LANGGRAPH_API_URL || "https://reflexion-staging.up.railway.app";
-
-                    // Remove trailing slash if present
-                    if (backendUrl.endsWith("/")) {
-                        backendUrl = backendUrl.slice(0, -1);
-                    }
+                    if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
 
                     const profileUrl = `${backendUrl}/auth/profile?email=${userEmail}`;
-                    console.log(`[AUTH] Fetching profile from: ${profileUrl}`);
+                    console.log(`[AUTH] Profile lookup for ${userEmail}`);
 
                     const resp = await fetch(profileUrl, {
-                        headers: {
-                            "X-Api-Key": process.env.LANGSMITH_API_KEY!
-                        }
+                        headers: { "X-Api-Key": process.env.LANGSMITH_API_KEY! }
                     });
                     if (resp.ok) {
                         const profile = await resp.json();
                         config = {
                             customerId: profile.customerId || config.customerId,
-                            projectId: config.projectId || "demo-project", // Default project if not in profile
+                            projectId: config.projectId || "demo-project",
                             role: profile.role || config.role
                         };
-                        console.log(`[AUTH] Successfully fetched profile for ${userEmail}:`, config);
-                    } else {
-                        console.error(`[AUTH] Backend profile lookup failed for ${userEmail}. Status: ${resp.status}, URL: ${profileUrl}`);
                     }
                 } catch (e) {
-                    console.error(`[AUTH] Exception during profile lookup for ${userEmail}:`, e);
+                    console.error(`[AUTH] Exception during profile lookup:`, e);
                 }
 
                 token.customerId = config.customerId;
@@ -77,9 +73,8 @@ export const authOptions: NextAuthOptions = {
                 token.role = config.role;
 
                 // 2. Mint Backend-Compatible Token
-                // This token mimics what reflexion_graph/security.py expects
                 const backendPayload = {
-                    sub: userEmail, // Or customer_id:project_id format if preferred
+                    sub: userEmail,
                     email: userEmail,
                     customer_id: config.customerId,
                     project_id: config.projectId,
@@ -88,22 +83,20 @@ export const authOptions: NextAuthOptions = {
 
                 token.idToken = jwt.sign(backendPayload, process.env.NEXTAUTH_SECRET!, {
                     algorithm: "HS256",
-                    expiresIn: "24h"
+                    expiresIn: "7d"
                 });
-            } else if (token.customerId && token.projectId && token.email) {
-                // Maintenance: Check if idToken is expired or expiring soon (e.g. within 1 hour)
-                // If so, mint a new one so the user's session remains valid for backend calls
-                let shouldRefresh = !token.idToken;
+                console.log(`[AUTH] New session for ${userEmail}. Org: ${config.customerId}`);
 
+            } else if (token.customerId && token.projectId && token.email) {
+                // Maintenance: Check if idToken is expired or expiring soon
+                let shouldRefresh = !token.idToken;
                 if (token.idToken) {
                     try {
                         const decoded = jwt.decode(token.idToken) as any;
                         if (decoded && decoded.exp) {
                             const now = Math.floor(Date.now() / 1000);
-                            // Refresh if expired or expiring in < 1 hour
-                            if (decoded.exp - now < 3600) {
-                                shouldRefresh = true;
-                            }
+                            // Refresh if less than 2 hours left
+                            if (decoded.exp - now < 7200) shouldRefresh = true;
                         } else {
                             shouldRefresh = true;
                         }
@@ -122,9 +115,8 @@ export const authOptions: NextAuthOptions = {
                     };
                     token.idToken = jwt.sign(backendPayload, process.env.NEXTAUTH_SECRET!, {
                         algorithm: "HS256",
-                        expiresIn: "24h"
+                        expiresIn: "7d"
                     });
-                    // console.log(`[AUTH] Refreshed expired/stale idToken for ${token.email}`);
                 }
             }
             return token;
@@ -135,6 +127,11 @@ export const authOptions: NextAuthOptions = {
                 session.user.projectId = token.projectId as string;
                 session.user.role = token.role as any;
                 session.user.idToken = token.idToken as string;
+
+                // Explicitly restore profile fields from token
+                session.user.name = token.name as string;
+                session.user.email = token.email as string;
+                session.user.image = token.picture as string;
             }
             return session;
         }
