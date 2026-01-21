@@ -61,6 +61,9 @@ export function WorldMapView() {
     const [historicalContent, setHistoricalContent] = useState<string | null>(null);
     const [isFocusMode, setIsFocusMode] = useState(false);
 
+    const [showHistory, setShowHistory] = useState(false);
+    const [activeVersion, setActiveVersion] = useState<string | null>(null);
+
     // Auto-toggle to workflow when a new visualization arrives
     useEffect(() => {
         if (visualizationHtml && viewMode !== 'workflow') {
@@ -122,7 +125,7 @@ export function WorldMapView() {
         } catch (e) { console.error('History fetch error:', e); }
     };
 
-    const fetchData = async () => {
+    const fetchData = async (version?: string) => {
         try {
             setLoading(true);
             setError(null);
@@ -133,6 +136,12 @@ export function WorldMapView() {
             let url = threadId ? `/api/kg-data?thread_id=${threadId}` : '/api/kg-data';
             if (isFocusMode) {
                 url += threadId ? `&focus=true` : `?focus=true`;
+            }
+            if (version) {
+                url += `&version=${version}`;
+                setActiveVersion(version);
+            } else {
+                setActiveVersion(null);
             }
 
             const res = await fetch(url, { headers });
@@ -146,7 +155,9 @@ export function WorldMapView() {
                 null_is_active: json.nodes?.filter((n: any) => n.is_active === undefined).length
             });
             setData(json);
-            fetchKgHistory();
+            // Only update history list if we are loading the latest version, 
+            // otherwise we might get a stale list if we time travel back
+            if (!version) fetchKgHistory();
         } catch (err: any) {
             console.error('[WorldMapView] Fetch error:', err);
             setError(err.message);
@@ -191,6 +202,8 @@ export function WorldMapView() {
             .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
             .attr('fill', '#888');
 
+        // Filter out nodes and links that should be completely hidden (if any)
+        // With current transparency model, we might still want to show all but ghosted
         const nodes = data.nodes.map(d => ({ ...d }));
         const links = data.links.map(d => ({ ...d }));
 
@@ -334,7 +347,7 @@ export function WorldMapView() {
     };
 
     return (
-        <div className="h-full w-full flex flex-col bg-background overflow-hidden">
+        <div className="h-full w-full flex flex-col bg-background overflow-hidden relative">
             {/* Toolbar */}
             <div className="h-12 border-b border-border bg-muted/30 flex items-center justify-between px-4 z-20">
                 <div className="flex items-center gap-4">
@@ -363,12 +376,20 @@ export function WorldMapView() {
                         </UIButton>
                     </div>
                     {kgHistory && (
-                        <div className="flex items-center gap-2 px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 rounded-md">
+                        <UIButton
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                                "flex items-center gap-2 px-2.5 py-1 border rounded-md transition-colors",
+                                showHistory ? "bg-blue-500/20 border-blue-500/40" : "bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20"
+                            )}
+                            onClick={() => setShowHistory(!showHistory)}
+                        >
                             <span className="text-[10px] font-bold text-blue-500 tracking-wider">KG v{kgHistory.total}</span>
-                        </div>
+                        </UIButton>
                     )}
                     <div className="h-4 w-px bg-border ml-2" />
-                    <UIButton variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground" onClick={fetchData}>
+                    <UIButton variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground" onClick={() => fetchData()}>
                         <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
                         <span className="text-xs">Refresh</span>
                     </UIButton>
@@ -380,6 +401,14 @@ export function WorldMapView() {
                             <span className="text-[10px] font-bold text-yellow-500 uppercase tracking-wider">Active Trigger: {data.metadata.active_trigger}</span>
                         </div>
                     )}
+                    {activeVersion && (
+                        <div className="flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full">
+                            <span className="text-[10px] font-bold text-purple-500 uppercase tracking-wider">Historical: {activeVersion}</span>
+                            <UIButton variant="ghost" size="icon" className="h-4 w-4 ml-1 hover:bg-purple-500/20 rounded-full" onClick={() => fetchData()}>
+                                <RefreshCw className="h-2.5 w-2.5 text-purple-500" />
+                            </UIButton>
+                        </div>
+                    )}
                     <div className="relative">
                         <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <input
@@ -389,6 +418,50 @@ export function WorldMapView() {
                     </div>
                 </div>
             </div>
+
+            {/* History Panel - Slide In */}
+            {showHistory && kgHistory && (
+                <div className="absolute top-12 left-0 bottom-0 w-64 bg-background/95 backdrop-blur-sm border-r border-border z-30 flex flex-col animate-in slide-in-from-left-4 duration-200">
+                    <div className="p-4 border-b border-border flex justify-between items-center bg-muted/30">
+                        <div>
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Timeline</h3>
+                            <p className="text-[10px] text-muted-foreground">{kgHistory.total} snapshots available</p>
+                        </div>
+                        <UIButton variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowHistory(false)}>
+                            <ZoomOut className="h-3 w-3" />
+                        </UIButton>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        <div
+                            className={cn(
+                                "p-3 rounded-md cursor-pointer transition-colors flex flex-col gap-1",
+                                !activeVersion ? "bg-primary/10 border border-primary/20" : "hover:bg-muted"
+                            )}
+                            onClick={() => fetchData()}
+                        >
+                            <span className="text-xs font-semibold text-foreground flex items-center justify-between">
+                                Current State
+                                {!activeVersion && <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">Live Active Graph</span>
+                        </div>
+
+                        {kgHistory.versions.map((v: any) => (
+                            <div
+                                key={v.id}
+                                className={cn(
+                                    "p-3 rounded-md cursor-pointer transition-colors flex flex-col gap-1 border border-transparent",
+                                    activeVersion === v.id ? "bg-purple-500/10 border-purple-500/20" : "hover:bg-muted"
+                                )}
+                                onClick={() => fetchData(v.id)}
+                            >
+                                <span className="text-xs font-medium text-foreground">{v.id}</span>
+                                <span className="text-[10px] text-muted-foreground">{v.timestamp}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Canvas Area */}
             <div ref={containerRef} className="flex-1 relative overflow-hidden" onClick={() => setSelectedNode(null)}>
@@ -452,7 +525,7 @@ export function WorldMapView() {
                             <div className="absolute inset-0 flex items-center justify-center bg-background z-30 p-6 text-center">
                                 <div>
                                     <p className="text-destructive mb-4 font-mono text-sm leading-relaxed max-w-md mx-auto">Error: {error}</p>
-                                    <UIButton onClick={fetchData} variant="outline" className="border-border">Retry Connection</UIButton>
+                                    <UIButton onClick={() => fetchData()} variant="outline" className="border-border">Retry Connection</UIButton>
                                 </div>
                             </div>
                         )}
