@@ -14,6 +14,7 @@ import {
   SetStateAction,
 } from "react";
 import { createClient } from "./client";
+import { useSession } from "next-auth/react";
 
 interface ThreadContextType {
   getThreads: () => Promise<Thread[]>;
@@ -38,6 +39,7 @@ function getThreadSearchMetadata(
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const [apiUrl] = useQueryState("apiUrl");
   const [assistantId] = useQueryState("assistantId");
+  const { data: session } = useSession();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
@@ -52,7 +54,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     }
 
     // apiUrl could be null from useQueryState, createClient expects string
-    const client = createClient(apiUrl || "", getApiKey() ?? undefined, headers);
+    // Prefer session token (fresh) over localStorage (potentially stale)
+    const token = session?.user?.idToken || getApiKey();
+    const client = createClient(apiUrl || "", token ?? undefined, headers);
 
     const threads = await client.threads.search({
       metadata: {
@@ -62,7 +66,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     });
 
     return threads;
-  }, [apiUrl, assistantId]);
+  }, [apiUrl, assistantId, session]);
 
   const value = {
     getThreads,
