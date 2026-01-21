@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import { Sidebar } from "./sidebar";
 import { useRouter } from "next/navigation";
 import { UserMenu } from "@/components/thread/user-menu";
@@ -40,29 +40,34 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
     // Agent-Driven View Synchronization
     const workbenchView = (stream as any)?.values?.workbench_view;
+    const lastSyncedView = useRef<string | undefined>(undefined);
+
     useEffect(() => {
         if (!workbenchView) return;
 
-        console.log(`[WorkbenchShell] Syncing view to: ${workbenchView}`);
+        // Only sync if the backend specifically changed its requested view
+        // effectively treating it as an event rather than a state enforcement
+        if (workbenchView !== lastSyncedView.current) {
+            console.log(`[WorkbenchShell] Syncing view to: ${workbenchView}`);
+            lastSyncedView.current = workbenchView;
 
-        if (["map", "workflow", "artifacts"].includes(workbenchView)) {
-            // Internal Sub-view Toggle
-            if (viewMode !== workbenchView) {
+            if (["map", "workflow", "artifacts"].includes(workbenchView)) {
+                // Internal Sub-view Toggle
                 setViewMode(workbenchView);
                 closeArtifact();
                 // Ensure we are on the map page if we switch to these sub-views
                 if (!window.location.pathname.includes("/workbench/map")) {
                     router.push("/workbench/map");
                 }
+            } else if (workbenchView === "discovery") {
+                router.push("/workbench/discovery");
+            } else if (workbenchView === "settings") {
+                router.push("/workbench/settings");
+            } else if (workbenchView === "backlog") {
+                router.push("/workbench/backlog");
             }
-        } else if (workbenchView === "discovery") {
-            router.push("/workbench/discovery");
-        } else if (workbenchView === "settings") {
-            router.push("/workbench/settings");
-        } else if (workbenchView === "backlog") {
-            router.push("/workbench/backlog");
         }
-    }, [workbenchView, setViewMode, closeArtifact, router, viewMode]);
+    }, [workbenchView, setViewMode, closeArtifact, router]);
 
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
