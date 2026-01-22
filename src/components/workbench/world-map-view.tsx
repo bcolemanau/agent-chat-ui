@@ -63,6 +63,7 @@ export function WorldMapView() {
 
     const [showHistory, setShowHistory] = useState(false);
     const [activeVersion, setActiveVersion] = useState<string | null>(null);
+    const [inactiveOpacity, setInactiveOpacity] = useState(0.15); // Transparency for inactive nodes (0-1)
 
     // Auto-toggle to workflow when a new visualization arrives
     useEffect(() => {
@@ -226,7 +227,7 @@ export function WorldMapView() {
             .attr('stroke', '#888')
             .attr('stroke-width', 1.5)
             .attr('marker-end', 'url(#arrowhead)')
-            .style('opacity', d => d.is_active === false ? 0.15 : 0.5);
+            .style('opacity', d => d.is_active === false ? inactiveOpacity : 0.5);
 
         const node = g.append('g')
             .attr('class', 'nodes')
@@ -234,7 +235,7 @@ export function WorldMapView() {
             .data(nodes)
             .enter().append('g')
             .attr('class', 'node')
-            .style('opacity', d => d.is_active === false ? 0.15 : 1)
+            .style('opacity', d => d.is_active === false ? inactiveOpacity : 1)
             .style('filter', d => d.is_active === false ? 'grayscale(1) blur(1px)' : 'none')
             .on('click', (event, d) => {
                 setSelectedNode(d);
@@ -277,10 +278,12 @@ export function WorldMapView() {
                 .attr('x1', d => (d.source as Node).x!)
                 .attr('y1', d => (d.source as Node).y!)
                 .attr('x2', d => (d.target as Node).x!)
-                .attr('y2', d => (d.target as Node).y!);
+                .attr('y2', d => (d.target as Node).y!)
+                .style('opacity', d => d.is_active === false ? inactiveOpacity : 0.5);
 
             node
-                .attr('transform', d => `translate(${d.x},${d.y})`);
+                .attr('transform', d => `translate(${d.x},${d.y})`)
+                .style('opacity', d => d.is_active === false ? inactiveOpacity : 1);
         });
 
         // Initial zoom to fit
@@ -299,7 +302,7 @@ export function WorldMapView() {
             );
         }, 500);
 
-    }, [data, viewMode]);
+    }, [data, viewMode, inactiveOpacity]);
 
     // Artifacts View Component
     const ArtifactsView = () => {
@@ -389,6 +392,20 @@ export function WorldMapView() {
                         </UIButton>
                     )}
                     <div className="h-4 w-px bg-border ml-2" />
+                    <div className="flex items-center gap-2 px-2">
+                        <label className="text-[10px] text-muted-foreground whitespace-nowrap">Inactive Opacity:</label>
+                        <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            value={inactiveOpacity}
+                            onChange={(e) => setInactiveOpacity(parseFloat(e.target.value))}
+                            className="w-20 h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+                            title={`Inactive node opacity: ${Math.round(inactiveOpacity * 100)}%`}
+                        />
+                        <span className="text-[10px] text-muted-foreground w-8 text-right">{Math.round(inactiveOpacity * 100)}%</span>
+                    </div>
                     <UIButton variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground" onClick={() => fetchData()}>
                         <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
                         <span className="text-xs">Refresh</span>
