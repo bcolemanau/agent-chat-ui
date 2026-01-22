@@ -8,8 +8,9 @@ function getBackendUrl(): string {
     return backendUrl;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
     try {
+        // In Next.js 15, getServerSession needs headers from the request
         const session = await getServerSession(authOptions);
 
         if (!session || !session.user) {

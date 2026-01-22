@@ -1,38 +1,5 @@
 [
     {
-        "id": "v1.4.0",
-        "version": "1.4.0",
-        "date": "2026-01-22",
-        "title": "Administrative Control & Enhanced Observability",
-        "description": "Major release introducing self-service customer management, comprehensive branding controls, and production-grade logging and tracing capabilities.",
-        "features": [
-            {
-                "name": "Organization Management UI",
-                "description": "Full self-service customer management interface for Reflexion administrators. Create, update, and delete organizations directly from the Settings view without requiring code changes. Dynamic organization picker automatically refreshes when new customers are added."
-            },
-            {
-                "name": "Branding Configuration System",
-                "description": "Complete visual identity management with intuitive color pickers, font selection, and style customization. Configure primary and secondary colors, text colors, border radius, and font families per organization. Real-time preview and validation."
-            },
-            {
-                "name": "Settings as Workbench View",
-                "description": "Settings promoted to an official workbench view in the Product section, providing centralized access to system configuration, organization management, and account settings with a modern, organized interface."
-            },
-            {
-                "name": "Enhanced Observability",
-                "description": "Production-grade logging and tracing improvements. LangSmith integration with @traceable decorators creates nested spans for helper functions, providing detailed visibility into tool execution. Configurable log levels via LOG_LEVEL environment variable with structured output to stderr."
-            },
-            {
-                "name": "RBAC Enhancements",
-                "description": "Refined role-based access control with @require_permission decorator for tools. Improved permission checking and error handling. Enhanced security for sensitive operations like project classification and knowledge graph updates."
-            },
-            {
-                "name": "Infrastructure Improvements",
-                "description": "Fixed thread persistence across environments by removing hardcoded database URIs. Improved error handling for 404 responses when fetching thread state. Enhanced organization context switching with proper state management."
-            }
-        ]
-    },
-    {
         "id": "v1.3.0",
         "version": "1.3.0",
         "date": "2026-01-20",
