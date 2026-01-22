@@ -70,16 +70,21 @@ export function OrganizationManagement() {
                 const orgs = await orgsResp.json();
                 setOrganizations(orgs);
             } else {
-                toast.error("Failed to load organizations");
+                const errorData = await orgsResp.json().catch(() => ({ error: `HTTP ${orgsResp.status}` }));
+                console.error("[ORG_MGMT] Failed to load organizations:", errorData);
+                toast.error(`Failed to load organizations: ${errorData.error || `HTTP ${orgsResp.status}`}`);
             }
 
             if (brandingResp.ok) {
                 const brandingData = await brandingResp.json();
                 setBranding(brandingData);
+            } else {
+                // Branding is optional, so we don't show an error for it
+                console.warn("[ORG_MGMT] Failed to load branding:", brandingResp.status);
             }
         } catch (error) {
-            console.error("Failed to load data:", error);
-            toast.error("Failed to load data");
+            console.error("[ORG_MGMT] Failed to load data:", error);
+            toast.error(`Failed to load data: ${error instanceof Error ? error.message : "Unknown error"}`);
         } finally {
             setLoading(false);
         }

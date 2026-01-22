@@ -18,17 +18,27 @@ export async function GET() {
 
         const targetUrl = `${getBackendUrl()}/auth/branding`;
 
-        const resp = await fetch(targetUrl, {
-            headers: {
-                "Authorization": `Bearer ${session.user.idToken}`,
-                "Content-Type": "application/json",
-            }
-        });
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+        // Add authorization if idToken is available
+        if (session.user.idToken) {
+            headers["Authorization"] = `Bearer ${session.user.idToken}`;
+        }
+
+        const resp = await fetch(targetUrl, { headers });
 
         if (!resp.ok) {
-            const errorText = await resp.text();
+            let errorText = "";
+            try {
+                const errorData = await resp.json();
+                errorText = errorData.detail || errorData.error || JSON.stringify(errorData);
+            } catch {
+                errorText = await resp.text();
+            }
             console.error(`[PROXY] Backend error (branding): ${resp.status} - ${errorText}`);
-            return NextResponse.json({ error: "Backend error" }, { status: resp.status });
+            return NextResponse.json({ error: errorText || "Backend error" }, { status: resp.status });
         }
 
         const data = await resp.json();
