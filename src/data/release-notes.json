@@ -3,32 +3,40 @@
         "id": "v1.5.0",
         "version": "1.5.0",
         "date": "2026-01-26",
-        "title": "Enrichment Approval Workbench & Enhanced Layout",
-        "description": "Major UI improvements moving enrichment approval to dedicated workbench view and enhancing the overall workbench layout for better space utilization and user experience.",
+        "title": "Harmonized Artifact Ingestion & Enrichment Workflow",
+        "description": "Major release completing Issue #12 - unified artifact ingestion with folder uploads, automatic enrichment extraction, and streamlined approval workflow. Enhanced workbench layout for better space utilization.",
         "features": [
             {
-                "name": "Enrichment Approval Workbench View",
-                "description": "Moved enrichment approval from modal dialog to dedicated workbench tab. Provides more space for reviewing enrichment proposals, better organization, and seamless integration with the workbench workflow. Automatically switches to enrichment view after file/folder uploads."
+                "name": "Folder Upload Support",
+                "description": "Upload multiple files at once via ZIP file or multi-file selection. Supports batch processing of documents with automatic artifact creation and metadata extraction. Each file is processed individually with progress tracking."
             },
             {
-                "name": "Collapsible Project Sidebar",
-                "description": "Left sidebar with project listings can now be collapsed to provide more space for the workbench content. Toggle button allows quick show/hide of the project pane."
+                "name": "Automatic Enrichment Extraction",
+                "description": "LLM-powered metadata extraction runs automatically when files are uploaded. Extracts category, title, artifact types, key concepts, relationships, and summary. Enrichment proposals are immediately available for review without manual triggering."
             },
             {
-                "name": "Resizable Agent Chat Panel",
-                "description": "Agent chat moved to bottom panel with draggable resizer. Users can adjust the relative height of the agent panel and workbench content by dragging the divider. Minimum height constraints ensure usability."
+                "name": "Enrichment Approval Workflow",
+                "description": "Dedicated workbench tab for reviewing and approving enrichment proposals. Select artifact types (PRD, SOP, Architecture, Requirements, etc.) for each uploaded document. Approve/reject/skip actions with visual status indicators. Automatically switches to enrichment view after uploads."
             },
             {
-                "name": "Meaningful Project Names",
-                "description": "Project names now display meaningful names extracted from classification reasoning or trigger descriptions. UUIDs are formatted as 'Project {shortId}' with full ID available in tooltip."
+                "name": "Knowledge Graph Integration",
+                "description": "Approved enrichments are automatically linked to the Knowledge Graph, creating new artifact nodes and relationships. Each approval generates a new KG version tracked via GitHub commit history. Commit messages provide meaningful version descriptions."
             },
             {
-                "name": "Map View Bug Fixes",
-                "description": "Fixed D3 force simulation error when links reference nodes that don't exist in the current dataset. Links are now filtered to only include valid source/target pairs, preventing 'node not found' errors."
+                "name": "Enhanced Workbench Layout",
+                "description": "Collapsible project sidebar, resizable agent chat panel, and improved space utilization. Agent chat moved to bottom panel with draggable divider. More room for workbench content while keeping agent interaction accessible."
             },
             {
-                "name": "Enhanced Enrichment Flow",
-                "description": "Improved enrichment proposal fetching with thread_id query parameter support. Better error handling and logging for debugging enrichment issues. Seamless integration with folder upload workflow."
+                "name": "Improved Project Management",
+                "description": "Meaningful project names extracted from classification reasoning or trigger descriptions. UUIDs formatted as friendly 'Project {shortId}' names. Better organization and identification of projects in the sidebar."
+            },
+            {
+                "name": "GitHub-Native Versioning",
+                "description": "Knowledge Graph versioning now uses GitHub commit history instead of separate version files. Commit messages displayed as friendly version names. Timeline view shows all KG versions with full commit metadata including author and timestamp."
+            },
+            {
+                "name": "Bug Fixes & Stability",
+                "description": "Fixed D3 force simulation errors for missing nodes in map view. Improved error handling and logging throughout enrichment flow. Better project_id lookup using thread_id from query parameters. Enhanced endpoint routing for enrichment operations."
             }
         ]
     },
