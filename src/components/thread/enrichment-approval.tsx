@@ -57,7 +57,7 @@ export function EnrichmentApproval({
   onOpenChange,
   artifactIds,
   threadId,
-  apiUrl = "http://localhost:8080",
+  apiUrl: rawApiUrl = "http://localhost:8080",
   onComplete,
 }: EnrichmentApprovalProps) {
   const { data: session } = useSession();
@@ -70,6 +70,38 @@ export function EnrichmentApproval({
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
+
+  // Helper function to get the direct backend URL, bypassing Next.js proxy
+  function getDirectBackendUrl(apiUrl: string): string {
+    if (apiUrl.startsWith("http://") || apiUrl.startsWith("https://")) {
+      if (apiUrl.includes('reflexion-ui') || apiUrl.includes('/api')) {
+        if (apiUrl.includes('railway.app')) {
+          return "https://reflexion-staging.up.railway.app";
+        }
+        return apiUrl.replace('reflexion-ui', 'reflexion').replace(':3000', ':8080').replace('/api', '');
+      }
+      return apiUrl;
+    }
+    
+    if (apiUrl.startsWith("/") || apiUrl.startsWith("/api")) {
+      if (typeof window !== 'undefined') {
+        const hostname = window.location.hostname;
+        if (hostname.includes('railway.app') || hostname.includes('reflexion-ui') || hostname.includes('reflexion-staging')) {
+          return "https://reflexion-staging.up.railway.app";
+        }
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+          return "http://localhost:8080";
+        }
+        const origin = window.location.origin;
+        return origin.replace('reflexion-ui', 'reflexion').replace(':3000', ':8080');
+      }
+      return process.env.NEXT_PUBLIC_API_URL || "https://reflexion-staging.up.railway.app";
+    }
+    
+    return apiUrl;
+  }
+  
+  const apiUrl = getDirectBackendUrl(rawApiUrl);
 
   // Fetch enrichment proposals for all artifacts
   useEffect(() => {
