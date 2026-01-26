@@ -13,14 +13,29 @@ export async function GET(req: Request) {
         }
 
         const token = process.env.GITHUB_TOKEN;
-        const repoUrl = process.env.GITHUB_REPO; // Expected format: owner/repo
+        // Try GITHUB_REPO first, then fall back to GITHUB_REPO_NAME (used by backend)
+        const repoUrl = process.env.GITHUB_REPO || process.env.GITHUB_REPO_NAME; // Expected format: owner/repo
 
         if (!token || !repoUrl) {
-            console.error("Missing GITHUB_TOKEN or GITHUB_REPO env vars");
-            return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+            console.error("Missing GITHUB_TOKEN or GITHUB_REPO env vars", {
+                hasToken: !!token,
+                hasRepo: !!repoUrl,
+                envKeys: Object.keys(process.env).filter(k => k.includes('GITHUB'))
+            });
+            return NextResponse.json({ 
+                error: "Server configuration error: Missing GitHub credentials",
+                details: "GITHUB_TOKEN and GITHUB_REPO (or GITHUB_REPO_NAME) must be configured"
+            }, { status: 500 });
         }
 
         const [owner, repo] = repoUrl.split("/");
+        if (!owner || !repo) {
+            console.error("Invalid GITHUB_REPO format. Expected 'owner/repo', got:", repoUrl);
+            return NextResponse.json({ 
+                error: "Server configuration error: Invalid repository format",
+                details: `GITHUB_REPO must be in format 'owner/repo', got: ${repoUrl}`
+            }, { status: 500 });
+        }
         const octokit = new Octokit({ auth: token });
 
         const { searchParams } = new URL(req.url);
@@ -64,8 +79,16 @@ export async function GET(req: Request) {
 
     } catch (error: any) {
         console.error("Error fetching issues:", error);
+        // Log more details for debugging
+        if (error.status) {
+            console.error("GitHub API error status:", error.status);
+        }
+        if (error.message) {
+            console.error("GitHub API error message:", error.message);
+        }
         return NextResponse.json({
-            error: error.message || "Failed to fetch issues"
+            error: error.message || "Failed to fetch issues",
+            details: error.status ? `GitHub API returned status ${error.status}` : undefined
         }, { status: 500 });
     }
 }
