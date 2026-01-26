@@ -401,8 +401,8 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
         )}
       >
         <motion.div
-          className={cn(
-            "relative flex min-w-0 flex-1 flex-col overflow-hidden",
+            className={cn(
+            "relative flex min-w-0 flex-1 flex-col overflow-hidden min-h-0",
             !chatStarted && "grid-rows-[1fr]",
           )}
           layout={isLargeScreen}
@@ -530,10 +530,10 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
             </div>
           )}
 
-          <StickToBottom className="relative flex-1 overflow-hidden">
+          <StickToBottom className="relative flex-1 overflow-hidden min-h-0">
             <StickyToBottomContent
               className={cn(
-                "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
+                "absolute inset-0 overflow-y-auto px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
                 !chatStarted && "mt-[25vh] flex flex-col items-stretch",
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
@@ -584,7 +584,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                 </>
               }
               footer={
-                <div className="sticky bottom-0 flex flex-col items-center gap-8 bg-background">
+                <div className="sticky bottom-0 flex flex-col items-center gap-8 bg-background z-10 shrink-0">
                   {!chatStarted && (
                     <div className="flex items-center gap-3">
                       <LangGraphLogoSVG className="h-8 flex-shrink-0 text-primary" />

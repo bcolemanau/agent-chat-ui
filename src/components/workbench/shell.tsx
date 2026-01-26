@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect, useRef } from "react";
+import { Suspense, useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Sidebar } from "./sidebar";
 import { useRouter } from "next/navigation";
 import { UserMenu } from "@/components/thread/user-menu";
@@ -41,6 +41,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const [isResizing, setIsResizing] = useState(false);
     const [isArtifactOpen, closeArtifact] = useArtifactOpen();
     const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
+    const [isMounted, setIsMounted] = useState(false);
+    const agentPanelRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
 
     // Agent-Driven View Synchronization (Backend -> UI)
@@ -136,6 +138,24 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             document.body.style.userSelect = '';
         };
     }, [isResizing]);
+
+    // Ensure layout is calculated synchronously before paint
+    useLayoutEffect(() => {
+        setIsMounted(true);
+        // Force a layout recalculation
+        if (agentPanelRef.current) {
+            // Trigger a reflow to ensure height constraints are applied
+            agentPanelRef.current.offsetHeight;
+        }
+    }, []);
+
+    // Recalculate when agent panel opens/closes
+    useLayoutEffect(() => {
+        if (isAgentPanelOpen && agentPanelRef.current) {
+            // Force layout recalculation
+            agentPanelRef.current.offsetHeight;
+        }
+    }, [isAgentPanelOpen, agentPanelHeight]);
 
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
@@ -383,8 +403,16 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     )}
 
                     {/* Agent Chat Panel - Bottom */}
-                    <div className="relative shrink-0 overflow-hidden" style={{ height: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px', maxHeight: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px' }}>
-                        {isAgentPanelOpen ? (
+                    <div 
+                        ref={agentPanelRef}
+                        className="relative shrink-0 overflow-hidden" 
+                        style={{ 
+                            height: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px', 
+                            maxHeight: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px',
+                            minHeight: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px'
+                        }}
+                    >
+                        {isAgentPanelOpen && isMounted ? (
                             <div 
                                 className={cn(
                                     "bg-background transition-all duration-300 flex flex-col h-full overflow-hidden",
@@ -407,8 +435,20 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     </Button>
                                 </div>
                                 {/* Agent Chat Content */}
-                                <div className="flex-1 min-h-0 overflow-hidden bg-background">
+                                <div className="flex-1 min-h-0 overflow-hidden bg-background" style={{ maxHeight: '100%' }}>
                                     <Thread embedded hideArtifacts />
+                                </div>
+                            </div>
+                        ) : isAgentPanelOpen && !isMounted ? (
+                            <div className="bg-background flex flex-col h-full overflow-hidden">
+                                <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0">
+                                    <div className="flex items-center gap-2">
+                                        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                                        <span className="text-xs font-semibold text-foreground">Agent Chat</span>
+                                    </div>
+                                </div>
+                                <div className="flex-1 min-h-0 overflow-hidden bg-background flex items-center justify-center">
+                                    <div className="text-xs text-muted-foreground">Loading...</div>
                                 </div>
                             </div>
                         ) : (
