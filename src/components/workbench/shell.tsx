@@ -383,14 +383,13 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     )}
 
                     {/* Agent Chat Panel - Bottom */}
-                    <div className="relative">
+                    <div className="relative" style={{ height: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px' }}>
                         {isAgentPanelOpen ? (
                             <div 
                                 className={cn(
-                                    "bg-background transition-all duration-300 flex flex-col",
+                                    "bg-background transition-all duration-300 flex flex-col h-full",
                                     !isResizing && "transition-all"
                                 )}
-                                style={{ height: `${agentPanelHeight}px` }}
                             >
                                 {/* Agent Panel Header */}
                                 <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0">
@@ -408,7 +407,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     </Button>
                                 </div>
                                 {/* Agent Chat Content */}
-                                <div className="flex-1 min-h-0 bg-background" style={{ height: `${agentPanelHeight - 40}px` }}>
+                                <div className="flex-1 min-h-0 overflow-hidden bg-background">
                                     <Thread embedded hideArtifacts />
                                 </div>
                             </div>
