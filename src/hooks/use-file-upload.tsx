@@ -58,57 +58,74 @@ interface UseFileUploadOptions {
  * the request body as text, which breaks multipart/form-data.
  */
 function getDirectBackendUrl(apiUrl: string): string {
+  console.log("[FileUpload] getDirectBackendUrl - Input:", apiUrl);
+  
   // If apiUrl is already an absolute URL (starts with http:// or https://)
   // and it's not a proxy path, we can use it directly
   if (apiUrl.startsWith("http://") || apiUrl.startsWith("https://")) {
     // But if it's pointing to the frontend (reflexion-ui), we need to redirect to backend
     if (apiUrl.includes('reflexion-ui') || apiUrl.includes('/api')) {
+      console.log("[FileUpload] getDirectBackendUrl - Absolute URL points to frontend/proxy, redirecting to backend");
       // Extract the backend URL from the frontend URL
       if (apiUrl.includes('railway.app')) {
-        return "https://reflexion-staging.up.railway.app";
+        const backendUrl = "https://reflexion-staging.up.railway.app";
+        console.log("[FileUpload] getDirectBackendUrl - Resolved to Railway backend:", backendUrl);
+        return backendUrl;
       }
       // For localhost, replace the port
-      return apiUrl.replace('reflexion-ui', 'reflexion').replace(':3000', ':8080').replace('/api', '');
+      const backendUrl = apiUrl.replace('reflexion-ui', 'reflexion').replace(':3000', ':8080').replace('/api', '');
+      console.log("[FileUpload] getDirectBackendUrl - Resolved to localhost backend:", backendUrl);
+      return backendUrl;
     }
+    console.log("[FileUpload] getDirectBackendUrl - Absolute URL is already a backend URL, using as-is");
     return apiUrl;
   }
   
   // If apiUrl is relative (starts with / or /api), we MUST bypass the proxy
   // This is the most common case in production where apiUrl = "/api"
   if (apiUrl.startsWith("/") || apiUrl.startsWith("/api")) {
+    console.log("[FileUpload] getDirectBackendUrl - Relative URL detected, MUST bypass proxy");
+    
     if (typeof window !== 'undefined') {
       const hostname = window.location.hostname;
       const origin = window.location.origin;
       
-      console.log("[FileUpload] getDirectBackendUrl - Bypassing proxy. Original apiUrl:", apiUrl, "hostname:", hostname);
+      console.log("[FileUpload] getDirectBackendUrl - Environment:", {
+        hostname,
+        origin,
+        isRailway: hostname.includes('railway.app') || hostname.includes('reflexion-ui') || hostname.includes('reflexion-staging'),
+        isLocalhost: hostname === 'localhost' || hostname === '127.0.0.1'
+      });
       
       // Check for Railway staging (most common production case)
       if (hostname.includes('railway.app') || hostname.includes('reflexion-ui') || hostname.includes('reflexion-staging')) {
         const backendUrl = "https://reflexion-staging.up.railway.app";
-        console.log("[FileUpload] Detected Railway, using direct backend URL:", backendUrl);
+        console.log("[FileUpload] getDirectBackendUrl - ✓ Detected Railway, using:", backendUrl);
         return backendUrl;
       }
       
       // Check for localhost
       if (hostname === 'localhost' || hostname === '127.0.0.1') {
         const backendUrl = "http://localhost:8080";
-        console.log("[FileUpload] Detected localhost, using direct backend URL:", backendUrl);
+        console.log("[FileUpload] getDirectBackendUrl - ✓ Detected localhost, using:", backendUrl);
         return backendUrl;
       }
       
       // Fallback: try to construct from current origin
       const fallbackUrl = origin.replace('reflexion-ui', 'reflexion').replace(':3000', ':8080');
-      console.warn("[FileUpload] Unknown hostname, using fallback URL:", fallbackUrl);
+      console.warn("[FileUpload] getDirectBackendUrl - ⚠️ Unknown hostname, using fallback:", fallbackUrl);
       return fallbackUrl;
     } else {
       // Server-side: use environment variable or default
-      return process.env.NEXT_PUBLIC_API_URL || "https://reflexion-staging.up.railway.app";
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL || "https://reflexion-staging.up.railway.app";
+      console.log("[FileUpload] getDirectBackendUrl - Server-side, using:", backendUrl);
+      return backendUrl;
     }
   }
   
   // If we get here, apiUrl is something unexpected
   // Default to Railway staging for safety
-  console.warn("[FileUpload] Unexpected apiUrl format:", apiUrl, "- defaulting to Railway staging");
+  console.warn("[FileUpload] getDirectBackendUrl - ⚠️ Unexpected apiUrl format:", apiUrl, "- defaulting to Railway staging");
   return "https://reflexion-staging.up.railway.app";
 }
 
@@ -139,7 +156,16 @@ export function useFileUpload({
   // Upload PDF to backend and get document_id
   const uploadDocument = async (file: File): Promise<DocumentUploadResult | null> => {
     try {
-      console.log("[FileUpload] Starting uploadDocument for:", file.name, "Type:", file.type, "Size:", file.size);
+      console.log("[FileUpload] ===== uploadDocument START =====");
+      console.log("[FileUpload] File:", { name: file.name, type: file.type, size: file.size });
+      console.log("[FileUpload] Input apiUrl:", apiUrl);
+      console.log("[FileUpload] Thread ID:", threadId);
+      console.log("[FileUpload] Window location:", typeof window !== 'undefined' ? {
+        hostname: window.location.hostname,
+        origin: window.location.origin,
+        href: window.location.href
+      } : "server-side");
+      
       const formData = new FormData();
       formData.append("file", file);
       if (threadId) {
@@ -153,14 +179,19 @@ export function useFileUpload({
       const token = session?.user?.idToken || getApiKey();
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
+        const tokenStr = String(token);
+        console.log("[FileUpload] Auth token: Present (length:", tokenStr.length, ")");
       } else {
-        console.warn("[FileUpload] No authentication token available");
+        console.warn("[FileUpload] ⚠️ No authentication token available");
       }
       
       // Add organization context if available
       const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
       if (orgContext) {
         headers['X-Organization-Context'] = orgContext;
+        console.log("[FileUpload] Organization context: Present");
+      } else {
+        console.log("[FileUpload] Organization context: Not set");
       }
 
       // For file uploads, we need to call the backend directly, not through Next.js proxy
@@ -168,20 +199,44 @@ export function useFileUpload({
       // ALWAYS bypass proxy for file uploads to avoid issues
       const uploadApiUrl = getDirectBackendUrl(apiUrl);
       const uploadUrl = `${uploadApiUrl}/documents/upload`;
-      console.log("[FileUpload] Sending POST request to:", uploadUrl);
-      console.log("[FileUpload] Headers:", Object.keys(headers));
       
+      console.log("[FileUpload] 🔄 URL Resolution:");
+      console.log("[FileUpload]   - Original apiUrl:", apiUrl);
+      console.log("[FileUpload]   - Resolved backend URL:", uploadApiUrl);
+      console.log("[FileUpload]   - Final upload URL:", uploadUrl);
+      console.log("[FileUpload]   - Proxy bypass:", apiUrl !== uploadApiUrl ? "YES ✓" : "NO (same URL)");
+      console.log("[FileUpload] Request headers:", Object.keys(headers));
+      
+      const requestStartTime = Date.now();
       const response = await fetch(uploadUrl, {
         method: "POST",
         headers,
         body: formData,
       });
+      const requestDuration = Date.now() - requestStartTime;
       
-      console.log("[FileUpload] Response status:", response.status, response.statusText);
+      console.log("[FileUpload] Response received:", {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        duration: `${requestDuration}ms`,
+        headers: Object.fromEntries(response.headers.entries())
+      });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: "Upload failed" }));
-        throw new Error(error.error || `Upload failed: ${response.statusText}`);
+        const errorText = await response.text().catch(() => "Could not read error response");
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || "Upload failed" };
+        }
+        console.error("[FileUpload] ❌ Upload failed:", {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        throw new Error(errorData.error || errorData.detail || `Upload failed: ${response.statusText}`);
       }
 
       const result: DocumentUploadResult = await response.json();
@@ -189,9 +244,21 @@ export function useFileUpload({
       if (result.artifact_id && !result.document_id) {
         result.document_id = result.artifact_id;
       }
+      
+      console.log("[FileUpload] ✅ Upload successful:", {
+        document_id: result.document_id,
+        artifact_id: result.artifact_id,
+        filename: result.filename
+      });
+      console.log("[FileUpload] ===== uploadDocument END =====");
+      
       return result;
     } catch (error) {
-      console.error("[FileUpload] Document upload failed:", error);
+      console.error("[FileUpload] ❌ Document upload failed:", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        file: file.name
+      });
       toast.error(`Failed to upload ${file.name}: ${error instanceof Error ? error.message : "Unknown error"}`);
       return null;
     }
@@ -203,7 +270,20 @@ export function useFileUpload({
     zipFile: File | null
   ): Promise<FolderUploadResult | null> => {
     try {
-      console.log("[FileUpload] Starting uploadFolder - zipFile:", zipFile?.name, "files:", files?.length);
+      console.log("[FileUpload] ===== uploadFolder START =====");
+      console.log("[FileUpload] Input:", {
+        zipFile: zipFile ? { name: zipFile.name, size: zipFile.size, type: zipFile.type } : null,
+        filesCount: files?.length || 0,
+        files: files?.map(f => ({ name: f.name, size: f.size, type: f.type })) || []
+      });
+      console.log("[FileUpload] Input apiUrl:", apiUrl);
+      console.log("[FileUpload] Thread ID:", threadId);
+      console.log("[FileUpload] Window location:", typeof window !== 'undefined' ? {
+        hostname: window.location.hostname,
+        origin: window.location.origin,
+        href: window.location.href
+      } : "server-side");
+      
       const formData = new FormData();
       
       if (zipFile) {
@@ -228,13 +308,18 @@ export function useFileUpload({
       const token = session?.user?.idToken || getApiKey();
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
+        const tokenStr = String(token);
+        console.log("[FileUpload] Auth token: Present (length:", tokenStr.length, ")");
       } else {
-        console.warn("[FileUpload] No authentication token available for folder upload");
+        console.warn("[FileUpload] ⚠️ No authentication token available for folder upload");
       }
       
       const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
       if (orgContext) {
         headers['X-Organization-Context'] = orgContext;
+        console.log("[FileUpload] Organization context: Present");
+      } else {
+        console.log("[FileUpload] Organization context: Not set");
       }
 
       setFolderUploading(true);
@@ -244,20 +329,44 @@ export function useFileUpload({
       // The Next.js proxy can't handle multipart/form-data file uploads
       const uploadApiUrl = getDirectBackendUrl(apiUrl);
       const uploadUrl = `${uploadApiUrl}/artifacts/upload-folder`;
-      console.log("[FileUpload] Sending POST request to:", uploadUrl);
-      console.log("[FileUpload] Headers:", Object.keys(headers));
       
+      console.log("[FileUpload] 🔄 URL Resolution:");
+      console.log("[FileUpload]   - Original apiUrl:", apiUrl);
+      console.log("[FileUpload]   - Resolved backend URL:", uploadApiUrl);
+      console.log("[FileUpload]   - Final upload URL:", uploadUrl);
+      console.log("[FileUpload]   - Proxy bypass:", apiUrl !== uploadApiUrl ? "YES ✓" : "NO (same URL)");
+      console.log("[FileUpload] Request headers:", Object.keys(headers));
+      
+      const requestStartTime = Date.now();
       const response = await fetch(uploadUrl, {
         method: "POST",
         headers,
         body: formData,
       });
+      const requestDuration = Date.now() - requestStartTime;
       
-      console.log("[FileUpload] Response status:", response.status, response.statusText);
+      console.log("[FileUpload] Response received:", {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        duration: `${requestDuration}ms`,
+        headers: Object.fromEntries(response.headers.entries())
+      });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: "Upload failed" }));
-        throw new Error(error.error || `Upload failed: ${response.statusText}`);
+        const errorText = await response.text().catch(() => "Could not read error response");
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || "Upload failed" };
+        }
+        console.error("[FileUpload] ❌ Folder upload failed:", {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        throw new Error(errorData.error || errorData.detail || `Upload failed: ${response.statusText}`);
       }
 
       const result: FolderUploadResult = await response.json();
@@ -268,9 +377,22 @@ export function useFileUpload({
         failed: result.failed,
       });
 
+      console.log("[FileUpload] ✅ Folder upload successful:", {
+        total: result.total,
+        successful: result.successful,
+        failed: result.failed,
+        artifacts: result.artifacts.length
+      });
+      console.log("[FileUpload] ===== uploadFolder END =====");
+
       return result;
     } catch (error) {
-      console.error("[FileUpload] Folder upload failed:", error);
+      console.error("[FileUpload] ❌ Folder upload failed:", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        zipFile: zipFile?.name,
+        filesCount: files?.length
+      });
       toast.error(`Failed to upload folder: ${error instanceof Error ? error.message : "Unknown error"}`);
       return null;
     } finally {
