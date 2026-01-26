@@ -418,9 +418,10 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     "bg-background transition-all duration-300 flex flex-col h-full overflow-hidden",
                                     !isResizing && "transition-all"
                                 )}
+                                style={{ height: '100%', maxHeight: '100%' }}
                             >
                                 {/* Agent Panel Header */}
-                                <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0">
+                                <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0" style={{ flexShrink: 0, height: '40px' }}>
                                     <div className="flex items-center gap-2">
                                         <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
                                         <span className="text-xs font-semibold text-foreground">Agent Chat</span>
@@ -435,8 +436,19 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     </Button>
                                 </div>
                                 {/* Agent Chat Content */}
-                                <div className="flex-1 min-h-0 overflow-hidden bg-background" style={{ maxHeight: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                    <div className="h-full w-full overflow-hidden" style={{ maxHeight: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                <div className="flex-1 min-h-0 overflow-hidden bg-background" style={{ 
+                                    height: `calc(100% - 40px)`, 
+                                    maxHeight: `calc(100% - 40px)`, 
+                                    display: 'flex', 
+                                    flexDirection: 'column',
+                                    flex: '1 1 auto'
+                                }}>
+                                    <div className="h-full w-full overflow-hidden" style={{ 
+                                        maxHeight: '100%', 
+                                        height: '100%', 
+                                        display: 'flex', 
+                                        flexDirection: 'column' 
+                                    }}>
                                         <Thread embedded hideArtifacts />
                                     </div>
                                 </div>
