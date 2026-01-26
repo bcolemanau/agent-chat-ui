@@ -269,7 +269,7 @@ export function WorldMapView() {
             
             // Create maps for both ID and name matching (fallback)
             const diffNodesById = new Map(diffData.diff.nodes.map((n: any) => [n.id, n]));
-            const diffNodesByName = new Map(diffData.diff.nodes.map((n: any) => [n.name || n.label, n]));
+            const diffNodesByName = new Map(diffData.diff.nodes.map((n: any) => [n.name || (n as any).label, n]));
             
             // Log detailed structure
             const sampleDiffNode = diffData.diff.nodes[0];
@@ -277,14 +277,12 @@ export function WorldMapView() {
             console.log('[WorldMapView] Sample diff node structure:', {
                 id: sampleDiffNode?.id,
                 name: sampleDiffNode?.name,
-                label: sampleDiffNode?.label,
                 diff_status: sampleDiffNode?.diff_status,
                 keys: sampleDiffNode ? Object.keys(sampleDiffNode) : []
             });
             console.log('[WorldMapView] Sample current node structure:', {
                 id: sampleCurrentNode?.id,
                 name: sampleCurrentNode?.name,
-                label: sampleCurrentNode?.label,
                 keys: sampleCurrentNode ? Object.keys(sampleCurrentNode) : []
             });
             
@@ -302,7 +300,7 @@ export function WorldMapView() {
             // Check all diff nodes with their status
             const diffNodesWithStatus = diffData.diff.nodes.filter((n: any) => n.diff_status).map((n: any) => ({
                 id: n.id,
-                name: n.name || n.label,
+                name: n.name || (n as any).label,
                 status: n.diff_status,
                 fullNode: n
             }));
