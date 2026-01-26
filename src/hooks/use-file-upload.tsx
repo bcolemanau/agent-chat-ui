@@ -5,20 +5,16 @@ import { fileToContentBlock } from "@/lib/multimodal-utils";
 import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
 
-export const SUPPORTED_FILE_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "application/pdf",
-];
-
+// Image types that are processed as content blocks (inline in messages)
 export const SUPPORTED_IMAGE_TYPES = [
   "image/jpeg",
   "image/png",
   "image/gif",
   "image/webp",
 ];
+
+// All other file types (PDFs, markdown, text files, etc.) are uploaded as documents
+// No file type restrictions - allow all file types
 
 // Document upload result from backend
 export interface DocumentUploadResult {
@@ -427,35 +423,22 @@ export function useFileUpload({
     }
     const fileArray = Array.from(files);
     console.log("[FileUpload] Files selected:", fileArray.map(f => ({ name: f.name, type: f.type, size: f.size })));
-    const validFiles = fileArray.filter((file) =>
-      SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const invalidFiles = fileArray.filter(
-      (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    console.log("[FileUpload] Valid files:", validFiles.length, "Invalid files:", invalidFiles.length);
-    if (invalidFiles.length > 0) {
-      console.log("[FileUpload] Invalid file types:", invalidFiles.map(f => ({ name: f.name, type: f.type })));
-    }
-    const duplicateFiles = validFiles.filter(isDuplicate);
-    const uniqueFiles = validFiles.filter((file) => !isDuplicate(file));
+    
+    // No file type restrictions - accept all files
+    const duplicateFiles = fileArray.filter(isDuplicate);
+    const uniqueFiles = fileArray.filter((file) => !isDuplicate(file));
     console.log("[FileUpload] Unique files to process:", uniqueFiles.length);
 
-    if (invalidFiles.length > 0) {
-      toast.error(
-        "You have uploaded invalid file type. Please upload a JPEG, PNG, GIF, WEBP image or a PDF.",
-      );
-    }
     if (duplicateFiles.length > 0) {
       toast.error(
         `Duplicate file(s) detected: ${duplicateFiles.map((f) => f.name).join(", ")}. Each file can only be uploaded once per message.`,
       );
     }
 
-    // Separate images from PDFs
+    // Separate images (content blocks) from documents (everything else)
     const imageFiles = uniqueFiles.filter((f) => SUPPORTED_IMAGE_TYPES.includes(f.type));
-    const pdfFiles = uniqueFiles.filter((f) => f.type === "application/pdf");
-    console.log("[FileUpload] Image files:", imageFiles.length, "PDF files:", pdfFiles.length);
+    const documentFiles = uniqueFiles.filter((f) => !SUPPORTED_IMAGE_TYPES.includes(f.type));
+    console.log("[FileUpload] Image files:", imageFiles.length, "Document files:", documentFiles.length);
 
     // Process images as content blocks (existing behavior)
     if (imageFiles.length > 0) {
@@ -464,15 +447,15 @@ export function useFileUpload({
       setContentBlocks((prev) => [...prev, ...newBlocks]);
     }
 
-    // Upload PDFs to backend
-    if (pdfFiles.length > 0) {
-      console.log("[FileUpload] Starting upload for", pdfFiles.length, "PDF file(s)");
+    // Upload documents (PDFs, markdown, text files, etc.) to backend
+    if (documentFiles.length > 0) {
+      console.log("[FileUpload] Starting upload for", documentFiles.length, "document file(s)");
       setUploading(true);
-      setPendingDocuments((prev) => [...prev, ...pdfFiles]);
+      setPendingDocuments((prev) => [...prev, ...documentFiles]);
       
       try {
         const uploadResults = await Promise.all(
-          pdfFiles.map((file) => uploadDocument(file))
+          documentFiles.map((file) => uploadDocument(file))
         );
         
         const successful = uploadResults.filter((r): r is DocumentUploadResult => r !== null);
@@ -482,8 +465,8 @@ export function useFileUpload({
         }
         
         // Remove successfully uploaded files from pending
-        setPendingDocuments((prev) => 
-          prev.filter((f) => !pdfFiles.some((pf) => pf.name === f.name))
+        setPendingDocuments((prev) =>
+          prev.filter((f) => !documentFiles.some((df) => df.name === f.name))
         );
       } catch (error) {
         console.error("[FileUpload] Error uploading documents:", error);
@@ -524,29 +507,19 @@ export function useFileUpload({
       if (!e.dataTransfer) return;
 
       const files = Array.from(e.dataTransfer.files);
-      const validFiles = files.filter((file) =>
-        SUPPORTED_FILE_TYPES.includes(file.type),
-      );
-      const invalidFiles = files.filter(
-        (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-      );
-      const duplicateFiles = validFiles.filter(isDuplicate);
-      const uniqueFiles = validFiles.filter((file) => !isDuplicate(file));
+      // No file type restrictions - accept all files
+      const duplicateFiles = files.filter(isDuplicate);
+      const uniqueFiles = files.filter((file) => !isDuplicate(file));
 
-      if (invalidFiles.length > 0) {
-        toast.error(
-          "You have uploaded invalid file type. Please upload a JPEG, PNG, GIF, WEBP image or a PDF.",
-        );
-      }
       if (duplicateFiles.length > 0) {
         toast.error(
           `Duplicate file(s) detected: ${duplicateFiles.map((f) => f.name).join(", ")}. Each file can only be uploaded once per message.`,
         );
       }
 
-      // Separate images from PDFs
+      // Separate images (content blocks) from documents (everything else)
       const imageFiles = uniqueFiles.filter((f) => SUPPORTED_IMAGE_TYPES.includes(f.type));
-      const pdfFiles = uniqueFiles.filter((f) => f.type === "application/pdf");
+      const documentFiles = uniqueFiles.filter((f) => !SUPPORTED_IMAGE_TYPES.includes(f.type));
 
       // Process images as content blocks
       if (imageFiles.length > 0) {
@@ -554,14 +527,14 @@ export function useFileUpload({
         setContentBlocks((prev) => [...prev, ...newBlocks]);
       }
 
-      // Upload PDFs to backend
-      if (pdfFiles.length > 0) {
+      // Upload documents (PDFs, markdown, text files, etc.) to backend
+      if (documentFiles.length > 0) {
         setUploading(true);
-        setPendingDocuments((prev) => [...prev, ...pdfFiles]);
+        setPendingDocuments((prev) => [...prev, ...documentFiles]);
         
         try {
           const uploadResults = await Promise.all(
-            pdfFiles.map((file) => uploadDocument(file))
+            documentFiles.map((file) => uploadDocument(file))
           );
           
           const successful = uploadResults.filter((r): r is DocumentUploadResult => r !== null);
@@ -571,7 +544,7 @@ export function useFileUpload({
           }
           
           setPendingDocuments((prev) => 
-            prev.filter((f) => !pdfFiles.some((pf) => pf.name === f.name))
+            prev.filter((f) => !documentFiles.some((df) => df.name === f.name))
           );
         } catch (error) {
           console.error("[FileUpload] Error uploading documents:", error);
@@ -665,28 +638,19 @@ export function useFileUpload({
       return;
     }
     e.preventDefault();
-    const validFiles = files.filter((file) =>
-      SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const invalidFiles = files.filter(
-      (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const duplicateFiles = validFiles.filter(isDuplicate);
-    const uniqueFiles = validFiles.filter((file) => !isDuplicate(file));
-    if (invalidFiles.length > 0) {
-      toast.error(
-        "You have pasted an invalid file type. Please paste a JPEG, PNG, GIF, WEBP image or a PDF.",
-      );
-    }
+    // No file type restrictions - accept all files
+    const duplicateFiles = files.filter(isDuplicate);
+    const uniqueFiles = files.filter((file) => !isDuplicate(file));
+    
     if (duplicateFiles.length > 0) {
       toast.error(
         `Duplicate file(s) detected: ${duplicateFiles.map((f) => f.name).join(", ")}. Each file can only be uploaded once per message.`,
       );
     }
 
-    // Separate images from PDFs
+    // Separate images (content blocks) from documents (everything else)
     const imageFiles = uniqueFiles.filter((f) => SUPPORTED_IMAGE_TYPES.includes(f.type));
-    const pdfFiles = uniqueFiles.filter((f) => f.type === "application/pdf");
+    const documentFiles = uniqueFiles.filter((f) => !SUPPORTED_IMAGE_TYPES.includes(f.type));
 
     // Process images as content blocks
     if (imageFiles.length > 0) {
@@ -694,14 +658,14 @@ export function useFileUpload({
       setContentBlocks((prev) => [...prev, ...newBlocks]);
     }
 
-    // Upload PDFs to backend
-    if (pdfFiles.length > 0) {
+    // Upload documents (PDFs, markdown, text files, etc.) to backend
+    if (documentFiles.length > 0) {
       setUploading(true);
-      setPendingDocuments((prev) => [...prev, ...pdfFiles]);
+      setPendingDocuments((prev) => [...prev, ...documentFiles]);
       
       try {
         const uploadResults = await Promise.all(
-          pdfFiles.map((file) => uploadDocument(file))
+          documentFiles.map((file) => uploadDocument(file))
         );
         
         const successful = uploadResults.filter((r): r is DocumentUploadResult => r !== null);
@@ -711,7 +675,7 @@ export function useFileUpload({
         }
         
         setPendingDocuments((prev) => 
-          prev.filter((f) => !pdfFiles.some((pf) => pf.name === f.name))
+          prev.filter((f) => !documentFiles.some((df) => df.name === f.name))
         );
       } catch (error) {
         console.error("[FileUpload] Error uploading documents:", error);

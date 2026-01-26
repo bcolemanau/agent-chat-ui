@@ -657,7 +657,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                           >
                             <Plus className="size-5 text-gray-600" />
                             <span className="text-sm text-gray-600">
-                              Upload PDF or Image
+                              Upload File
                             </span>
                           </Label>
                           <input
@@ -665,7 +665,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                             type="file"
                             onChange={handleFileUpload}
                             multiple
-                            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                            accept="*/*"
                             className="hidden"
                           />
                           <Label

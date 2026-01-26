@@ -4,7 +4,7 @@
         "version": "1.5.0",
         "date": "2026-01-26",
         "title": "Customer Onboarding Complete - Unified Artifact Ingestion",
-        "description": "As a Customer Administrator working with a Context Enrichment Agent, I want a unified, streamlined system to ingest and enrich organizational artifacts (documents, standards, SOPs, methodologies) through a consistent workflow, so that my organization's domain knowledge and methodologies are efficiently captured, accurately categorized, and seamlessly integrated into the knowledge graph to inform the Concept → Design → Operations loop. This release completes Issue #12 and marks the completion of the Customer Onboarding experience, ready for the Concept, Design, and Operate cycle.",
+        "description": "Harmonize the two artifact ingestion flows (`save_external_context` and `upload_document`) into a unified system that supports both text-based and file-based domain/method context ingestion for the Concept → Design → Operations loop. This major update streamlines the process of bringing external knowledge into the Reflexion Knowledge Graph, from initial upload through enrichment approval to final integration, with a significantly improved user experience. This release completes Issue #12 and marks the completion of the Customer Onboarding experience, ready for the Concept, Design, and Operate cycle.",
         "features": [
             {
                 "name": "Folder Upload Support",

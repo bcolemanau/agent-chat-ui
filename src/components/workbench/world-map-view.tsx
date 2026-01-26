@@ -7,6 +7,8 @@ import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
+import { NodeDetailPanel } from './node-detail-panel';
+import { ArtifactsListView } from './artifacts-list-view';
 
 interface Node extends d3.SimulationNodeDatum {
     id: string;
@@ -15,6 +17,7 @@ interface Node extends d3.SimulationNodeDatum {
     is_active?: boolean;
     description?: string;
     properties?: any;
+    metadata?: Record<string, any>;
     diff_status?: 'added' | 'modified' | 'removed';
 }
 
@@ -57,9 +60,6 @@ export function WorldMapView() {
 
     const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
     const [historyOpen, setHistoryOpen] = useState(false);
-    const [artifactHistory, setArtifactHistory] = useState<any[] | null>(null);
-    const [loadingHistory, setLoadingHistory] = useState(false);
-    const [historicalContent, setHistoricalContent] = useState<string | null>(null);
     const [isFocusMode, setIsFocusMode] = useState(false);
 
     const [showHistory, setShowHistory] = useState(false);
@@ -79,47 +79,7 @@ export function WorldMapView() {
         }
     }, [visualizationHtml]);
 
-    const fetchArtifactHistory = async (nodeId: string) => {
-        try {
-            setLoadingHistory(true);
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const url = threadId ? `/api/artifact/history?node_id=${nodeId}&thread_id=${threadId}` : `/api/artifact/history?node_id=${nodeId}`;
-            const res = await fetch(url, { headers });
-            if (res.ok) {
-                const json = await res.json();
-                setArtifactHistory(json.versions);
-            }
-        } catch (e) { console.error('Artifact history fetch error:', e); }
-        finally { setLoadingHistory(false); }
-    };
-
-    const fetchHistoricalVersion = async (nodeId: string, version: string) => {
-        try {
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const url = threadId
-                ? `/api/artifact/content?node_id=${nodeId}&version=${version}&thread_id=${threadId}`
-                : `/api/artifact/content?node_id=${nodeId}&version=${version}`;
-            const res = await fetch(url, { headers });
-            if (res.ok) {
-                const json = await res.json();
-                setHistoricalContent(json.content);
-            }
-        } catch (e) { console.error('Historical content fetch error:', e); }
-    };
-
-    useEffect(() => {
-        if (selectedNode?.type === 'ARTIFACT') {
-            fetchArtifactHistory(selectedNode.id);
-            setHistoricalContent(null);
-        } else {
-            setArtifactHistory(null);
-            setHistoricalContent(null);
-        }
-    }, [selectedNode]);
+    // Note: Artifact history and content fetching is now handled by NodeDetailPanel
 
     const fetchKgHistory = async () => {
         try {
@@ -437,9 +397,29 @@ export function WorldMapView() {
                     d.fy = null;
                 }) as any);
 
+        // Add selection highlighting circle (outer glow)
         node.append('circle')
-            .attr('r', d => d.id === data.metadata.active_trigger ? 18 : 12)
+            .attr('class', 'selection-glow')
+            .attr('r', d => {
+                if (selectedNode && d.id === selectedNode.id) return 24;
+                return 0;
+            })
+            .attr('fill', 'none')
+            .attr('stroke', '#3b82f6')
+            .attr('stroke-width', 3)
+            .attr('opacity', 0.6)
+            .style('pointer-events', 'none')
+            .style('filter', 'drop-shadow(0 0 8px #3b82f6)')
+            .style('animation', d => selectedNode && d.id === selectedNode.id ? 'node-pulse 2s ease-in-out infinite' : 'none');
+
+        node.append('circle')
+            .attr('r', d => {
+                if (selectedNode && d.id === selectedNode.id) return 20;
+                return d.id === data.metadata.active_trigger ? 18 : 12;
+            })
             .attr('fill', d => {
+                // Selected node gets special color
+                if (selectedNode && d.id === selectedNode.id) return '#3b82f6';
                 // Color by diff status if available
                 if ((d as any).diff_status === 'added') return '#10b981'; // green
                 if ((d as any).diff_status === 'modified') return '#f59e0b'; // yellow
@@ -447,14 +427,17 @@ export function WorldMapView() {
                 return typeConfig[d.type]?.color || '#444';
             })
             .attr('stroke', d => {
+                if (selectedNode && d.id === selectedNode.id) return '#fff';
                 if ((d as any).diff_status) return '#fff';
                 return d.id === data.metadata.active_trigger ? '#fff' : '#000';
             })
             .attr('stroke-width', d => {
+                if (selectedNode && d.id === selectedNode.id) return 4;
                 if ((d as any).diff_status) return 2;
                 return d.id === data.metadata.active_trigger ? 3 : 1;
             })
             .style('filter', d => {
+                if (selectedNode && d.id === selectedNode.id) return 'drop-shadow(0 0 12px #3b82f6)';
                 if ((d as any).diff_status === 'added') return 'drop-shadow(0 0 6px #10b981)';
                 if ((d as any).diff_status === 'modified') return 'drop-shadow(0 0 6px #f59e0b)';
                 if ((d as any).diff_status === 'removed') return 'drop-shadow(0 0 6px #ef4444)';
@@ -488,11 +471,54 @@ export function WorldMapView() {
                 .attr('y1', d => (d.source as Node).y!)
                 .attr('x2', d => (d.target as Node).x!)
                 .attr('y2', d => (d.target as Node).y!)
-                .style('opacity', d => d.is_active === false ? inactiveOpacity : 0.5);
+                .style('opacity', d => {
+                    // Highlight links connected to selected node
+                    if (selectedNode) {
+                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
+                        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
+                            return d.is_active === false ? inactiveOpacity : 1;
+                        }
+                    }
+                    return d.is_active === false ? inactiveOpacity : 0.5;
+                })
+                .style('stroke-width', d => {
+                    if (selectedNode) {
+                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
+                        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
+                            return 2.5;
+                        }
+                    }
+                    return 1.5;
+                })
+                .style('stroke', d => {
+                    if (selectedNode) {
+                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
+                        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
+                            return '#3b82f6';
+                        }
+                    }
+                    return '#888';
+                });
 
             node
                 .attr('transform', d => `translate(${d.x},${d.y})`)
-                .style('opacity', d => d.is_active === false ? inactiveOpacity : 1);
+                .style('opacity', d => {
+                    // Dim non-selected nodes when a node is selected
+                    if (selectedNode && d.id !== selectedNode.id) {
+                        return d.is_active === false ? inactiveOpacity * 0.3 : 0.4;
+                    }
+                    return d.is_active === false ? inactiveOpacity : 1;
+                });
+            
+            // Update selection glow position
+            node.select('.selection-glow')
+                .attr('r', d => {
+                    if (selectedNode && d.id === selectedNode.id) return 24;
+                    return 0;
+                });
         });
 
         // Initial zoom to fit
@@ -511,50 +537,78 @@ export function WorldMapView() {
             );
         }, 500);
 
-    }, [data, viewMode, inactiveOpacity, diffData]);
+    }, [data, viewMode, inactiveOpacity, diffData, selectedNode]);
+
+    // Center map on selected node when it changes
+    useEffect(() => {
+        if (!selectedNode || !svgRef.current || !data) return;
+        
+        const svg = d3.select(svgRef.current);
+        const g = svg.select<SVGGElement>('g');
+        if (!g.node()) return;
+        
+        // Wait for simulation to settle and DOM to update
+        const timeoutId = setTimeout(() => {
+            // Find the selected node in the simulation
+            const nodeElement = g.selectAll<SVGGElement, Node>('.node')
+                .filter((d: Node) => d.id === selectedNode.id);
+            
+            if (nodeElement.empty()) return;
+            
+            const node = nodeElement.datum() as Node;
+            if (!node.x || !node.y) return;
+            
+            // Get current zoom transform
+            if (!svgRef.current) return;
+            const zoom = d3.zoom<SVGSVGElement, unknown>();
+            const currentTransform = d3.zoomTransform(svgRef.current);
+            
+            // Calculate center position in viewport coordinates
+            const container = svgRef.current.parentElement;
+            if (!container) return;
+            
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+            
+            // Center the selected node in the viewport
+            const scale = currentTransform.k || 1;
+            const translateX = containerWidth / 2 - node.x * scale;
+            const translateY = containerHeight / 2 - node.y * scale;
+            
+            // Smooth transition to center on selected node
+            svg.transition()
+                .duration(750)
+                .ease(d3.easeCubicOut)
+                .call(
+                    zoom.transform,
+                    d3.zoomIdentity.translate(translateX, translateY).scale(scale)
+                );
+        }, 300);
+        
+        return () => clearTimeout(timeoutId);
+    }, [selectedNode, data]);
 
     // Artifacts View Component
     const ArtifactsView = () => {
         const artifacts = data?.nodes.filter(n => n.type === 'ARTIFACT') || [];
+        
+        // Enrich artifacts with metadata from KG nodes
+        const enrichedArtifacts = artifacts.map(artifact => {
+            // Find the node in data to get full metadata
+            const fullNode = data?.nodes.find(n => n.id === artifact.id);
+            return {
+                ...artifact,
+                metadata: fullNode?.metadata || artifact.metadata || {}
+            };
+        });
 
         return (
-            <div className="absolute inset-0 flex flex-col bg-background p-6 overflow-auto">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {artifacts.length > 0 ? (
-                        artifacts.map(artifact => (
-                            <div key={artifact.id} className="border border-border rounded-lg p-4 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer" onClick={() => setSelectedNode(artifact)}>
-                                <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2">
-                                        <FileText className="w-4 h-4 text-blue-500" />
-                                        <h3 className="font-semibold text-sm truncate max-w-[120px]">{artifact.name}</h3>
-                                    </div>
-                                    {artifact.properties?.versions > 0 && (
-                                        <span className="text-[10px] bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full font-medium">
-                                            v{artifact.properties.versions + 1}
-                                        </span>
-                                    )}
-                                </div>
-                                <p className="text-xs text-muted-foreground line-clamp-2">
-                                    {artifact.description || "No description available."}
-                                </p>
-                            </div>
-                        ))
-                    ) : (
-                        <div className="col-span-full flex flex-col items-center justify-center text-muted-foreground py-12">
-                            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
-                                <FileText className="w-6 h-6 opacity-20" />
-                            </div>
-                            <p>No artifacts found in this project.</p>
-                        </div>
-                    )}
-                </div>
-                <div className="absolute bottom-6 left-6 z-20 pointer-events-none">
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
-                        <FileText className="w-3.5 h-3.5 text-muted-foreground" />
-                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Artifacts View</span>
-                    </div>
-                </div>
-            </div>
+            <ArtifactsListView
+                artifacts={enrichedArtifacts}
+                threadId={threadId}
+                onNodeSelect={setSelectedNode}
+                selectedNode={selectedNode}
+            />
         );
     };
 
@@ -863,9 +917,17 @@ export function WorldMapView() {
                 </div>
             )}
 
-            {/* Canvas Area */}
-            <div ref={containerRef} className="flex-1 relative overflow-hidden" onClick={() => setSelectedNode(null)}>
-                {viewMode === 'workflow' ? (
+            {/* Canvas Area - Split layout when node is selected (but not in artifacts view) */}
+            {selectedNode && viewMode !== 'artifacts' ? (
+                <div className="flex-1 flex relative overflow-hidden">
+                    {/* Map - 50% width */}
+                    <div ref={containerRef} className="w-1/2 relative overflow-hidden border-r border-border min-w-0" onClick={(e) => {
+                        // Only close if clicking directly on the map background, not on nodes
+                        if (e.target === e.currentTarget || (e.target as Element).closest('svg')) {
+                            setSelectedNode(null);
+                        }
+                    }}>
+                        {viewMode === 'workflow' ? (
                     <div className="absolute inset-0 flex flex-col bg-background">
                         {!visualizationHtml ? (
                             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
@@ -941,104 +1003,123 @@ export function WorldMapView() {
                     </>
                 )}
 
-                {/* Selected Node Details */}
-                {selectedNode && (
-                    <div className="absolute top-4 right-4 w-80 bg-background/90 backdrop-blur-md border border-border rounded-xl p-5 z-20 shadow-2xl animate-in slide-in-from-right-4 duration-300 max-h-[80vh] overflow-y-auto">
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 block">
-                                    {typeConfig[selectedNode.type]?.label || selectedNode.type}
-                                </span>
-                                <h3 className="text-lg font-bold text-foreground leading-tight">{selectedNode.name}</h3>
-                            </div>
-                            <UIButton variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedNode(null)}>
-                                <ZoomOut className="h-3.5 w-3.5" />
+                        {/* Floating Controls */}
+                        <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
+                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                <ZoomIn className="h-4 w-4" />
+                            </UIButton>
+                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                <ZoomOut className="h-4 w-4" />
+                            </UIButton>
+                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                <Maximize className="h-4 w-4" />
                             </UIButton>
                         </div>
+                    </div>
 
-                        <div className="space-y-4">
-                            {!historicalContent ? (
-                                <>
-                                    <p className="text-xs text-muted-foreground leading-relaxed">
-                                        {selectedNode.description || "No detailed description available for this node."}
-                                    </p>
-
-                                    {selectedNode.properties && (
-                                        <div className="space-y-2">
-                                            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Technical Specs</span>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {Object.entries(selectedNode.properties).slice(0, 4).map(([k, v]: [any, any]) => (
-                                                    <div key={k} className="bg-muted rounded p-2">
-                                                        <div className="text-[9px] text-muted-foreground uppercase">{k}</div>
-                                                        <div className="text-[10px] text-foreground truncate">{String(v)}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {selectedNode.type === 'ARTIFACT' && artifactHistory && artifactHistory.length > 0 && (
-                                        <div className="space-y-3 pt-4 border-t border-border">
-                                            <div className="flex items-center gap-2">
-                                                <Activity className="w-3 h-3 text-blue-500" />
-                                                <span className="text-[10px] font-bold text-muted-foreground uppercase">Version History</span>
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                {artifactHistory.map((v: any) => (
-                                                    <div
-                                                        key={v.id}
-                                                        className="flex items-center justify-between p-2 rounded bg-muted/30 hover:bg-muted transition-colors cursor-pointer group"
-                                                        onClick={() => fetchHistoricalVersion(selectedNode.id, v.id)}
-                                                    >
-                                                        <div className="flex flex-col">
-                                                            <span className="text-[10px] font-medium text-foreground">{v.id}</span>
-                                                            <span className="text-[9px] text-muted-foreground">{v.timestamp}</span>
-                                                        </div>
-                                                        <UIButton variant="ghost" size="sm" className="h-6 px-2 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            View
-                                                        </UIButton>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-[10px] font-bold text-blue-500 uppercase">Historical Preview</span>
-                                        <UIButton variant="ghost" size="sm" className="h-6 text-[9px]" onClick={() => setHistoricalContent(null)}>
-                                            Back to Current
-                                        </UIButton>
+                    {/* Detail Panel - 50% width */}
+                    <div className="w-1/2 relative overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <NodeDetailPanel
+                            node={selectedNode}
+                            onClose={() => setSelectedNode(null)}
+                            position="right"
+                            threadId={threadId}
+                        />
+                    </div>
+                </div>
+            ) : (
+                <div ref={containerRef} className="flex-1 relative overflow-hidden" onClick={() => setSelectedNode(null)}>
+                    {viewMode === 'workflow' ? (
+                        <div className="absolute inset-0 flex flex-col bg-background">
+                            {!visualizationHtml ? (
+                                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
+                                    <Activity className="w-12 h-12 opacity-20" />
+                                    <div className="text-center">
+                                        <h3 className="text-sm font-medium text-foreground">No active orientation</h3>
+                                        <p className="text-xs text-muted-foreground mt-1 max-w-[200px]">Ask the agent to "show orientation" to see the project workflow here.</p>
                                     </div>
-                                    <div className="bg-muted/50 rounded-lg p-3 border border-border">
-                                        <div className="prose prose-invert prose-xs max-h-[40vh] overflow-y-auto whitespace-pre-wrap text-[11px] font-mono leading-relaxed">
-                                            {historicalContent}
-                                        </div>
+                                    <UIButton
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-4 border-border text-xs"
+                                        onClick={() => setViewMode('map')}
+                                    >
+                                        Switch to Map View
+                                    </UIButton>
+                                </div>
+                            ) : (
+                                <iframe
+                                    srcDoc={`
+                                        <html>
+                                            <head>
+                                                <style>
+                                                    body { margin: 0; background: transparent; color: inherit; font-family: sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+                                                </style>
+                                            </head>
+                                            <body>
+                                                ${visualizationHtml}
+                                            </body>
+                                        </html>
+                                    `}
+                                    className="w-full h-full border-none"
+                                    title="Workflow Orientation"
+                                />
+                            )}
+                            <div className="absolute bottom-6 left-6 z-20">
+                                <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
+                                    <GitGraph className="w-3.5 h-3.5 text-muted-foreground" />
+                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Workflow State Mode</span>
+                                </div>
+                            </div>
+                        </div>
+                    ) : viewMode === 'artifacts' ? (
+                        <ArtifactsView />
+                    ) : (
+                        <>
+                            {loading && !data && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-background z-30">
+                                    <div className="text-center">
+                                        <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                                        <p className="text-xs text-muted-foreground">Initializing Knowledge Graph...</p>
                                     </div>
                                 </div>
                             )}
 
-                            <UIButton variant="outline" className="w-full text-[10px] h-8 border-border bg-muted/50 hover:bg-muted">
-                                View Detailed Methodology
-                            </UIButton>
-                        </div>
-                    </div>
-                )}
+                            {error && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-background z-30 p-6 text-center">
+                                    <div>
+                                        <p className="text-destructive mb-4 font-mono text-sm leading-relaxed max-w-md mx-auto">Error: {error}</p>
+                                        <UIButton onClick={() => fetchData()} variant="outline" className="border-border">Retry Connection</UIButton>
+                                    </div>
+                                </div>
+                            )}
 
-                {/* Floating Controls */}
-                <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
-                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                        <ZoomIn className="h-4 w-4" />
-                    </UIButton>
-                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                        <ZoomOut className="h-4 w-4" />
-                    </UIButton>
-                    <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                        <Maximize className="h-4 w-4" />
-                    </UIButton>
+                            <svg ref={svgRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
+
+                            <div className="absolute bottom-6 left-6 z-20">
+                                <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
+                                    <Globe className="w-3.5 h-3.5 text-muted-foreground" />
+                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Graph Mode</span>
+                                </div>
+                            </div>
+                        </>
+                    )}
+
+                    {/* Floating Controls */}
+                    <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
+                        <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                            <ZoomIn className="h-4 w-4" />
+                        </UIButton>
+                        <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                            <ZoomOut className="h-4 w-4" />
+                        </UIButton>
+                        <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                            <Maximize className="h-4 w-4" />
+                        </UIButton>
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 }
+

@@ -278,9 +278,9 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 </header>
 
                 {/* Level 3: Content Stage - Workbench takes main area */}
-                <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                     {/* Workbench Main Area */}
-                    <div className="flex-1 flex overflow-hidden" style={{ height: isAgentPanelOpen ? `calc(100% - ${agentPanelHeight}px)` : '100%' }}>
+                    <div className="flex-1 flex overflow-hidden min-h-0" style={{ height: isAgentPanelOpen ? `calc(100% - ${agentPanelHeight}px)` : '100%', maxHeight: isAgentPanelOpen ? `calc(100% - ${agentPanelHeight}px)` : '100%' }}>
                         {isWorkbenchOpen && (
                             <aside className="flex-1 border-l bg-background flex flex-col shadow-xl z-30">
                             {/* Workbench Tabs - Now inside the Right Pane */}
@@ -383,11 +383,11 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     )}
 
                     {/* Agent Chat Panel - Bottom */}
-                    <div className="relative" style={{ height: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px' }}>
+                    <div className="relative shrink-0 overflow-hidden" style={{ height: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px', maxHeight: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px' }}>
                         {isAgentPanelOpen ? (
                             <div 
                                 className={cn(
-                                    "bg-background transition-all duration-300 flex flex-col h-full",
+                                    "bg-background transition-all duration-300 flex flex-col h-full overflow-hidden",
                                     !isResizing && "transition-all"
                                 )}
                             >
