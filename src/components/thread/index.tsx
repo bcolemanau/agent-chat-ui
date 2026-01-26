@@ -147,7 +147,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   // Use URL query params for pending artifacts (shared with workbench)
   const [pendingArtifactIds, setPendingArtifactIds] = useQueryState<string[]>("pendingArtifacts", {
     parse: (value) => value ? value.split(",").filter(Boolean) : [],
-    serialize: (value) => value && value.length > 0 ? value.join(",") : null,
+    serialize: (value) => value && value.length > 0 ? value.join(",") : "",
     defaultValue: []
   });
 

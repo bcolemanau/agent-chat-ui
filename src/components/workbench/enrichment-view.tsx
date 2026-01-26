@@ -42,7 +42,7 @@ export function EnrichmentView() {
   const stream = useStreamContext();
   const [pendingArtifactIds, setPendingArtifactIds] = useQueryState<string[]>("pendingArtifacts", {
     parse: (value) => value ? value.split(",").filter(Boolean) : [],
-    serialize: (value) => value && value.length > 0 ? value.join(",") : null,
+    serialize: (value) => value && value.length > 0 ? value.join(",") : "",
     defaultValue: []
   });
   
