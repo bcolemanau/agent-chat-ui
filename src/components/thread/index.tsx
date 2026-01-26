@@ -61,22 +61,26 @@ function StickyToBottomContent(props: {
   footer?: ReactNode;
   className?: string;
   contentClassName?: string;
+  style?: React.CSSProperties;
 }) {
   const context = useStickToBottomContext();
   return (
     <div
       ref={context.scrollRef}
-      style={{ width: "100%", height: "100%" }}
+      style={{ width: "100%", height: "100%", maxHeight: "100%", overflow: "hidden", display: "flex", flexDirection: "column", ...props.style }}
       className={props.className}
     >
       <div
         ref={context.contentRef}
         className={props.contentClassName}
+        style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0 }}
       >
         {props.content}
       </div>
 
-      {props.footer}
+      <div style={{ flexShrink: 0 }}>
+        {props.footer}
+      </div>
     </div>
   );
 }
@@ -366,9 +370,9 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   return (
     <div className={cn(
       "flex w-full overflow-hidden",
-      embedded ? "h-full" : "h-screen",
+      embedded ? "h-full max-h-full" : "h-screen",
       className
-    )}>
+    )} style={embedded ? { height: '100%', maxHeight: '100%' } : undefined}>
       <div className="relative hidden lg:flex">
         <motion.div
           className="absolute z-20 h-full overflow-hidden border-r bg-background"
@@ -530,7 +534,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
             </div>
           )}
 
-          <StickToBottom className="relative flex-1 overflow-hidden min-h-0">
+          <StickToBottom className="relative flex-1 overflow-hidden min-h-0" style={{ maxHeight: '100%', height: '100%' }}>
             <StickyToBottomContent
               className={cn(
                 "absolute inset-0 overflow-y-auto px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
@@ -538,6 +542,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
               contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
+              style={{ maxHeight: '100%', overflow: 'hidden' }}
               content={
                 <>
                   {safeMessages
@@ -584,7 +589,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                 </>
               }
               footer={
-                <div className="sticky bottom-0 flex flex-col items-center gap-8 bg-background z-10 shrink-0">
+                <div className="flex flex-col items-center gap-8 bg-background z-10 shrink-0 w-full">
                   {!chatStarted && (
                     <div className="flex items-center gap-3">
                       <LangGraphLogoSVG className="h-8 flex-shrink-0 text-primary" />
