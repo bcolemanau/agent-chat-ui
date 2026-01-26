@@ -3,8 +3,8 @@
         "id": "v1.5.0",
         "version": "1.5.0",
         "date": "2026-01-26",
-        "title": "Harmonized Artifact Ingestion & Enrichment Workflow",
-        "description": "Unify save_external_context and upload_document flows into a single, consistent artifact ingestion system. Users can now upload folders (ZIP or multiple files), automatically extract enrichment metadata, approve artifact type mappings, and seamlessly integrate documents into the Knowledge Graph. This release completes Issue #12 with a streamlined workflow from upload to KG integration.",
+        "title": "Customer Onboarding Complete - Unified Artifact Ingestion",
+        "description": "As a Customer Administrator working with a Context Enrichment Agent, I want a unified, streamlined system to ingest and enrich organizational artifacts (documents, standards, SOPs, methodologies) through a consistent workflow, so that my organization's domain knowledge and methodologies are efficiently captured, accurately categorized, and seamlessly integrated into the knowledge graph to inform the Concept → Design → Operations loop. This release completes Issue #12 and marks the completion of the Customer Onboarding experience, ready for the Concept, Design, and Operate cycle.",
         "features": [
             {
                 "name": "Folder Upload Support",
@@ -38,6 +38,30 @@
                 "name": "Bug Fixes & Stability",
                 "description": "Fixed D3 force simulation errors for missing nodes in map view. Improved error handling and logging throughout enrichment flow. Better project_id lookup using thread_id from query parameters. Enhanced endpoint routing for enrichment operations."
             }
+        ],
+        "businessValue": [
+            {
+                "name": "Accelerated Onboarding",
+                "description": "Reduce time-to-value by enabling bulk ingestion of organizational knowledge assets through folder uploads and batch processing."
+            },
+            {
+                "name": "Improved Accuracy",
+                "description": "Human-in-the-loop approval ensures correct categorization and prevents knowledge graph pollution through structured artifact type selection."
+            },
+            {
+                "name": "Iterative Refinement",
+                "description": "Support evolving understanding through multiple enrichment cycles as context deepens, allowing re-enrichment and refinement of metadata."
+            },
+            {
+                "name": "Audit Trail",
+                "description": "Version history provides transparency and enables rollback for compliance and quality assurance. GitHub commit history tracks all KG changes with meaningful commit messages."
+            },
+            {
+                "name": "Unified Experience",
+                "description": "Single workflow for both text-based and file-based artifacts reduces cognitive load and training time. Consistent path structure and metadata format across all ingestion methods."
+            }
+        ]
+    },
         ]
     },
     {
