@@ -145,7 +145,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         // Force a layout recalculation
         if (agentPanelRef.current) {
             // Trigger a reflow to ensure height constraints are applied
-            agentPanelRef.current.offsetHeight;
+            void agentPanelRef.current.offsetHeight;
         }
     }, []);
 
@@ -153,7 +153,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     useLayoutEffect(() => {
         if (isAgentPanelOpen && agentPanelRef.current) {
             // Force layout recalculation
-            agentPanelRef.current.offsetHeight;
+            void agentPanelRef.current.offsetHeight;
         }
     }, [isAgentPanelOpen, agentPanelHeight]);
 
