@@ -7,8 +7,8 @@ import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
-import { NodeDetailPanel } from './node-detail-panel';
 import { ArtifactsListView } from './artifacts-list-view';
+import { useWorkbenchContext } from './workbench-context';
 
 interface Node extends d3.SimulationNodeDatum {
     id: string;
@@ -43,6 +43,17 @@ const typeConfig: Record<string, { color: string; label: string }> = {
     ARTIFACT: { color: '#0ea5e9', label: 'Artifact' },
     MECH: { color: '#a855f7', label: 'Mechanism' },
     CRIT: { color: '#f43f5e', label: 'Risk' },
+    // Template integration node types
+    OUT: { color: '#10b981', label: 'Outcome' },
+    SCN: { color: '#3b82f6', label: 'Scenario' },
+    FEAT: { color: '#8b5cf6', label: 'Feature' },
+    UXO: { color: '#ec4899', label: 'UX Outcome' },
+    COMP: { color: '#f59e0b', label: 'Component' },
+    IF: { color: '#06b6d4', label: 'Interface' },
+    DESIGN: { color: '#6366f1', label: 'Design' },
+    DATA: { color: '#14b8a6', label: 'Data Model' },
+    UI: { color: '#f97316', label: 'UI Component' },
+    VIEW: { color: '#64748b', label: 'Architecture View' },
 };
 
 export function WorldMapView() {
@@ -55,7 +66,7 @@ export function WorldMapView() {
     const [data, setData] = useState<GraphData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+    const { selectedNode, setSelectedNode } = useWorkbenchContext();
     const [threadId] = useQueryState("threadId");
 
     const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
@@ -917,118 +928,13 @@ export function WorldMapView() {
                 </div>
             )}
 
-            {/* Canvas Area - Split layout when node is selected (but not in artifacts view) */}
-            {selectedNode && viewMode !== 'artifacts' ? (
-                <div className="flex-1 flex relative overflow-hidden">
-                    {/* Map - 50% width */}
-                    <div ref={containerRef} className="w-1/2 relative overflow-hidden border-r border-border min-w-0" onClick={(e) => {
-                        // Only close if clicking directly on the map background, not on nodes
-                        if (e.target === e.currentTarget || (e.target as Element).closest('svg')) {
-                            setSelectedNode(null);
-                        }
-                    }}>
-                        {viewMode === 'workflow' ? (
-                    <div className="absolute inset-0 flex flex-col bg-background">
-                        {!visualizationHtml ? (
-                            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
-                                <Activity className="w-12 h-12 opacity-20" />
-                                <div className="text-center">
-                                    <h3 className="text-sm font-medium text-foreground">No active orientation</h3>
-                                    <p className="text-xs text-muted-foreground mt-1 max-w-[200px]">Ask the agent to "show orientation" to see the project workflow here.</p>
-                                </div>
-                                <UIButton
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-4 border-border text-xs"
-                                    onClick={() => setViewMode('map')}
-                                >
-                                    Switch to Map View
-                                </UIButton>
-                            </div>
-                        ) : (
-                            <iframe
-                                srcDoc={`
-                                    <html>
-                                        <head>
-                                            <style>
-                                                body { margin: 0; background: transparent; color: inherit; font-family: sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-                                            </style>
-                                        </head>
-                                        <body>
-                                            ${visualizationHtml}
-                                        </body>
-                                    </html>
-                                `}
-                                className="w-full h-full border-none"
-                                title="Workflow Orientation"
-                            />
-                        )}
-                        <div className="absolute bottom-6 left-6 z-20">
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
-                                <GitGraph className="w-3.5 h-3.5 text-muted-foreground" />
-                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Workflow State Mode</span>
-                            </div>
-                        </div>
-                    </div>
-                ) : viewMode === 'artifacts' ? (
-                    <ArtifactsView />
-                ) : (
-                    <>
-                        {loading && !data && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-background z-30">
-                                <div className="text-center">
-                                    <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                                    <p className="text-xs text-muted-foreground">Initializing Knowledge Graph...</p>
-                                </div>
-                            </div>
-                        )}
-
-                        {error && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-background z-30 p-6 text-center">
-                                <div>
-                                    <p className="text-destructive mb-4 font-mono text-sm leading-relaxed max-w-md mx-auto">Error: {error}</p>
-                                    <UIButton onClick={() => fetchData()} variant="outline" className="border-border">Retry Connection</UIButton>
-                                </div>
-                            </div>
-                        )}
-
-                        <svg ref={svgRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
-
-                        <div className="absolute bottom-6 left-6 z-20">
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
-                                <Globe className="w-3.5 h-3.5 text-muted-foreground" />
-                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Graph Mode</span>
-                            </div>
-                        </div>
-                    </>
-                )}
-
-                        {/* Floating Controls */}
-                        <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
-                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                                <ZoomIn className="h-4 w-4" />
-                            </UIButton>
-                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                                <ZoomOut className="h-4 w-4" />
-                            </UIButton>
-                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                                <Maximize className="h-4 w-4" />
-                            </UIButton>
-                        </div>
-                    </div>
-
-                    {/* Detail Panel - 50% width */}
-                    <div className="w-1/2 relative overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-                        <NodeDetailPanel
-                            node={selectedNode}
-                            onClose={() => setSelectedNode(null)}
-                            position="right"
-                            threadId={threadId}
-                        />
-                    </div>
-                </div>
-            ) : (
-                <div ref={containerRef} className="flex-1 relative overflow-hidden" onClick={() => setSelectedNode(null)}>
+            {/* Canvas Area */}
+            <div ref={containerRef} className="flex-1 relative overflow-hidden" onClick={() => {
+                // Only close if clicking directly on the map background, not on nodes
+                if (selectedNode) {
+                    setSelectedNode(null);
+                }
+            }}>
                     {viewMode === 'workflow' ? (
                         <div className="absolute inset-0 flex flex-col bg-background">
                             {!visualizationHtml ? (
@@ -1118,7 +1024,6 @@ export function WorldMapView() {
                         </UIButton>
                     </div>
                 </div>
-            )}
         </div>
     );
 }

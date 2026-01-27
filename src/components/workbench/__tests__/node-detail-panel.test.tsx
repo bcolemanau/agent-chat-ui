@@ -210,4 +210,19 @@ describe('NodeDetailPanel', () => {
       expect(screen.getByText('1')).toBeInTheDocument();
     });
   });
+
+  it('should accept bottom position prop', () => {
+    render(<NodeDetailPanel node={mockNode} onClose={jest.fn()} position="bottom" />);
+    expect(screen.getByText('Test Node')).toBeInTheDocument();
+  });
+
+  it('should accept left position prop', () => {
+    render(<NodeDetailPanel node={mockNode} onClose={jest.fn()} position="left" />);
+    expect(screen.getByText('Test Node')).toBeInTheDocument();
+  });
+
+  it('should accept right position prop (default)', () => {
+    render(<NodeDetailPanel node={mockNode} onClose={jest.fn()} position="right" />);
+    expect(screen.getByText('Test Node')).toBeInTheDocument();
+  });
 });

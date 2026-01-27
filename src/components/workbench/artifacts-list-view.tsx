@@ -5,7 +5,7 @@ import { FileText, Upload, CheckCircle2, Circle, Search, Filter, ArrowUpDown, Ar
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { NodeDetailPanel } from "./node-detail-panel";
+import { useWorkbenchContext } from "./workbench-context";
 
 interface Node {
   id: string;
@@ -93,7 +93,17 @@ function getArtifactTypes(node: Node): string[] {
   return [];
 }
 
-export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedNode }: ArtifactsListViewProps) {
+export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedNode: propSelectedNode }: ArtifactsListViewProps) {
+  const { selectedNode: contextSelectedNode, setSelectedNode } = useWorkbenchContext();
+  // Use context selectedNode if available, otherwise fall back to prop
+  const selectedNode = contextSelectedNode || propSelectedNode;
+  const handleNodeSelect = (node: Node | null) => {
+    setSelectedNode(node);
+    if (onNodeSelect) {
+      onNodeSelect(node);
+    }
+  };
+
   console.log("[ArtifactsListView] RENDER", { 
     artifactsCount: artifacts.length, 
     hasOnNodeSelect: !!onNodeSelect, 
@@ -104,56 +114,6 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
   const [statusFilter, setStatusFilter] = useState<ArtifactStatus | "all">("all");
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  
-  // Layout state
-  const [detailPanelOpen, setDetailPanelOpen] = useState(false);
-  const [listWidth, setListWidth] = useState(50); // Percentage
-  const [isResizing, setIsResizing] = useState(false);
-  const resizeRef = useRef<HTMLDivElement>(null);
-  
-  // Smart default: Auto-open detail panel for rich content
-  useEffect(() => {
-    if (selectedNode) {
-      // Check if content is likely rich (has diagrams, long text, etc.)
-      // For now, auto-open if node is selected (user can close if they want)
-      setDetailPanelOpen(true);
-    }
-  }, [selectedNode]);
-  
-  // Resize handler
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing || !resizeRef.current) return;
-      
-      const container = resizeRef.current.parentElement;
-      if (!container) return;
-      
-      const containerWidth = container.clientWidth;
-      const newListWidth = (e.clientX / containerWidth) * 100;
-      
-      // Constrain between 20% and 80%
-      const constrainedWidth = Math.max(20, Math.min(80, newListWidth));
-      setListWidth(constrainedWidth);
-    };
-    
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-    
-    if (isResizing) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    }
-    
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [isResizing]);
 
   // Enrich artifacts with status and metadata
   const enrichedArtifacts = useMemo<ArtifactWithStatus[]>(() => {
@@ -276,11 +236,10 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
 
   return (
     <div className="h-full w-full flex flex-col bg-background overflow-hidden relative">
-      <div ref={resizeRef} className="flex-1 flex relative overflow-hidden">
-        {/* List - Resizable width */}
+      <div className="flex-1 flex relative overflow-hidden">
+        {/* List */}
         <div 
-          className="flex flex-col overflow-hidden border-r border-border"
-          style={{ width: detailPanelOpen && selectedNode ? `${listWidth}%` : '100%' }}
+          className="flex flex-col overflow-hidden w-full"
         >
             {/* Header with filters */}
             <div className="border-b border-border p-4 space-y-3 bg-muted/30">
@@ -360,8 +319,8 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          console.log("[ArtifactsListView] Row clicked", { artifactId: artifact.id, artifactName: artifact.name, hasOnNodeSelect: !!onNodeSelect });
-                          onNodeSelect?.(artifact);
+                          console.log("[ArtifactsListView] Row clicked", { artifactId: artifact.id, artifactName: artifact.name });
+                          handleNodeSelect(artifact);
                         }}
                         className={cn(
                           "border-b border-border hover:bg-muted/50 transition-colors cursor-pointer",
@@ -372,7 +331,7 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
                           className="p-3"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onNodeSelect?.(artifact);
+                            handleNodeSelect(artifact);
                           }}
                         >
                           {getStatusBadge(artifact)}
@@ -381,7 +340,7 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
                           className="p-3"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onNodeSelect?.(artifact);
+                            handleNodeSelect(artifact);
                           }}
                         >
                           <div className="flex items-center gap-2">
@@ -398,7 +357,7 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
                           className="p-3"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onNodeSelect?.(artifact);
+                            handleNodeSelect(artifact);
                           }}
                         >
                           <div className="text-xs">
@@ -413,7 +372,7 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
                           className="p-3"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onNodeSelect?.(artifact);
+                            handleNodeSelect(artifact);
                           }}
                         >
                           <div className="text-xs text-muted-foreground">
@@ -424,7 +383,7 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
                           className="p-3"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onNodeSelect?.(artifact);
+                            handleNodeSelect(artifact);
                           }}
                         >
                           {artifact.versionCount && artifact.versionCount > 0 ? (
@@ -457,65 +416,7 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
               </div>
             </div>
           </div>
-
-        {/* Resizable Divider */}
-        {detailPanelOpen && selectedNode && (
-          <div
-            className={cn(
-              "w-1 border-l border-r bg-border cursor-col-resize hover:bg-primary/20 transition-colors relative group flex-shrink-0",
-              isResizing && "bg-primary/30"
-            )}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setIsResizing(true);
-            }}
-          >
-            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1 flex items-center justify-center">
-              <div className="w-0.5 h-16 bg-muted-foreground/30 group-hover:bg-primary/50 rounded-full transition-colors" />
-            </div>
-          </div>
-        )}
-
-        {/* Detail Panel - Resizable width */}
-        {detailPanelOpen && selectedNode && (
-          <div 
-            className="flex-shrink-0 relative overflow-hidden flex flex-col"
-            style={{ width: `${100 - listWidth}%` }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <NodeDetailPanel
-              node={selectedNode}
-              onClose={() => {
-                onNodeSelect?.(null);
-                setDetailPanelOpen(false);
-              }}
-              position="right"
-              threadId={threadId}
-            />
-          </div>
-        )}
       </div>
-
-      {/* Toggle Detail Panel Button - Only show when node is selected */}
-      {selectedNode && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "absolute top-4 right-4 z-30 h-8 w-8 rounded-md border bg-background/90 backdrop-blur-sm shadow-md hover:bg-muted transition-all",
-            detailPanelOpen && "right-auto"
-          )}
-          style={detailPanelOpen ? { right: `${100 - listWidth}%`, transform: 'translateX(-100%)' } : {}}
-          onClick={() => setDetailPanelOpen(!detailPanelOpen)}
-          title={detailPanelOpen ? "Hide detail panel" : "Show detail panel"}
-        >
-          {detailPanelOpen ? (
-            <PanelRightClose className="h-4 w-4" />
-          ) : (
-            <PanelRightOpen className="h-4 w-4" />
-          )}
-        </Button>
-      )}
 
 
       {/* Mode indicator */}

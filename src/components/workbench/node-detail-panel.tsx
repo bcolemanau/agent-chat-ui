@@ -22,7 +22,7 @@ interface Node {
 interface NodeDetailPanelProps {
   node: Node | null;
   onClose: () => void;
-  position?: "left" | "right";
+  position?: "left" | "right" | "bottom";
   threadId?: string | null;
 }
 

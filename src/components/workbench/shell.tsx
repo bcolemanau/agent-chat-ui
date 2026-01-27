@@ -8,26 +8,28 @@ import { Breadcrumbs } from "./breadcrumbs";
 import { OrgSwitcher } from "./org-switcher";
 import { useStreamContext } from "@/providers/Stream";
 import { Thread } from "@/components/thread";
-import { MessageSquare, Map as MapIcon, Workflow, Activity, X, PanelRight, Sparkles, Circle, Download } from "lucide-react";
+import { MessageSquare, Map as MapIcon, Workflow, Activity, X, Sparkles, Circle, Download, Minimize2, Maximize2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useRecording } from "@/providers/RecordingProvider";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQueryState } from "nuqs";
 import { cn } from "@/lib/utils";
 import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "@/components/thread/artifact";
-import { PanelLeft, FileText, Layout, GitGraph, CheckSquare } from "lucide-react";
+import { PanelLeft, FileText, Layout, CheckSquare } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductPanel } from "@/components/product-panel/ProductPanel";
 import { EnrichmentView } from "./enrichment-view";
+import { WorkbenchProvider, useWorkbenchContext, Node } from "./workbench-context";
+import { NodeDetailPanel } from "./node-detail-panel";
 
-export function WorkbenchShell({ children }: { children: React.ReactNode }) {
+function WorkbenchShellContent({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
     const { isRecording, startRecording, stopRecording, downloadRecording } = useRecording();
+    const { selectedNode, setSelectedNode } = useWorkbenchContext();
 
     // Robust Mode Derivation
     const values = (stream as any)?.values;
     const rawAgent = values?.active_agent;
-    // Fallback: If active_agent is missing, infer from visualization content or default to supervisor
     const activeAgent = rawAgent ||
         (values?.visualization_html?.includes("active_node='hydrator'") || values?.visualization_html?.includes("Hydrator")
             ? "hydrator"
@@ -36,14 +38,31 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
     const [isWorkbenchOpen, setIsWorkbenchOpen] = useState(true);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-    const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(true);
-    const [agentPanelHeight, setAgentPanelHeight] = useState(300); // Default height in pixels
-    const [isResizing, setIsResizing] = useState(false);
     const [isArtifactOpen, closeArtifact] = useArtifactOpen();
     const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
-    const agentPanelRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
+    const [threadId] = useQueryState("threadId");
+
+    // Chat Panel States
+    const [chatPanelWidth, setChatPanelWidth] = useState(400);
+    const [isChatMinimized, setIsChatMinimized] = useState(false);
+    const [isChatMaximized, setIsChatMaximized] = useState(false);
+    const [chatPanelWidthBeforeMaximize, setChatPanelWidthBeforeMaximize] = useState(400);
+    const [isChatResizing, setIsChatResizing] = useState(false);
+    const chatPanelRef = useRef<HTMLDivElement>(null);
+
+    // Detail View States
+    const [detailViewHeight, setDetailViewHeight] = useState(300);
+    const [isDetailViewMinimized, setIsDetailViewMinimized] = useState(false);
+    const [isDetailViewMaximized, setIsDetailViewMaximized] = useState(false);
+    const [detailViewHeightBeforeMaximize, setDetailViewHeightBeforeMaximize] = useState(300);
+    const [isDetailViewResizing, setIsDetailViewResizing] = useState(false);
+    const detailViewRef = useRef<HTMLDivElement>(null);
+
+    // Workbench States
+    const [isWorkbenchMinimized, setIsWorkbenchMinimized] = useState(false);
+    const [isWorkbenchMaximized, setIsWorkbenchMaximized] = useState(false);
 
     // Agent-Driven View Synchronization (Backend -> UI)
     const workbenchView = (stream as any)?.values?.workbench_view;
@@ -51,18 +70,13 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!workbenchView) return;
-
-        // Only sync if the backend specifically changed its requested view
-        // effectively treating it as an event rather than a state enforcement
         if (workbenchView !== lastSyncedView.current) {
             console.log(`[WorkbenchShell] Backend synced view to: ${workbenchView}`);
             lastSyncedView.current = workbenchView;
 
             if (["map", "workflow", "artifacts", "enrichment"].includes(workbenchView)) {
-                // Internal Sub-view Toggle
                 setViewMode(workbenchView);
                 closeArtifact();
-                // Ensure we are on the map page if we switch to these sub-views
                 if (!window.location.pathname.includes("/workbench/map")) {
                     router.push("/workbench/map");
                 }
@@ -79,8 +93,6 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     // User-Driven View Synchronization (UI -> Backend)
     useEffect(() => {
         if (!viewMode) return;
-
-        // Detect manual user-initiated view changes (including URL updates)
         if (viewMode !== lastSyncedView.current) {
             console.log(`[WorkbenchShell] User-initiated view change to: ${viewMode}`);
             lastSyncedView.current = viewMode;
@@ -90,41 +102,86 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         }
     }, [viewMode, stream]);
 
-    // Handle panel resizing
-    const handleMouseDown = (e: React.MouseEvent) => {
+    // Chat Panel Resizing (Horizontal)
+    const handleChatResizeMouseDown = (e: React.MouseEvent) => {
         e.preventDefault();
-        setIsResizing(true);
+        setIsChatResizing(true);
     };
 
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
-            if (!isResizing) return;
+            if (!isChatResizing) return;
             
             const container = document.querySelector('[data-workbench-container]') as HTMLElement;
             if (!container) return;
             
             const containerRect = container.getBoundingClientRect();
-            const containerHeight = containerRect.height;
-            const headerHeight = 56; // h-14 = 56px
-            const availableHeight = containerHeight - headerHeight;
+            const containerWidth = containerRect.width;
             
-            // Calculate new agent panel height from bottom
+            // Calculate new chat panel width from right edge
+            const mouseX = e.clientX;
+            const relativeX = containerRect.right - mouseX;
+            
+            // Constrain between min and max widths
+            const minWidth = 300;
+            const maxWidth = containerWidth * 0.5; // Max 50% of container
+            const newWidth = Math.max(minWidth, Math.min(maxWidth, relativeX));
+            
+            setChatPanelWidth(newWidth);
+        };
+
+        const handleMouseUp = () => {
+            setIsChatResizing(false);
+        };
+
+        if (isChatResizing) {
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        }
+
+        return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        };
+    }, [isChatResizing]);
+
+    // Detail View Resizing (Vertical)
+    const handleDetailViewResizeMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault();
+        setIsDetailViewResizing(true);
+    };
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!isDetailViewResizing) return;
+            
+            const container = document.querySelector('[data-workbench-center]') as HTMLElement;
+            if (!container) return;
+            
+            const containerRect = container.getBoundingClientRect();
+            const containerHeight = containerRect.height;
+            
+            // Calculate new detail view height from bottom
             const mouseY = e.clientY;
             const relativeY = containerRect.bottom - mouseY;
             
             // Constrain between min and max heights
-            const minHeight = 150; // Minimum 150px for agent panel
-            const maxHeight = availableHeight - 200; // Leave at least 200px for workbench
+            const minHeight = 150;
+            const maxHeight = containerHeight * 0.7; // Max 70% of center area
             const newHeight = Math.max(minHeight, Math.min(maxHeight, relativeY));
             
-            setAgentPanelHeight(newHeight);
+            setDetailViewHeight(newHeight);
         };
 
         const handleMouseUp = () => {
-            setIsResizing(false);
+            setIsDetailViewResizing(false);
         };
 
-        if (isResizing) {
+        if (isDetailViewResizing) {
             document.addEventListener('mousemove', handleMouseMove);
             document.addEventListener('mouseup', handleMouseUp);
             document.body.style.cursor = 'row-resize';
@@ -137,35 +194,93 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
         };
-    }, [isResizing]);
+    }, [isDetailViewResizing]);
 
-    // Ensure layout is calculated synchronously before paint
+    // Minimize/Maximize Handlers
+    const handleChatMinimize = () => {
+        if (isChatMaximized) {
+            setChatPanelWidth(chatPanelWidthBeforeMaximize);
+            setIsChatMaximized(false);
+        }
+        setIsChatMinimized(true);
+    };
+
+    const handleChatMaximize = () => {
+        if (!isChatMaximized) {
+            setChatPanelWidthBeforeMaximize(chatPanelWidth);
+        }
+        setIsChatMinimized(false);
+        setIsChatMaximized(true);
+        const container = document.querySelector('[data-workbench-container]') as HTMLElement;
+        if (container) {
+            setChatPanelWidth(Math.min(container.getBoundingClientRect().width * 0.5, 800));
+        }
+    };
+
+    const handleChatRestore = () => {
+        setIsChatMinimized(false);
+        setIsChatMaximized(false);
+        setChatPanelWidth(chatPanelWidthBeforeMaximize);
+    };
+
+    const handleDetailViewMinimize = () => {
+        if (isDetailViewMaximized) {
+            setDetailViewHeight(detailViewHeightBeforeMaximize);
+            setIsDetailViewMaximized(false);
+        }
+        setIsDetailViewMinimized(true);
+    };
+
+    const handleDetailViewMaximize = () => {
+        if (!isDetailViewMaximized) {
+            setDetailViewHeightBeforeMaximize(detailViewHeight);
+        }
+        setIsDetailViewMinimized(false);
+        setIsDetailViewMaximized(true);
+        const container = document.querySelector('[data-workbench-center]') as HTMLElement;
+        if (container) {
+            setDetailViewHeight(container.getBoundingClientRect().height * 0.7);
+        }
+    };
+
+    const handleDetailViewRestore = () => {
+        setIsDetailViewMinimized(false);
+        setIsDetailViewMaximized(false);
+        setDetailViewHeight(detailViewHeightBeforeMaximize);
+    };
+
+    const handleWorkbenchMinimize = () => {
+        if (isWorkbenchMaximized) {
+            setIsWorkbenchMaximized(false);
+        }
+        setIsWorkbenchMinimized(true);
+    };
+
+    const handleWorkbenchMaximize = () => {
+        setIsWorkbenchMinimized(false);
+        setIsWorkbenchMaximized(true);
+    };
+
+    const handleWorkbenchRestore = () => {
+        setIsWorkbenchMinimized(false);
+        setIsWorkbenchMaximized(false);
+    };
+
     useLayoutEffect(() => {
         setIsMounted(true);
-        // Force a layout recalculation
-        if (agentPanelRef.current) {
-            // Trigger a reflow to ensure height constraints are applied
-            void agentPanelRef.current.offsetHeight;
-        }
     }, []);
 
-    // Recalculate when agent panel opens/closes
-    useLayoutEffect(() => {
-        if (isAgentPanelOpen && agentPanelRef.current) {
-            // Force layout recalculation
-            void agentPanelRef.current.offsetHeight;
-        }
-    }, [isAgentPanelOpen, agentPanelHeight]);
+    const isChatOpen = !isChatMinimized;
+    const isDetailViewOpen = selectedNode !== null && !isDetailViewMinimized;
 
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
-            {/* Sidebar - Collapsible */}
+            {/* Sidebar - Left */}
             <div className={cn(
                 "relative transition-all duration-300 border-r bg-muted/20 flex flex-col h-full overflow-hidden",
                 isSidebarCollapsed ? "w-0 border-0" : "w-64"
             )}>
                 {!isSidebarCollapsed && <Sidebar />}
-                {/* Collapse Toggle Button */}
                 <Button
                     variant="ghost"
                     size="icon"
@@ -179,9 +294,9 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 </Button>
             </div>
 
-            {/* Main Content Area */}
+            {/* Center Area */}
             <div className="flex-1 flex flex-col h-full min-w-0" data-workbench-container>
-                {/* Level 1: Global Context Header */}
+                {/* Header */}
                 <header className="h-14 border-b flex items-center justify-between px-6 bg-background z-20 shrink-0">
                     <div className="flex items-center gap-4">
                         <Suspense fallback={<div className="h-4 w-32 bg-muted animate-pulse rounded" />}>
@@ -206,7 +321,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
                         <div className="h-6 w-[1px] bg-border mx-1" />
 
-                        {/* What's New Trigger */}
+                        {/* What's New */}
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
@@ -221,10 +336,9 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                             <TooltipContent>What's New</TooltipContent>
                         </Tooltip>
 
-                        {/* Theme Toggle at Global Level */}
                         <ThemeToggle />
 
-                        {/* Session Recording (Debug) */}
+                        {/* Session Recording */}
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
@@ -251,19 +365,23 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                             </TooltipContent>
                         </Tooltip>
 
-                        {/* Workbench Panel Trigger */}
+                        {/* Workbench Toggle */}
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    onClick={() => setIsWorkbenchOpen(!isWorkbenchOpen)}
+                                    onClick={() => {
+                                        if (isWorkbenchMinimized) handleWorkbenchRestore();
+                                        else if (isWorkbenchMaximized) handleWorkbenchRestore();
+                                        else handleWorkbenchMaximize();
+                                    }}
                                     className={cn(
                                         "h-9 w-9 text-muted-foreground hover:text-foreground relative transition-all",
                                         isWorkbenchOpen && "bg-muted text-foreground"
                                     )}
                                 >
-                                    <Layout className="w-4 h-4" />
+                                    {isWorkbenchMinimized ? <ChevronUp className="w-4 h-4" /> : isWorkbenchMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                                     {stream.isLoading && (
                                         <span className="absolute top-2 right-2 flex h-2 w-2">
                                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
@@ -272,39 +390,74 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     )}
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Toggle Workbench</TooltipContent>
+                            <TooltipContent>
+                                {isWorkbenchMinimized ? "Restore Workbench" : isWorkbenchMaximized ? "Restore Workbench" : "Maximize Workbench"}
+                            </TooltipContent>
                         </Tooltip>
 
-                        {/* Agent Panel Toggle */}
+                        {/* Detail View Toggle (only show when node selected) */}
+                        {selectedNode && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => {
+                                            if (isDetailViewMinimized) handleDetailViewRestore();
+                                            else if (isDetailViewMaximized) handleDetailViewRestore();
+                                            else handleDetailViewMaximize();
+                                        }}
+                                        className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                                    >
+                                        {isDetailViewMinimized ? <ChevronDown className="w-4 h-4" /> : isDetailViewMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Toggle Detail View</TooltipContent>
+                            </Tooltip>
+                        )}
+
+                        {/* Chat Panel Toggle */}
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    onClick={() => setIsAgentPanelOpen(!isAgentPanelOpen)}
+                                    onClick={() => {
+                                        if (isChatMinimized) handleChatRestore();
+                                        else if (isChatMaximized) handleChatRestore();
+                                        else handleChatMaximize();
+                                    }}
                                     className={cn(
                                         "h-9 w-9 text-muted-foreground hover:text-foreground relative transition-all",
-                                        isAgentPanelOpen && "bg-muted text-foreground"
+                                        isChatOpen && "bg-muted text-foreground"
                                     )}
                                 >
-                                    <MessageSquare className="w-4 h-4" />
+                                    {isChatMinimized ? <ChevronLeft className="w-4 h-4" /> : isChatMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Toggle Agent Chat</TooltipContent>
+                            <TooltipContent>
+                                {isChatMinimized ? "Restore Chat" : isChatMaximized ? "Restore Chat" : "Maximize Chat"}
+                            </TooltipContent>
                         </Tooltip>
 
                         <UserMenu />
                     </div>
                 </header>
 
-                {/* Level 3: Content Stage - Workbench takes main area */}
-                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-                    {/* Workbench Main Area */}
-                    <div className="flex-1 flex overflow-hidden min-h-0" style={{ height: isAgentPanelOpen ? `calc(100% - ${agentPanelHeight}px)` : '100%', maxHeight: isAgentPanelOpen ? `calc(100% - ${agentPanelHeight}px)` : '100%' }}>
-                        {isWorkbenchOpen && (
-                            <aside className="flex-1 border-l bg-background flex flex-col shadow-xl z-30">
-                            {/* Workbench Tabs - Now inside the Right Pane */}
-                            <div className="h-12 border-b flex items-center px-6 bg-muted/10 shrink-0">
+                {/* Center Content: Workbench + Detail View */}
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0" data-workbench-center>
+                    {/* Workbench */}
+                    {isWorkbenchOpen && (
+                        <div
+                            className={cn(
+                                "flex flex-col overflow-hidden bg-background border-l",
+                                isWorkbenchMinimized && "h-[40px]",
+                                isWorkbenchMaximized && "flex-1",
+                                !isWorkbenchMinimized && !isWorkbenchMaximized && "flex-1"
+                            )}
+                        >
+                            {/* Workbench Tabs */}
+                            <div className="h-12 border-b flex items-center justify-between px-6 bg-muted/10 shrink-0">
                                 <div className="flex items-center space-x-1">
                                     <Button
                                         variant="ghost"
@@ -355,45 +508,70 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         Enrichment
                                     </Button>
                                 </div>
+                                {/* Workbench Minimize/Maximize Controls */}
+                                <div className="flex items-center gap-2">
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-6 w-6"
+                                                onClick={() => {
+                                                    if (isWorkbenchMinimized) handleWorkbenchRestore();
+                                                    else if (isWorkbenchMaximized) handleWorkbenchRestore();
+                                                    else handleWorkbenchMaximize();
+                                                }}
+                                            >
+                                                {isWorkbenchMinimized ? <ChevronDown className="h-3.5 w-3.5" /> : isWorkbenchMaximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            {isWorkbenchMinimized ? "Restore" : isWorkbenchMaximized ? "Restore" : "Maximize"}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div>
                             </div>
 
                             {/* Workbench Content */}
-                            {isArtifactOpen ? (
-                                <div className="h-full w-full flex flex-col relative">
-                                    <div className="flex items-center justify-between border-b px-6 py-3 bg-background/95 backdrop-blur-sm sticky top-0 z-10 shrink-0">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mr-2">Artifact Viewer</span>
-                                            <ArtifactTitle className="text-sm font-medium" />
+                            {!isWorkbenchMinimized && (
+                                <>
+                                    {isArtifactOpen ? (
+                                        <div className="h-full w-full flex flex-col relative">
+                                            <div className="flex items-center justify-between border-b px-6 py-3 bg-background/95 backdrop-blur-sm sticky top-0 z-10 shrink-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mr-2">Artifact Viewer</span>
+                                                    <ArtifactTitle className="text-sm font-medium" />
+                                                </div>
+                                                <Button variant="ghost" size="sm" onClick={closeArtifact} className="h-8 w-8 p-0">
+                                                    <X className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                            <div className="flex-1 overflow-auto p-6 bg-muted/5">
+                                                <ArtifactContent className="max-w-4xl mx-auto bg-background border rounded-lg shadow-sm min-h-[500px]" />
+                                            </div>
                                         </div>
-                                        <Button variant="ghost" size="sm" onClick={closeArtifact} className="h-8 w-8 p-0">
-                                            <X className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-                                    <div className="flex-1 overflow-auto p-6 bg-muted/5">
-                                        <ArtifactContent className="max-w-4xl mx-auto bg-background border rounded-lg shadow-sm min-h-[500px]" />
-                                    </div>
-                                </div>
-                            ) : viewMode === "enrichment" ? (
-                                <div className="h-full w-full overflow-hidden">
-                                    <EnrichmentView />
-                                </div>
-                            ) : (
-                                <div className="h-full w-full overflow-hidden">
-                                    {children}
-                                </div>
+                                    ) : viewMode === "enrichment" ? (
+                                        <div className="h-full w-full overflow-hidden">
+                                            <EnrichmentView />
+                                        </div>
+                                    ) : (
+                                        <div className="h-full w-full overflow-hidden">
+                                            {children}
+                                        </div>
+                                    )}
+                                </>
                             )}
-                            </aside>
-                        )}
-                    </div>
+                        </div>
+                    )}
 
-                    {/* Resizable Divider */}
-                    {isAgentPanelOpen && (
+                    {/* Detail View Resize Handle */}
+                    {selectedNode && !isDetailViewMinimized && (
                         <div
                             className={cn(
                                 "h-1 border-t border-b bg-border cursor-row-resize hover:bg-primary/20 transition-colors relative group",
-                                isResizing && "bg-primary/30"
+                                isDetailViewResizing && "bg-primary/30"
                             )}
-                            onMouseDown={handleMouseDown}
+                            onMouseDown={handleDetailViewResizeMouseDown}
                             style={{ minHeight: '4px' }}
                         >
                             <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 flex items-center justify-center">
@@ -402,83 +580,160 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                         </div>
                     )}
 
-                    {/* Agent Chat Panel - Bottom */}
-                    <div 
-                        ref={agentPanelRef}
-                        className="relative shrink-0 overflow-hidden" 
-                        style={{ 
-                            height: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px', 
-                            maxHeight: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px',
-                            minHeight: isAgentPanelOpen ? `${agentPanelHeight}px` : '0px'
-                        }}
-                    >
-                        {isAgentPanelOpen && isMounted ? (
-                            <div 
-                                className={cn(
-                                    "bg-background transition-all duration-300 flex flex-col h-full overflow-hidden",
-                                    !isResizing && "transition-all"
-                                )}
-                                style={{ height: '100%', maxHeight: '100%' }}
-                            >
-                                {/* Agent Panel Header */}
-                                <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0" style={{ flexShrink: 0, height: '40px' }}>
-                                    <div className="flex items-center gap-2">
-                                        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                                        <span className="text-xs font-semibold text-foreground">Agent Chat</span>
-                                    </div>
+                    {/* Detail View Panel */}
+                    {selectedNode && (
+                        <div
+                            ref={detailViewRef}
+                            className={cn(
+                                "relative shrink-0 overflow-hidden bg-background border-t",
+                                isDetailViewMinimized && "h-[40px]",
+                                isDetailViewMaximized && "h-[70%]"
+                            )}
+                            style={{
+                                height: isDetailViewMinimized
+                                    ? '40px'
+                                    : isDetailViewMaximized
+                                        ? '70%'
+                                        : `${detailViewHeight}px`,
+                                display: isDetailViewMinimized ? 'flex' : 'block',
+                                flexDirection: isDetailViewMinimized ? 'row' : 'column'
+                            }}
+                        >
+                            {/* Detail View Header */}
+                            <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0">
+                                <div className="flex items-center gap-2">
+                                    <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                                    <span className="text-xs font-semibold text-foreground">Detail View</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-6 w-6"
+                                                onClick={() => {
+                                                    if (isDetailViewMinimized) handleDetailViewRestore();
+                                                    else if (isDetailViewMaximized) handleDetailViewRestore();
+                                                    else handleDetailViewMaximize();
+                                                }}
+                                            >
+                                                {isDetailViewMinimized ? <ChevronUp className="h-3.5 w-3.5" /> : isDetailViewMaximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            {isDetailViewMinimized ? "Restore" : isDetailViewMaximized ? "Restore" : "Maximize"}
+                                        </TooltipContent>
+                                    </Tooltip>
                                     <Button
                                         variant="ghost"
                                         size="icon"
                                         className="h-6 w-6"
-                                        onClick={() => setIsAgentPanelOpen(false)}
+                                        onClick={() => setSelectedNode(null)}
                                     >
                                         <X className="h-3.5 w-3.5" />
                                     </Button>
                                 </div>
-                                {/* Agent Chat Content */}
-                                <div className="flex-1 min-h-0 overflow-hidden bg-background" style={{ 
-                                    height: `calc(100% - 40px)`, 
-                                    maxHeight: `calc(100% - 40px)`, 
-                                    display: 'flex', 
-                                    flexDirection: 'column',
-                                    flex: '1 1 auto'
-                                }}>
-                                    <div className="h-full w-full overflow-hidden" style={{ 
-                                        maxHeight: '100%', 
-                                        height: '100%', 
-                                        display: 'flex', 
-                                        flexDirection: 'column' 
-                                    }}>
-                                        <Thread embedded hideArtifacts />
-                                    </div>
-                                </div>
                             </div>
-                        ) : isAgentPanelOpen && !isMounted ? (
-                            <div className="bg-background flex flex-col h-full overflow-hidden">
-                                <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0">
-                                    <div className="flex items-center gap-2">
-                                        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                                        <span className="text-xs font-semibold text-foreground">Agent Chat</span>
-                                    </div>
+                            {/* Detail View Content */}
+                            {!isDetailViewMinimized && (
+                                <div className="flex-1 min-h-0 overflow-hidden">
+                                    <NodeDetailPanel
+                                        node={selectedNode}
+                                        onClose={() => setSelectedNode(null)}
+                                        position="bottom"
+                                        threadId={threadId}
+                                    />
                                 </div>
-                                <div className="flex-1 min-h-0 overflow-hidden bg-background flex items-center justify-center">
-                                    <div className="text-xs text-muted-foreground">Loading...</div>
-                                </div>
-                            </div>
-                        ) : (
-                            /* Agent Panel Toggle - Show when collapsed */
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="absolute bottom-4 left-1/2 -translate-x-1/2 h-8 px-3 bg-background border shadow-md hover:bg-muted z-50"
-                                onClick={() => setIsAgentPanelOpen(true)}
-                            >
-                                <MessageSquare className="h-3.5 w-3.5 mr-2" />
-                                <span className="text-xs">Show Agent Chat</span>
-                            </Button>
-                        )}
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Chat Panel Resize Handle */}
+            {isChatOpen && !isChatMinimized && (
+                <div
+                    className={cn(
+                        "w-1 border-l border-r bg-border cursor-col-resize hover:bg-primary/20 transition-colors relative group",
+                        isChatResizing && "bg-primary/30"
+                    )}
+                    onMouseDown={handleChatResizeMouseDown}
+                    style={{ minWidth: '4px' }}
+                >
+                    <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1 flex items-center justify-center">
+                        <div className="h-16 w-0.5 bg-muted-foreground/30 group-hover:bg-primary/50 rounded-full transition-colors" />
                     </div>
                 </div>
+            )}
+
+            {/* Chat Panel - Right */}
+            <div
+                ref={chatPanelRef}
+                className={cn(
+                    "relative shrink-0 overflow-hidden border-l bg-background",
+                    isChatMinimized && "w-[40px]"
+                )}
+                style={{
+                    width: isChatMinimized
+                        ? '40px'
+                        : isChatMaximized
+                            ? '50%'
+                            : `${chatPanelWidth}px`,
+                    display: isChatMinimized ? 'flex' : 'block',
+                    flexDirection: isChatMinimized ? 'column' : 'row'
+                }}
+            >
+                {isChatOpen && isMounted ? (
+                    <div className="flex flex-col h-full overflow-hidden">
+                        {/* Chat Panel Header */}
+                        <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0">
+                            <div className="flex items-center gap-2">
+                                <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                                {!isChatMinimized && <span className="text-xs font-semibold text-foreground">Agent Chat</span>}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6"
+                                            onClick={() => {
+                                                if (isChatMinimized) handleChatRestore();
+                                                else if (isChatMaximized) handleChatRestore();
+                                                else handleChatMaximize();
+                                            }}
+                                        >
+                                            {isChatMinimized ? <ChevronRight className="h-3.5 w-3.5" /> : isChatMaximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        {isChatMinimized ? "Restore" : isChatMaximized ? "Restore" : "Maximize"}
+                                    </TooltipContent>
+                                </Tooltip>
+                            </div>
+                        </div>
+                        {/* Chat Content */}
+                        {!isChatMinimized && (
+                            <div className="flex-1 min-h-0 overflow-hidden">
+                                <Thread embedded hideArtifacts />
+                            </div>
+                        )}
+                    </div>
+                ) : isChatOpen && !isMounted ? (
+                    <div className="bg-background flex flex-col h-full overflow-hidden">
+                        <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0">
+                            <div className="flex items-center gap-2">
+                                <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="text-xs font-semibold text-foreground">Agent Chat</span>
+                            </div>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-hidden bg-background flex items-center justify-center">
+                            <div className="text-xs text-muted-foreground">Loading...</div>
+                        </div>
+                    </div>
+                ) : null}
             </div>
 
             <ProductPanel open={releaseNotesOpen} onClose={() => setReleaseNotesOpen(false)} />
@@ -499,6 +754,14 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     background: rgba(255, 255, 255, 0.2);
                 }
             `}</style>
-        </div >
+        </div>
+    );
+}
+
+export function WorkbenchShell({ children }: { children: React.ReactNode }) {
+    return (
+        <WorkbenchProvider>
+            <WorkbenchShellContent>{children}</WorkbenchShellContent>
+        </WorkbenchProvider>
     );
 }

@@ -6,6 +6,8 @@ export default function WorkbenchLayout({
 }: {
     children: React.ReactNode;
 }) {
+    // Authentication is handled by middleware.ts
+    // No need to check here - middleware ensures only authenticated users reach this point
     return (
         <RecordingProvider>
             <WorkbenchShell>{children}</WorkbenchShell>
