@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Sidebar } from "./sidebar";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { UserMenu } from "@/components/thread/user-menu";
 import { Breadcrumbs } from "./breadcrumbs";
@@ -19,26 +19,24 @@ import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "@/components/th
 import { PanelLeft, FileText, Layout, GitGraph, CheckSquare, AlertCircle } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductPanel } from "@/components/product-panel/ProductPanel";
-import { useUnifiedApprovals } from "./hooks/use-unified-approvals";
+import { useUnifiedPreviews } from "./hooks/use-unified-previews";
 import { useApprovalCount } from "./hooks/use-approval-count";
 import { ApprovalCard } from "./approval-card";
-import { AlertCircle } from "lucide-react";
 
 function DecisionsView() {
     const stream = useStreamContext();
-    const approvals = useUnifiedApprovals();
-    
-    // Group approvals by type for better organization
-    const groupedApprovals = approvals.reduce((acc, item) => {
+    const previews = useUnifiedPreviews();
+
+    const groupedPreviews = previews.reduce((acc, item) => {
         if (!acc[item.type]) {
             acc[item.type] = [];
         }
         acc[item.type].push(item);
         return acc;
-    }, {} as Record<string, typeof approvals>);
-    
-    const approvalTypes = Object.keys(groupedApprovals);
-    
+    }, {} as Record<string, typeof previews>);
+
+    const previewTypes = Object.keys(groupedPreviews);
+
     return (
         <div className="flex flex-col h-full overflow-auto p-6">
             <div className="mb-6 shrink-0">
@@ -47,26 +45,26 @@ function DecisionsView() {
                     Review and approve pending actions from agents
                 </p>
             </div>
-            
-            {approvals.length === 0 ? (
+
+            {previews.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
                     <div className="text-center max-w-md">
                         <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                         <h3 className="text-lg font-semibold mb-2">No Pending Decisions</h3>
                         <p className="text-sm text-muted-foreground">
-                            All approvals have been processed. New decisions will appear here when agents require your input.
+                            New decisions will appear here when agents have proposals for you to review.
                         </p>
                     </div>
                 </div>
             ) : (
                 <div className="flex flex-col gap-6">
-                    {approvalTypes.map((type) => (
+                    {previewTypes.map((type) => (
                         <div key={type}>
                             <h2 className="text-lg font-medium mb-3 capitalize">
-                                {getTypeLabel(type)} ({groupedApprovals[type].length})
+                                {getTypeLabel(type)} ({groupedPreviews[type].length})
                             </h2>
                             <div className="grid gap-4">
-                                {groupedApprovals[type].map((item) => (
+                                {groupedPreviews[type].map((item) => (
                                     <ApprovalCard
                                         key={item.id}
                                         item={item}
@@ -96,6 +94,7 @@ function getTypeLabel(type: string): string {
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
     const router = useRouter();
+    const pathname = usePathname();
     const { status } = useSession();
     const { isRecording, startRecording, stopRecording, downloadRecording } = useRecording();
 
@@ -109,6 +108,11 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             : "supervisor");
 
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
+    const [threadId] = useQueryState("threadId");
+
+    // Preserve threadId when navigating so autoroute doesn't lose project context
+    const workbenchHref = (path: string) =>
+        threadId ? `${path}${path.includes("?") ? "&" : "?"}threadId=${encodeURIComponent(threadId)}` : path;
     const [isWorkbenchOpen, setIsWorkbenchOpen] = useState(true);
     const [isWorkbenchMinimized, setIsWorkbenchMinimized] = useState(false);
     const [isWorkbenchMaximized, setIsWorkbenchMaximized] = useState(false);
@@ -134,6 +138,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         }
     }, [status, router]);
 
+    // Decisions has its own route (/workbench/decisions); we do NOT set view=decisions in URL so we keep one canonical URL
+
     // Agent-Driven View Synchronization (Backend -> UI)
     const workbenchView = (stream as any)?.values?.workbench_view;
     const lastSyncedView = useRef<string | undefined>(undefined);
@@ -152,7 +158,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
             if (hydrationInterrupt && !window.location.pathname.includes("/workbench/hydration")) {
                 console.log("[WorkbenchShell] Hydration proposal detected, navigating to hydration page");
-                router.push("/workbench/hydration");
+                router.push(workbenchHref("/workbench/hydration"));
             }
         }
     }, [stream, router]);
@@ -166,22 +172,24 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             console.log(`[WorkbenchShell] Backend synced view to: ${workbenchView}`);
             lastSyncedView.current = workbenchView;
 
-            if (["map", "workflow", "artifacts", "decisions"].includes(workbenchView)) {
-                // Internal Sub-view Toggle
+            if (["map", "workflow", "artifacts"].includes(workbenchView)) {
+                // Internal sub-views live under /workbench/map
                 setViewMode(workbenchView);
                 closeArtifact();
-                // Ensure we are on the map page if we switch to these sub-views
                 if (!window.location.pathname.includes("/workbench/map")) {
-                    router.push("/workbench/map");
+                    router.push(workbenchHref("/workbench/map"));
                 }
+            } else if (workbenchView === "decisions") {
+                closeArtifact();
+                router.push(workbenchHref("/workbench/decisions"));
             } else if (workbenchView === "discovery") {
-                router.push("/workbench/discovery");
+                router.push(workbenchHref("/workbench/discovery"));
             } else if (workbenchView === "settings") {
-                router.push("/workbench/settings");
+                router.push(workbenchHref("/workbench/settings"));
             } else if (workbenchView === "backlog") {
-                router.push("/workbench/backlog");
+                router.push(workbenchHref("/workbench/backlog"));
             } else if (workbenchView === "hydration") {
-                router.push("/workbench/hydration");
+                router.push(workbenchHref("/workbench/hydration"));
             }
         }
     }, [workbenchView, setViewMode, closeArtifact, router]);
@@ -194,7 +202,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         // If approval count increased and we're not already on decisions page, auto-route
         if (approvalCount > 0 && approvalCount > lastApprovalCount.current && !isOnDecisionsPage) {
             console.log(`[WorkbenchShell] New approvals detected (${approvalCount}), auto-routing to Decisions view`);
-            router.push("/workbench/decisions");
+            router.push(workbenchHref("/workbench/decisions"));
         }
         
         lastApprovalCount.current = approvalCount;
@@ -213,6 +221,22 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             });
         }
     }, [viewMode, stream]);
+
+    // Fix: If on /workbench/decisions but viewMode is a map sub-view, navigate to /workbench/map
+    useEffect(() => {
+        if (pathname?.includes("/workbench/decisions") && ["map", "workflow", "artifacts"].includes(viewMode)) {
+            console.log(`[WorkbenchShell] On decisions route but viewMode is ${viewMode}, navigating to /workbench/map`);
+            router.push(workbenchHref(`/workbench/map?view=${viewMode}`));
+        }
+    }, [pathname, viewMode, router]);
+
+    // Fix: If on /workbench/hydration but user selected Decisions, navigate to /workbench/decisions
+    useEffect(() => {
+        if (pathname?.includes("/workbench/hydration") && viewMode === "decisions") {
+            console.log(`[WorkbenchShell] On hydration route but viewMode is decisions, navigating to /workbench/decisions`);
+            router.push(workbenchHref("/workbench/decisions"));
+        }
+    }, [pathname, viewMode, router]);
 
     // Handle panel resizing (now horizontal for right panel)
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -487,9 +511,14 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         size="sm"
                                         className={cn(
                                             "h-8 px-3 gap-2 text-xs font-medium transition-all",
-                                            viewMode === "map" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                            pathname?.includes("/workbench/map") && viewMode === "map" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                                         )}
-                                        onClick={() => { setViewMode("map"); closeArtifact(); stream.setWorkbenchView("map"); }}
+                                        onClick={() => {
+                                            setViewMode("map");
+                                            closeArtifact();
+                                            stream.setWorkbenchView("map");
+                                            if (!pathname?.includes("/workbench/map")) router.push(workbenchHref("/workbench/map"));
+                                        }}
                                     >
                                         <MapIcon className="w-3.5 h-3.5" />
                                         Map
@@ -499,9 +528,15 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         size="sm"
                                         className={cn(
                                             "h-8 px-3 gap-2 text-xs font-medium transition-all",
-                                            viewMode === "workflow" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                            pathname?.includes("/workbench/map") && viewMode === "workflow" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                                         )}
-                                        onClick={() => { setViewMode("workflow"); closeArtifact(); stream.setWorkbenchView("workflow"); }}
+                                        onClick={() => {
+                                            setViewMode("workflow");
+                                            closeArtifact();
+                                            stream.setWorkbenchView("workflow");
+                                            const mapHref = workbenchHref("/workbench/map");
+                                            router.push(`${mapHref}${mapHref.includes("?") ? "&" : "?"}view=workflow`);
+                                        }}
                                     >
                                         <Workflow className="w-3.5 h-3.5" />
                                         Workflow
@@ -511,9 +546,15 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         size="sm"
                                         className={cn(
                                             "h-8 px-3 gap-2 text-xs font-medium transition-all",
-                                            viewMode === "artifacts" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                            pathname?.includes("/workbench/map") && viewMode === "artifacts" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                                         )}
-                                        onClick={() => { setViewMode("artifacts"); closeArtifact(); stream.setWorkbenchView("artifacts"); }}
+                                        onClick={() => {
+                                            setViewMode("artifacts");
+                                            closeArtifact();
+                                            stream.setWorkbenchView("artifacts");
+                                            const mapHref = workbenchHref("/workbench/map");
+                                            router.push(`${mapHref}${mapHref.includes("?") ? "&" : "?"}view=artifacts`);
+                                        }}
                                     >
                                         <FileText className="w-3.5 h-3.5" />
                                         Artifacts
@@ -523,11 +564,12 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         size="sm"
                                         className={cn(
                                             "h-8 px-3 gap-2 text-xs font-medium transition-all relative",
-                                            viewMode === "decisions" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                            pathname?.includes("/workbench/decisions") ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                                         )}
-                                        onClick={() => { 
-                                            router.push("/workbench/decisions");
+                                        onClick={() => {
                                             closeArtifact();
+                                            stream.setWorkbenchView("decisions" as any);
+                                            router.push(workbenchHref("/workbench/decisions"));
                                         }}
                                     >
                                         <CheckSquare className="w-3.5 h-3.5" />
@@ -537,18 +579,6 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                                 {approvalCount > 9 ? "9+" : approvalCount}
                                             </span>
                                         )}
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className={cn(
-                                            "h-8 px-3 gap-2 text-xs font-medium transition-all",
-                                            viewMode === "decisions" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                                        )}
-                                        onClick={() => { setViewMode("decisions"); closeArtifact(); stream.setWorkbenchView("decisions" as any); }}
-                                    >
-                                        <CheckSquare className="w-3.5 h-3.5" />
-                                        Decisions
                                     </Button>
                                 </div>
                                 {/* Workbench Panel Controls */}
@@ -607,6 +637,16 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     <div className="flex-1 overflow-auto p-6 bg-muted/5">
                                         <ArtifactContent className="max-w-4xl mx-auto bg-background border rounded-lg shadow-sm min-h-[500px]" />
                                     </div>
+                                </div>
+                            ) : pathname?.includes("/workbench/decisions") && !["map", "workflow", "artifacts"].includes(viewMode) ? (
+                                // Only show Decisions if we're on the decisions route AND viewMode is not a map sub-view
+                                <div className="h-full w-full overflow-hidden">
+                                    {children}
+                                </div>
+                            ) : pathname?.includes("/workbench/hydration") && viewMode === "decisions" ? (
+                                // If on hydration page but user selected Decisions tab, show Decisions view
+                                <div className="h-full w-full overflow-hidden">
+                                    <DecisionsView />
                                 </div>
                             ) : viewMode === "decisions" ? (
                                 <div className="h-full w-full overflow-hidden">

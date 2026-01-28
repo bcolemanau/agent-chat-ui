@@ -7,6 +7,7 @@ import React, {
   useState,
   useEffect,
   useMemo,
+  useRef,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -65,6 +66,8 @@ type StreamContextType = UseStream<StateType, {
 }> & {
   setApiKey: (key: string) => void;
   setWorkbenchView: (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "decisions") => Promise<void>;
+  /** Issue 37: Update thread state (e.g. after Begin Enriching handoff). */
+  updateState?: (update: { values?: Record<string, unknown> }) => Promise<void>;
   setActiveAgentDebug?: (agent: "supervisor" | "hydrator" | "concept") => Promise<void>;
   apiUrl: string;
 };
@@ -110,6 +113,7 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+  const prevThreadIdRef = useRef<string | null>(null);
 
   // Load Org Context for Headers
   const [orgContext, setOrgContext] = useState<string | null>(null);
@@ -139,11 +143,20 @@ const StreamSession = ({
       console.error("[Stream] SDK Error:", error);
     },
     onThreadId: (id) => {
-      if (id && id !== threadId) {
-        console.log("[Stream] Thread ID changed to:", id);
+      if (!id) return;
+      // Only adopt thread id when we don't have one (first message created a new thread).
+      // This preserves thread/project context during tool calls and node transitions:
+      // we never overwrite an existing threadId from stream events.
+      if (threadId && id !== threadId) {
+        console.warn("[Stream] Ignoring onThreadId during active thread to preserve context", {
+          received: id,
+          current: threadId,
+        });
+        return;
+      }
+      if (id !== threadId) {
+        console.log("[Stream] Thread ID set (new thread):", id);
         setThreadId(id);
-        // Trace thread creation/assignment
-        // Note: withThreadSpan is async, but we don't await it to avoid blocking
         withThreadSpan(
           "thread.created",
           {
@@ -210,6 +223,32 @@ const StreamSession = ({
     }
   };
 
+  // Optimistic overlay: stream hook doesn't refetch after updateState, so merge our updates so header (Mode) updates immediately.
+  const [valuesOverlay, setValuesOverlay] = useState<Record<string, unknown>>({});
+  const valuesOverlayRef = useRef<Record<string, unknown>>({});
+  useEffect(() => {
+    if (prevThreadIdRef.current !== (threadId ?? null)) {
+      prevThreadIdRef.current = threadId ?? null;
+      valuesOverlayRef.current = {};
+      setValuesOverlay({});
+    }
+  }, [threadId]);
+
+  // Issue 37: Update thread state (e.g. after Begin Enriching → handoff to Enrichment).
+  const updateState = async (update: { values?: Record<string, unknown> }) => {
+    if (!threadId || !apiUrl || !update?.values) return;
+    try {
+      valuesOverlayRef.current = { ...valuesOverlayRef.current, ...update.values };
+      setValuesOverlay({ ...valuesOverlayRef.current });
+      const headers: Record<string, string> = {};
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      const client = createClient(apiUrl, apiKey ?? undefined, headers);
+      await client.threads.updateState(threadId, { values: update.values });
+    } catch (e) {
+      console.error("[Stream] Failed to update state:", e);
+    }
+  };
+
   // Dynamic Proxy Wrapper
   // This ensure ANY access to the context always gets the latest hook state 
   // but with forced null-safety for problematic fields.
@@ -220,7 +259,9 @@ const StreamSession = ({
         if (prop === "setApiKey") return setApiKey;
         if (prop === "apiUrl") return apiUrl;
         if (prop === "setWorkbenchView") return setWorkbenchView;
+        if (prop === "updateState") return updateState;
         if (prop === "setActiveAgentDebug") return setActiveAgentDebug;
+        if (prop === "threadId") return threadId ?? (rawStream as any)?.[prop];
 
         // Safety check: if rawStream itself is null, provide safe defaults
         if (!rawStream) {
@@ -234,7 +275,12 @@ const StreamSession = ({
 
         // Dynamic property access from the raw hook state
         // We read from rawStream directly to ensure we have the absolute latest state
-        const value = (rawStream as any)[prop];
+        let value = (rawStream as any)[prop];
+
+        // Merge valuesOverlay so Mode (active_agent) updates after updateState (e.g. Begin Enriching)
+        if (prop === "values" && value && Object.keys(valuesOverlay).length > 0) {
+          value = { ...value, ...valuesOverlay };
+        }
 
         // Safety Fallbacks
         if (prop === "messages") return value ?? [];
@@ -248,7 +294,7 @@ const StreamSession = ({
         return value;
       }
     });
-  }, [rawStream, apiKey, apiUrl, threadId, orgContext]);
+  }, [rawStream, apiKey, apiUrl, threadId, orgContext, valuesOverlay]);
 
   useEffect(() => {
     // For relative paths (like /api), check via /api/info endpoint

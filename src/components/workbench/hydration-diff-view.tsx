@@ -8,7 +8,7 @@ import { ProgressionDiffRenderer } from "./diff-renderers/progression-diff-rende
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CheckCircle2, AlertCircle, TrendingUp } from "lucide-react";
+import { CheckCircle2, AlertCircle, TrendingUp, Map, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface HydrationDiffViewProps {
@@ -28,17 +28,40 @@ export function HydrationDiffView({
   const stream = useStreamContext();
   const [threadId] = useQueryState("threadId");
 
-  // If no diffData provided, show empty state
+  // If no diffData provided, show empty state; when threadId is present offer links so context helps
   if (!diffData) {
+    const mapHref = threadId ? `/workbench/map?threadId=${encodeURIComponent(threadId)}` : "/workbench/map";
+    const artifactsHref = threadId
+      ? `/workbench/map?threadId=${encodeURIComponent(threadId)}&view=artifacts`
+      : "/workbench/map?view=artifacts";
     return (
       <div className="flex items-center justify-center p-8 h-full">
-        <div className="text-center max-w-md">
+        <div className="text-center max-w-md space-y-4">
           <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
           <h3 className="text-lg font-semibold mb-2">No Hydration Data Available</h3>
           <p className="text-sm text-muted-foreground">
             Waiting for hydration proposal data. This view will display when the hydration agent
             proposes transitioning to the Concept phase.
           </p>
+          {threadId && (
+            <div className="pt-4 border-t space-y-2">
+              <p className="text-xs text-muted-foreground">Continue in this project:</p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                <Button variant="outline" size="sm" asChild>
+                  <a href={mapHref}>
+                    <Map className="w-3.5 h-3.5 mr-1.5" />
+                    Map
+                  </a>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <a href={artifactsHref}>
+                    <FileText className="w-3.5 h-3.5 mr-1.5" />
+                    Artifacts
+                  </a>
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
