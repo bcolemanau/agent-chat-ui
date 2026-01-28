@@ -65,6 +65,7 @@ type StreamContextType = UseStream<StateType, {
 }> & {
   setApiKey: (key: string) => void;
   setWorkbenchView: (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "decisions") => Promise<void>;
+  setActiveAgentDebug?: (agent: "supervisor" | "hydrator" | "concept") => Promise<void>;
   apiUrl: string;
 };
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -191,6 +192,24 @@ const StreamSession = ({
     }
   };
 
+  // DEBUG: manually override the active agent for this thread.
+  const setActiveAgentDebug = async (agent: "supervisor" | "hydrator" | "concept") => {
+    if (!threadId || !apiUrl) return;
+
+    console.log(`[Stream] DEBUG: Forcing active_agent -> ${agent}`);
+    try {
+      const headers: Record<string, string> = {};
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+
+      const client = createClient(apiUrl, apiKey ?? undefined, headers);
+      await client.threads.updateState(threadId, {
+        values: { active_agent: agent },
+      });
+    } catch (e) {
+      console.error("[Stream] Failed to set active agent (debug):", e);
+    }
+  };
+
   // Dynamic Proxy Wrapper
   // This ensure ANY access to the context always gets the latest hook state 
   // but with forced null-safety for problematic fields.
@@ -201,6 +220,7 @@ const StreamSession = ({
         if (prop === "setApiKey") return setApiKey;
         if (prop === "apiUrl") return apiUrl;
         if (prop === "setWorkbenchView") return setWorkbenchView;
+        if (prop === "setActiveAgentDebug") return setActiveAgentDebug;
 
         // Safety check: if rawStream itself is null, provide safe defaults
         if (!rawStream) {

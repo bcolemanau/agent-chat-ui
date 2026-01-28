@@ -50,6 +50,20 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
         decision = { type: "edit", edited_action: item.data };
       }
       
+      // Guard against approving on the wrong thread: if this approval belongs to a
+      // different thread than the one currently loaded in the stream, ask the user
+      // to switch to that project first instead of silently resuming on a new thread.
+      const originThreadId = item.threadId as string | undefined;
+      const currentThreadId = (stream as any)?.threadId as string | undefined;
+      if (originThreadId && currentThreadId && originThreadId !== currentThreadId) {
+        setStatus("pending");
+        setIsLoading(false);
+        toast.error("This decision belongs to a different project", {
+          description: "Please select the original project in the sidebar, then approve the decision again.",
+        });
+        return;
+      }
+
       // Submit decision using stream.submit (same pattern as use-interrupted-actions)
       // Note: stream.submit is bound in StreamProvider, so we can call it directly
       if (typeof (stream as any).submit === "function") {
@@ -132,7 +146,7 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
       <CardContent className="space-y-4">
         {/* Diff Preview */}
         {(item.data.diff || item.data.preview_data?.diff) && (
-          <div className="border rounded-lg p-4 bg-muted/50">
+          <div className="border rounded-lg p-4 bg-muted/50 max-h-[600px] overflow-y-auto">
             {renderDiffPreview(item.type, item.data.diff || item.data.preview_data?.diff, item.data.preview_data)}
           </div>
         )}

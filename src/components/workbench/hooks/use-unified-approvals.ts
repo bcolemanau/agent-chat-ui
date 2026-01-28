@@ -27,6 +27,7 @@ export interface UnifiedApprovalItem {
   };
   interruptId?: string; // Interrupt ID if from stream.interrupt
   interruptIndex?: number; // Index in interrupt array
+  threadId?: string; // Original thread where the interrupt was raised
 }
 
 export function useUnifiedApprovals(): UnifiedApprovalItem[] {
@@ -66,6 +67,9 @@ export function useUnifiedApprovals(): UnifiedApprovalItem[] {
             },
             interruptId: interrupt.id,
             interruptIndex: interruptIndex,
+            // LangGraph Interrupt includes thread_id; propagate it so approvals can resume
+            // on the correct thread even if the UI has navigated elsewhere.
+            threadId: (interrupt as any).thread_id,
           });
         });
       });

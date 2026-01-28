@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Sidebar } from "./sidebar";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { UserMenu } from "@/components/thread/user-menu";
 import { Breadcrumbs } from "./breadcrumbs";
 import { OrgSwitcher } from "./org-switcher";
@@ -15,10 +16,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useQueryState } from "nuqs";
 import { cn } from "@/lib/utils";
 import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "@/components/thread/artifact";
-import { PanelLeft, FileText, Layout, GitGraph, CheckSquare } from "lucide-react";
+import { PanelLeft, FileText, Layout, GitGraph, CheckSquare, AlertCircle } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductPanel } from "@/components/product-panel/ProductPanel";
 import { useUnifiedApprovals } from "./hooks/use-unified-approvals";
+import { useApprovalCount } from "./hooks/use-approval-count";
 import { ApprovalCard } from "./approval-card";
 import { AlertCircle } from "lucide-react";
 
@@ -93,6 +95,8 @@ function getTypeLabel(type: string): string {
 
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
+    const router = useRouter();
+    const { status } = useSession();
     const { isRecording, startRecording, stopRecording, downloadRecording } = useRecording();
 
     // Robust Mode Derivation
@@ -118,7 +122,17 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
     const agentPanelRef = useRef<HTMLDivElement>(null);
-    const router = useRouter();
+    
+    // Issue #14: Approval count for badge
+    const approvalCount = useApprovalCount();
+    const lastApprovalCount = useRef<number>(0);
+    
+    // Auth guard: redirect unauthenticated users to login
+    useEffect(() => {
+        if (status === "unauthenticated") {
+            router.push("/");
+        }
+    }, [status, router]);
 
     // Agent-Driven View Synchronization (Backend -> UI)
     const workbenchView = (stream as any)?.values?.workbench_view;
@@ -171,6 +185,20 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             }
         }
     }, [workbenchView, setViewMode, closeArtifact, router]);
+    
+    // Issue #14: Auto-routing to Decisions view when new approvals arrive
+    useEffect(() => {
+        const currentPath = window.location.pathname;
+        const isOnDecisionsPage = currentPath.includes("/workbench/decisions");
+        
+        // If approval count increased and we're not already on decisions page, auto-route
+        if (approvalCount > 0 && approvalCount > lastApprovalCount.current && !isOnDecisionsPage) {
+            console.log(`[WorkbenchShell] New approvals detected (${approvalCount}), auto-routing to Decisions view`);
+            router.push("/workbench/decisions");
+        }
+        
+        lastApprovalCount.current = approvalCount;
+    }, [approvalCount, router]);
 
     // User-Driven View Synchronization (UI -> Backend)
     useEffect(() => {
@@ -251,6 +279,14 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         }
     }, [isAgentPanelOpen, agentPanelHeight]);
 
+    if (status === "loading") {
+        return (
+            <div className="flex h-screen items-center justify-center">
+                <span className="text-sm text-muted-foreground">Checking authentication…</span>
+            </div>
+        );
+    }
+
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
             {/* Sidebar - Collapsible */}
@@ -284,18 +320,55 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     </div>
 
                     <div className="flex items-center gap-3">
-                        {/* Workflow Status */}
-                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted/50 border border-border shadow-sm mr-2">
-                            <Activity className={cn(
-                                "w-3.5 h-3.5",
-                                stream.isLoading ? "text-amber-500 animate-pulse" : "text-emerald-500"
-                            )} />
-                            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                                Mode:
-                            </span>
-                            <span className="text-xs font-semibold text-foreground capitalize">
-                                {activeAgent}
-                            </span>
+                        {/* Workflow Status + Debug Agent Switcher */}
+                        <div className="flex items-center gap-2 mr-2">
+                            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted/50 border border-border shadow-sm">
+                                <Activity className={cn(
+                                    "w-3.5 h-3.5",
+                                    stream.isLoading ? "text-amber-500 animate-pulse" : "text-emerald-500"
+                                )} />
+                                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                                    Mode:
+                                </span>
+                                <span className="text-xs font-semibold text-foreground capitalize">
+                                    {activeAgent}
+                                </span>
+                            </div>
+
+                            {/* Debug-only agent switcher (quick manual override) */}
+                            <div className="flex items-center gap-1">
+                                {["supervisor", "hydrator", "concept"].map((agent) => (
+                                    <Tooltip key={agent}>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className={cn(
+                                                    "h-7 w-7 text-[10px] font-semibold uppercase rounded-full border border-dashed",
+                                                    activeAgent === agent
+                                                        ? "bg-primary/10 text-primary border-primary/40"
+                                                        : "text-muted-foreground hover:text-foreground"
+                                                )}
+                                                onClick={() => {
+                                                    const fn = (stream as any).setActiveAgentDebug as
+                                                        | ((a: "supervisor" | "hydrator" | "concept") => Promise<void>)
+                                                        | undefined;
+                                                    if (fn) {
+                                                        fn(agent as "supervisor" | "hydrator" | "concept").catch((e) =>
+                                                            console.warn("[WorkbenchShell] Failed to set active agent (debug):", e)
+                                                        );
+                                                    } else {
+                                                        console.warn("[WorkbenchShell] setActiveAgentDebug not available on stream context");
+                                                    }
+                                                }}
+                                            >
+                                                {agent.charAt(0).toUpperCase()}
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Debug: Switch to {agent} agent</TooltipContent>
+                                    </Tooltip>
+                                ))}
+                            </div>
                         </div>
 
                         <div className="h-6 w-[1px] bg-border mx-1" />
@@ -444,6 +517,26 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     >
                                         <FileText className="w-3.5 h-3.5" />
                                         Artifacts
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className={cn(
+                                            "h-8 px-3 gap-2 text-xs font-medium transition-all relative",
+                                            viewMode === "decisions" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                        )}
+                                        onClick={() => { 
+                                            router.push("/workbench/decisions");
+                                            closeArtifact();
+                                        }}
+                                    >
+                                        <CheckSquare className="w-3.5 h-3.5" />
+                                        Decisions
+                                        {approvalCount > 0 && (
+                                            <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                                                {approvalCount > 9 ? "9+" : approvalCount}
+                                            </span>
+                                        )}
                                     </Button>
                                     <Button
                                         variant="ghost"

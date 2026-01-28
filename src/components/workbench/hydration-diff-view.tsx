@@ -106,8 +106,8 @@ export function HydrationDiffView({
       </div>
 
       {/* Tabs for Progress vs Remaining */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "progress" | "remaining")} className="flex-1 flex flex-col overflow-hidden">
-        <div className="border-b px-4">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "progress" | "remaining")} className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <div className="border-b px-4 flex-shrink-0">
           <TabsList>
             <TabsTrigger value="progress">
               Progress Made
@@ -118,7 +118,7 @@ export function HydrationDiffView({
           </TabsList>
         </div>
 
-        <TabsContent value="progress" className="flex-1 overflow-auto p-4">
+        <TabsContent value="progress" className="flex-1 overflow-y-auto p-4 min-h-0">
           <Card>
             <CardHeader>
               <CardTitle>{progress_diff.metadata.title}</CardTitle>
@@ -130,7 +130,7 @@ export function HydrationDiffView({
           </Card>
         </TabsContent>
 
-        <TabsContent value="remaining" className="flex-1 overflow-auto p-4">
+        <TabsContent value="remaining" className="flex-1 overflow-y-auto p-4 min-h-0">
           <Card>
             <CardHeader>
               <CardTitle>{remaining_diff.metadata.title}</CardTitle>
