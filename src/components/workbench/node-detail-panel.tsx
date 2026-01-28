@@ -22,7 +22,7 @@ interface Node {
 interface NodeDetailPanelProps {
   node: Node | null;
   onClose: () => void;
-  position?: "left" | "right";
+  position?: "left" | "right" | "bottom";
   threadId?: string | null;
 }
 
@@ -160,8 +160,8 @@ export function NodeDetailPanel({
   return (
     <div 
       className={cn(
-        "h-full w-full flex flex-col bg-background border-l border-border",
-        position === "left" ? "border-l-0 border-r" : ""
+        "h-full w-full flex flex-col bg-background",
+        position === "left" ? "border-r border-border" : position === "bottom" ? "border-t border-border" : "border-l border-border"
       )}
       onClick={(e) => e.stopPropagation()}
     >

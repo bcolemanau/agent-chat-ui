@@ -917,11 +917,11 @@ export function WorldMapView() {
                 </div>
             )}
 
-            {/* Canvas Area - Split layout when node is selected (but not in artifacts view) */}
+            {/* Canvas Area - Split vertically when node is selected (but not in artifacts view) */}
             {selectedNode && viewMode !== 'artifacts' ? (
-                <div className="flex-1 flex relative overflow-hidden">
-                    {/* Map - 50% width */}
-                    <div ref={containerRef} className="w-1/2 relative overflow-hidden border-r border-border min-w-0" onClick={(e) => {
+                <div className="flex-1 flex flex-col relative overflow-hidden">
+                    {/* Map - Top, full width */}
+                    <div ref={containerRef} className="flex-1 relative overflow-hidden border-b border-border min-h-0" onClick={(e) => {
                         // Only close if clicking directly on the map background, not on nodes
                         if (e.target === e.currentTarget || (e.target as Element).closest('svg')) {
                             setSelectedNode(null);
@@ -1017,12 +1017,12 @@ export function WorldMapView() {
                         </div>
                     </div>
 
-                    {/* Detail Panel - 50% width */}
-                    <div className="w-1/2 relative overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                    {/* Detail Panel - Bottom, resizable height */}
+                    <div className="h-96 relative overflow-hidden flex flex-col border-t border-border shrink-0" onClick={(e) => e.stopPropagation()}>
                         <NodeDetailPanel
                             node={selectedNode}
                             onClose={() => setSelectedNode(null)}
-                            position="right"
+                            position="bottom"
                             threadId={threadId}
                         />
                     </div>
