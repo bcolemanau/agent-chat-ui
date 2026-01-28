@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/auth";
 
 // This file acts as a proxy for requests to your LangGraph server.
 // We use a custom implementation to ensure the client's JWT token is forwarded correctly.
+// Middleware: Automatically injects Google auth token from NextAuth session.
 
 const BACKEND_URL = process.env.LANGGRAPH_API_URL ?? "https://reflexion-staging.up.railway.app";
 
@@ -12,6 +15,40 @@ async function proxyRequest(req: NextRequest, method: string) {
     
     // Construct backend URL
     const backendUrl = `${BACKEND_URL}${path}${req.nextUrl.search}`;
+    
+    // List of endpoints that don't require auth (matches backend proxy_server.py exclusions)
+    const publicEndpoints = [
+      "/health",
+      "/ok",
+      "/info",
+      "/auth/token",
+    ];
+    const publicPrefixes = [
+      "/static/",
+      "/ui/",
+    ];
+    
+    // Check if this endpoint should be excluded from auth
+    const isPublicEndpoint = publicEndpoints.includes(path) ||
+      publicPrefixes.some(prefix => path.startsWith(prefix)) ||
+      method === "OPTIONS"; // OPTIONS preflight requests
+    
+    // Middleware: Get Google auth token from NextAuth session (skip for public endpoints)
+    let sessionToken: string | null = null;
+    if (!isPublicEndpoint) {
+      try {
+        const session = await getServerSession(authOptions);
+        if (session?.user?.idToken) {
+          sessionToken = session.user.idToken;
+          console.log("[PROXY] Middleware: Injected Google auth token from session");
+        }
+      } catch (authError) {
+        // Auth is optional for some endpoints
+        console.debug("[PROXY] Middleware: No session available");
+      }
+    } else {
+      console.debug(`[PROXY] Middleware: Skipping auth for public endpoint: ${path}`);
+    }
     
     // Get client's auth header (JWT token from session)
     const clientApiKey = req.headers.get("X-Api-Key");
@@ -28,16 +65,22 @@ async function proxyRequest(req: NextRequest, method: string) {
       }
     });
     
-    // Ensure client's auth header is used (override any passthrough default)
-    if (clientApiKey) {
-      headers.set("X-Api-Key", clientApiKey);
-    }
-    if (clientAuth) {
-      headers.set("Authorization", clientAuth);
+    // Middleware: Inject session token if available (takes precedence over client headers)
+    if (sessionToken) {
+      headers.set("Authorization", `Bearer ${sessionToken}`);
+      headers.set("X-Api-Key", sessionToken); // Also set as X-Api-Key for compatibility
+    } else {
+      // Fallback to client's auth headers if no session token
+      if (clientApiKey) {
+        headers.set("X-Api-Key", clientApiKey);
+      }
+      if (clientAuth) {
+        headers.set("Authorization", clientAuth);
+      }
     }
     
-    // If no client auth, use fallback (shouldn't happen in production)
-    if (!clientApiKey && !clientAuth) {
+    // If no auth at all, use fallback (shouldn't happen in production)
+    if (!sessionToken && !clientApiKey && !clientAuth) {
       const fallbackKey = process.env.LANGSMITH_API_KEY;
       if (fallbackKey && fallbackKey !== "remove-me") {
         headers.set("X-Api-Key", fallbackKey);
@@ -113,5 +156,3 @@ export async function DELETE(req: NextRequest) {
 export async function OPTIONS(req: NextRequest) {
   return proxyRequest(req, "OPTIONS");
 }
-
-export const runtime = "edge";
