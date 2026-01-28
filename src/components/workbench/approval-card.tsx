@@ -90,6 +90,10 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
       case "generate_concept_brief":
         return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
+      case "propose_enrichment":
+      case "approve_enrichment":
+      case "enrichment":
+        return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200";
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
     }
@@ -232,6 +236,61 @@ function renderDiffPreview(
                 <span>Active: {metadata.subset.activeCount} nodes</span>
                 <span>Inactive: {metadata.subset.inactiveCount} nodes</span>
                 <span>Reduction: {metadata.subset.reductionPercentage.toFixed(1)}%</span>
+              </div>
+            )}
+          </div>
+        );
+      }
+      break;
+      
+    case "propose_enrichment":
+    case "approve_enrichment":
+    case "enrichment":
+      // Enrichment uses progression diff - similar to hydration
+      if (diff?.type === "progression" && diff.metadata) {
+        const metadata = diff.metadata;
+        const progression = metadata.progression || {};
+        return (
+          <div className="space-y-3">
+            <div className="text-sm font-medium">{metadata.title}</div>
+            {metadata.description && (
+              <div className="text-xs text-muted-foreground">{metadata.description}</div>
+            )}
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div>
+                <div className="font-medium mb-1">{metadata.leftLabel || "Previous"}</div>
+                {diff.left && (
+                  <div className="space-y-1 text-muted-foreground">
+                    {diff.left.artifact_types?.length > 0 && (
+                      <div>Types: {diff.left.artifact_types.join(", ")}</div>
+                    )}
+                    {diff.left.category && <div>Category: {diff.left.category}</div>}
+                    {diff.left.title && <div>Title: {diff.left.title}</div>}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="font-medium mb-1">{metadata.rightLabel || "Proposed"}</div>
+                {diff.right && (
+                  <div className="space-y-1">
+                    {diff.right.artifact_types?.length > 0 && (
+                      <div className="text-green-600 dark:text-green-400">
+                        Types: {diff.right.artifact_types.join(", ")}
+                      </div>
+                    )}
+                    {diff.right.category && (
+                      <div>Category: {diff.right.category}</div>
+                    )}
+                    {diff.right.title && (
+                      <div>Title: {diff.right.title}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            {progression.completionPercentage !== undefined && (
+              <div className="text-xs text-muted-foreground">
+                Completion: {progression.completionPercentage.toFixed(0)}%
               </div>
             )}
           </div>

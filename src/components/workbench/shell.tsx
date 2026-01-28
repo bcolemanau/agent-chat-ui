@@ -18,8 +18,78 @@ import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "@/components/th
 import { PanelLeft, FileText, Layout, GitGraph, CheckSquare, AlertCircle } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductPanel } from "@/components/product-panel/ProductPanel";
-import { EnrichmentView } from "./enrichment-view";
-import { useApprovalCount } from "./hooks/use-approval-count";
+import { useUnifiedApprovals } from "./hooks/use-unified-approvals";
+import { ApprovalCard } from "./approval-card";
+import { AlertCircle } from "lucide-react";
+
+function DecisionsView() {
+    const stream = useStreamContext();
+    const approvals = useUnifiedApprovals();
+    
+    // Group approvals by type for better organization
+    const groupedApprovals = approvals.reduce((acc, item) => {
+        if (!acc[item.type]) {
+            acc[item.type] = [];
+        }
+        acc[item.type].push(item);
+        return acc;
+    }, {} as Record<string, typeof approvals>);
+    
+    const approvalTypes = Object.keys(groupedApprovals);
+    
+    return (
+        <div className="flex flex-col h-full overflow-auto p-6">
+            <div className="mb-6 shrink-0">
+                <h1 className="text-2xl font-semibold">Decisions</h1>
+                <p className="text-sm text-muted-foreground mt-1">
+                    Review and approve pending actions from agents
+                </p>
+            </div>
+            
+            {approvals.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                    <div className="text-center max-w-md">
+                        <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold mb-2">No Pending Decisions</h3>
+                        <p className="text-sm text-muted-foreground">
+                            All approvals have been processed. New decisions will appear here when agents require your input.
+                        </p>
+                    </div>
+                </div>
+            ) : (
+                <div className="flex flex-col gap-6">
+                    {approvalTypes.map((type) => (
+                        <div key={type}>
+                            <h2 className="text-lg font-medium mb-3 capitalize">
+                                {getTypeLabel(type)} ({groupedApprovals[type].length})
+                            </h2>
+                            <div className="grid gap-4">
+                                {groupedApprovals[type].map((item) => (
+                                    <ApprovalCard
+                                        key={item.id}
+                                        item={item}
+                                        stream={stream}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function getTypeLabel(type: string): string {
+    const labels: Record<string, string> = {
+        classify_intent: "Project Classification",
+        propose_hydration_complete: "Hydration Complete",
+        generate_concept_brief: "Concept Brief Options",
+        approve_enrichment: "Enrichment",
+        enrichment: "Enrichment",
+    };
+    return labels[type] || type.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+}
 
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
@@ -44,9 +114,6 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const [isAgentPanelMaximized, setIsAgentPanelMaximized] = useState(false);
     const [agentPanelHeight, setAgentPanelHeight] = useState(400); // Default width in pixels (reused for right panel)
     const [isResizing, setIsResizing] = useState(false);
-    const minPercent = 0.25; // 25% minimum for both panels
-    const maxPercent = 0.75; // 75% maximum for both panels
-    const isAgentPanelMaximized = agentPanelWidthPercent >= maxPercent;
     const [isArtifactOpen, closeArtifact] = useArtifactOpen();
     const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
@@ -89,7 +156,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             console.log(`[WorkbenchShell] Backend synced view to: ${workbenchView}`);
             lastSyncedView.current = workbenchView;
 
-            if (["map", "workflow", "artifacts", "enrichment"].includes(workbenchView)) {
+            if (["map", "workflow", "artifacts", "decisions"].includes(workbenchView)) {
                 // Internal Sub-view Toggle
                 setViewMode(workbenchView);
                 closeArtifact();
@@ -200,7 +267,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             // Force layout recalculation
             void agentPanelRef.current.offsetWidth;
         }
-    }, [isAgentPanelOpen, agentPanelWidthPercent]);
+    }, [isAgentPanelOpen, agentPanelHeight]);
 
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
@@ -421,12 +488,12 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         size="sm"
                                         className={cn(
                                             "h-8 px-3 gap-2 text-xs font-medium transition-all",
-                                            viewMode === "enrichment" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                            viewMode === "decisions" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                                         )}
-                                        onClick={() => { setViewMode("enrichment"); closeArtifact(); stream.setWorkbenchView("enrichment"); }}
+                                        onClick={() => { setViewMode("decisions"); closeArtifact(); stream.setWorkbenchView("decisions" as any); }}
                                     >
                                         <CheckSquare className="w-3.5 h-3.5" />
-                                        Enrichment
+                                        Decisions
                                     </Button>
                                 </div>
                                 {/* Workbench Panel Controls */}
@@ -486,9 +553,9 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         <ArtifactContent className="max-w-4xl mx-auto bg-background border rounded-lg shadow-sm min-h-[500px]" />
                                     </div>
                                 </div>
-                            ) : viewMode === "enrichment" ? (
+                            ) : viewMode === "decisions" ? (
                                 <div className="h-full w-full overflow-hidden">
-                                    <EnrichmentView />
+                                    <DecisionsView />
                                 </div>
                             ) : (
                                 <div className="h-full w-full overflow-hidden">

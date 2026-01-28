@@ -14,8 +14,10 @@ export interface ActionRequest {
   description?: string;
   diff?: string;
   summary?: string;
-  preview_data?: Record<string, unknown>; // Issue #14: Contains diff and other preview data
-  preview_html?: string; // Legacy support
+  preview_data?: {
+    diff?: any;
+    [key: string]: any;
+  };
 }
 
 export interface ReviewConfig {

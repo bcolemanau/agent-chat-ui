@@ -64,7 +64,7 @@ type StreamContextType = UseStream<StateType, {
   CustomEventType: UIMessage | RemoveUIMessage;
 }> & {
   setApiKey: (key: string) => void;
-  setWorkbenchView: (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "enrichment") => Promise<void>;
+  setWorkbenchView: (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "decisions") => Promise<void>;
   apiUrl: string;
 };
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -174,7 +174,7 @@ const StreamSession = ({
   }, [rawStream.values]);
 
   // Method to update the backend state with the current view
-  const setWorkbenchView = async (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "enrichment") => {
+  const setWorkbenchView = async (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "decisions") => {
     if (!threadId || !apiUrl) return;
 
     console.log(`[Stream] Updating active view to: ${view}`);

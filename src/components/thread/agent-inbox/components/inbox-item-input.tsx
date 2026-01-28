@@ -57,13 +57,99 @@ function SummaryRenderer({ summary }: { summary: string }) {
   );
 }
 
-function DiffRenderer({ diff }: { diff: string }) {
-  return (
-    <div className="mb-4 w-full">
-      <p className="text-sm font-semibold text-gray-700 mb-2">Changes (Diff)</p>
-      <div className="rounded-lg bg-zinc-950 p-4 overflow-x-auto max-h-[300px] border border-zinc-800">
-        <MarkdownText>{`\`\`\`diff\n${diff}\n\`\`\``}</MarkdownText>
+function DiffRenderer({ diff, toolName }: { diff: string | any; toolName?: string }) {
+  // Handle structured diff objects (from preview_data.diff)
+  if (diff && typeof diff === "object") {
+    return <StructuredDiffRenderer diff={diff} toolName={toolName} />;
+  }
+  
+  // Handle string diffs (legacy format)
+  if (typeof diff === "string") {
+    return (
+      <div className="mb-4 w-full">
+        <p className="text-sm font-semibold text-gray-700 mb-2">Changes (Diff)</p>
+        <div className="rounded-lg bg-zinc-950 p-4 overflow-x-auto max-h-[300px] border border-zinc-800">
+          <MarkdownText>{`\`\`\`diff\n${diff}\n\`\`\``}</MarkdownText>
+        </div>
       </div>
+    );
+  }
+  
+  return null;
+}
+
+function StructuredDiffRenderer({ diff, toolName }: { diff: any; toolName?: string }) {
+  // Render structured diff based on type (subset, progression, similarity)
+  if (!diff || !diff.type) {
+    return null;
+  }
+  
+  switch (diff.type) {
+    case "subset":
+      // Used by classify_intent
+      if (diff.metadata) {
+        const metadata = diff.metadata;
+        return (
+          <div className="mb-4 w-full rounded-lg border bg-muted/30 p-4">
+            <div className="text-sm font-semibold mb-2">{metadata.title || "Subset View"}</div>
+            {metadata.description && (
+              <div className="text-xs text-muted-foreground mb-3">{metadata.description}</div>
+            )}
+            {metadata.subset && (
+              <div className="flex gap-4 text-xs">
+                <span className="font-medium">Active: {metadata.subset.activeCount} nodes</span>
+                <span className="font-medium">Inactive: {metadata.subset.inactiveCount} nodes</span>
+                <span className="font-medium text-green-600">
+                  Reduction: {metadata.subset.reductionPercentage.toFixed(1)}%
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      }
+      break;
+      
+    case "progression":
+      // Used by propose_hydration_complete, enrichment
+      if (diff.metadata) {
+        const metadata = diff.metadata;
+        const progression = metadata.progression || {};
+        return (
+          <div className="mb-4 w-full rounded-lg border bg-muted/30 p-4">
+            <div className="text-sm font-semibold mb-2">{metadata.title || "Progression View"}</div>
+            {metadata.description && (
+              <div className="text-xs text-muted-foreground mb-3">{metadata.description}</div>
+            )}
+            {progression.completionPercentage !== undefined && (
+              <div className="text-xs text-muted-foreground">
+                Completion: {progression.completionPercentage.toFixed(0)}%
+              </div>
+            )}
+          </div>
+        );
+      }
+      break;
+      
+    case "similarity":
+      // Used by generate_concept_brief
+      if (diff.options && diff.options.length > 0) {
+        return (
+          <div className="mb-4 w-full rounded-lg border bg-muted/30 p-4">
+            <div className="text-sm font-semibold mb-2">Similarity Options</div>
+            <div className="text-xs text-muted-foreground">
+              {diff.options.length} option(s) available
+            </div>
+          </div>
+        );
+      }
+      break;
+  }
+  
+  // Fallback: show diff type
+  return (
+    <div className="mb-4 w-full rounded-lg border bg-muted/30 p-4">
+      <div className="text-sm font-semibold mb-2">Diff Preview</div>
+      <div className="text-xs text-muted-foreground">Type: {diff.type}</div>
     </div>
   );
 }
@@ -474,10 +560,13 @@ export function InboxItemInput({
     );
   };
 
+  // Extract diff from preview_data.diff (structured) or fallback to diff (string)
+  const diffData = actionRequest?.preview_data?.diff || actionRequest?.diff;
+  
   return (
     <div className="flex w-full max-w-full flex-col items-start justify-start gap-2">
       {actionRequest?.summary && <SummaryRenderer summary={actionRequest.summary} />}
-      {actionRequest?.diff && <DiffRenderer diff={actionRequest.diff} />}
+      {diffData && <DiffRenderer diff={diffData} toolName={actionRequest?.name} />}
 
       {showArgsOutsideCards && <ArgsRenderer args={actionArgs} />}
 

@@ -35,6 +35,9 @@ export interface EnrichmentProposal {
   };
   status: "pending" | "approved" | "rejected";
   filename?: string;
+  preview_data?: {
+    diff?: any; // SemanticDiff structure from backend
+  };
 }
 
 export function EnrichmentView() {
@@ -142,6 +145,7 @@ export function EnrichmentView() {
                   enrichment: data.enrichment,
                   status: "pending",
                   filename: data.filename,
+                  preview_data: data.preview_data, // Include diff data if available
                 });
                 // Pre-select first artifact type if available
                 if (data.enrichment.artifact_types?.length > 0) {
@@ -164,6 +168,7 @@ export function EnrichmentView() {
                     enrichment: createData.enrichment,
                     status: "pending",
                     filename: createData.filename,
+                    preview_data: createData.preview_data, // Include diff data if available
                   });
                   if (createData.enrichment.artifact_types?.length > 0) {
                     newSelectedTypes.set(artifactId, [createData.enrichment.artifact_types[0]]);
@@ -404,6 +409,13 @@ export function EnrichmentView() {
                   </div>
                 </div>
 
+                {/* Diff Preview (if available) */}
+                {proposal.preview_data?.diff && (
+                  <div className="mb-4 p-4 border rounded-lg bg-muted/30">
+                    {renderEnrichmentDiff(proposal.preview_data.diff)}
+                  </div>
+                )}
+
                 {/* Summary */}
                 {proposal.enrichment.summary && (
                   <div className="mb-4 p-3 bg-muted/50 rounded-md">
@@ -513,6 +525,76 @@ export function EnrichmentView() {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Render enrichment diff view (similar to ApprovalCard)
+function renderEnrichmentDiff(diff: any): React.ReactNode {
+  if (!diff || diff.type !== "progression") {
+    return null;
+  }
+
+  const metadata = diff.metadata || {};
+  const progression = metadata.progression || {};
+  
+  return (
+    <div className="space-y-3">
+      <div className="text-sm font-semibold">{metadata.title || "Enrichment Proposal"}</div>
+      {metadata.description && (
+        <div className="text-xs text-muted-foreground">{metadata.description}</div>
+      )}
+      <div className="grid grid-cols-2 gap-4 text-xs border-t pt-3">
+        <div>
+          <div className="font-medium mb-2 text-muted-foreground">{metadata.leftLabel || "Previous State"}</div>
+          {diff.left && (
+            <div className="space-y-1 text-muted-foreground">
+              {diff.left.artifact_types?.length > 0 ? (
+                <div>Types: {diff.left.artifact_types.join(", ") || "None"}</div>
+              ) : (
+                <div className="italic">No previous enrichment</div>
+              )}
+              {diff.left.category && <div>Category: {diff.left.category}</div>}
+              {diff.left.title && <div>Title: {diff.left.title}</div>}
+            </div>
+          )}
+        </div>
+        <div>
+          <div className="font-medium mb-2">{metadata.rightLabel || "Proposed Enrichment"}</div>
+          {diff.right && (
+            <div className="space-y-1">
+              {diff.right.artifact_types?.length > 0 && (
+                <div className="text-green-600 dark:text-green-400 font-medium">
+                  Types: {diff.right.artifact_types.join(", ")}
+                </div>
+              )}
+              {diff.right.category && (
+                <div>Category: {diff.right.category}</div>
+              )}
+              {diff.right.title && (
+                <div>Title: {diff.right.title}</div>
+              )}
+              {diff.right.key_concepts?.length > 0 && (
+                <div className="mt-2">
+                  <div className="text-xs text-muted-foreground mb-1">Key Concepts:</div>
+                  <div className="flex flex-wrap gap-1">
+                    {diff.right.key_concepts.slice(0, 5).map((concept: string, idx: number) => (
+                      <span key={idx} className="px-1.5 py-0.5 bg-muted rounded text-xs">
+                        {concept}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {progression.completionPercentage !== undefined && (
+        <div className="text-xs text-muted-foreground pt-2 border-t">
+          Completion: {progression.completionPercentage.toFixed(0)}%
+        </div>
+      )}
     </div>
   );
 }

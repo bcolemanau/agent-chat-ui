@@ -174,8 +174,8 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
       // Small delay to allow backend to process enrichment
       const timer = setTimeout(() => {
         setPendingArtifactIds((prev) => [...prev, ...newArtifactIds]);
-        // Switch to enrichment view in workbench
-        stream.setWorkbenchView("enrichment").catch(console.error);
+        // Switch to decisions view in workbench
+        stream.setWorkbenchView("decisions").catch(console.error);
       }, 1500);
 
       return () => clearTimeout(timer);
@@ -263,8 +263,8 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
       
       if (artifactIds.length > 0) {
         setPendingArtifactIds(artifactIds);
-        // Switch to enrichment view in workbench
-        stream.setWorkbenchView("enrichment").catch(console.error);
+        // Switch to decisions view in workbench
+        stream.setWorkbenchView("decisions").catch(console.error);
       }
     }
 
