@@ -14,6 +14,10 @@ export interface ActionRequest {
   description?: string;
   diff?: string;
   summary?: string;
+  preview_data?: {
+    diff?: any;
+    [key: string]: any;
+  };
 }
 
 export interface ReviewConfig {

@@ -43,9 +43,6 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const [isAgentPanelMaximized, setIsAgentPanelMaximized] = useState(false);
     const [agentPanelHeight, setAgentPanelHeight] = useState(400); // Default width in pixels (reused for right panel)
     const [isResizing, setIsResizing] = useState(false);
-    const minPercent = 0.25; // 25% minimum for both panels
-    const maxPercent = 0.75; // 75% maximum for both panels
-    const isAgentPanelMaximized = agentPanelWidthPercent >= maxPercent;
     const [isArtifactOpen, closeArtifact] = useArtifactOpen();
     const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
@@ -181,7 +178,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             // Force layout recalculation
             void agentPanelRef.current.offsetWidth;
         }
-    }, [isAgentPanelOpen, agentPanelWidthPercent]);
+    }, [isAgentPanelOpen, agentPanelHeight]);
 
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
