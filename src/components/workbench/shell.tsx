@@ -202,6 +202,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         // If approval count increased and we're not already on decisions page, auto-route
         if (approvalCount > 0 && approvalCount > lastApprovalCount.current && !isOnDecisionsPage) {
             console.log(`[WorkbenchShell] New approvals detected (${approvalCount}), auto-routing to Decisions view`);
+            lastSyncedView.current = "decisions";
             router.push(workbenchHref("/workbench/decisions"));
         }
         
@@ -223,10 +224,15 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     }, [viewMode, stream]);
 
     // Fix: If on /workbench/decisions but viewMode is a map sub-view, navigate to /workbench/map
+    // BUT only if we're not explicitly intending to stay on decisions (e.g. via tab selection)
     useEffect(() => {
         if (pathname?.includes("/workbench/decisions") && ["map", "workflow", "artifacts"].includes(viewMode)) {
-            console.log(`[WorkbenchShell] On decisions route but viewMode is ${viewMode}, navigating to /workbench/map`);
-            router.push(workbenchHref(`/workbench/map?view=${viewMode}`));
+            // Check if this was a recent manual navigation to decisions
+            const isManualDecisions = lastSyncedView.current === "decisions";
+            if (!isManualDecisions) {
+                console.log(`[WorkbenchShell] On decisions route but viewMode is ${viewMode}, navigating to /workbench/map`);
+                router.push(workbenchHref(`/workbench/map?view=${viewMode}`));
+            }
         }
     }, [pathname, viewMode, router]);
 
@@ -568,6 +574,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         )}
                                         onClick={() => {
                                             closeArtifact();
+                                            lastSyncedView.current = "decisions";
                                             stream.setWorkbenchView("decisions" as any);
                                             router.push(workbenchHref("/workbench/decisions"));
                                         }}
@@ -638,8 +645,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         <ArtifactContent className="max-w-4xl mx-auto bg-background border rounded-lg shadow-sm min-h-[500px]" />
                                     </div>
                                 </div>
-                            ) : pathname?.includes("/workbench/decisions") && !["map", "workflow", "artifacts"].includes(viewMode) ? (
-                                // Only show Decisions if we're on the decisions route AND viewMode is not a map sub-view
+                            ) : pathname?.includes("/workbench/decisions") ? (
+                                // Show Decisions if we're on the decisions route
                                 <div className="h-full w-full overflow-hidden">
                                     {children}
                                 </div>
