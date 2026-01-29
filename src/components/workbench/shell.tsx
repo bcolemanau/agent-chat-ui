@@ -180,6 +180,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     router.push(workbenchHref("/workbench/map"));
                 }
             } else if (workbenchView === "decisions") {
+                setViewMode("decisions");
                 closeArtifact();
                 router.push(workbenchHref("/workbench/decisions"));
             } else if (workbenchView === "discovery") {
@@ -202,6 +203,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         // If approval count increased and we're not already on decisions page, auto-route
         if (approvalCount > 0 && approvalCount > lastApprovalCount.current && !isOnDecisionsPage) {
             console.log(`[WorkbenchShell] New approvals detected (${approvalCount}), auto-routing to Decisions view`);
+            setViewMode("decisions");
             lastSyncedView.current = "decisions";
             router.push(workbenchHref("/workbench/decisions"));
         }
@@ -570,10 +572,11 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         size="sm"
                                         className={cn(
                                             "h-8 px-3 gap-2 text-xs font-medium transition-all relative",
-                                            pathname?.includes("/workbench/decisions") ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                            pathname?.includes("/workbench/decisions") || viewMode === "decisions" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                                         )}
                                         onClick={() => {
                                             closeArtifact();
+                                            setViewMode("decisions");
                                             lastSyncedView.current = "decisions";
                                             stream.setWorkbenchView("decisions" as any);
                                             router.push(workbenchHref("/workbench/decisions"));
