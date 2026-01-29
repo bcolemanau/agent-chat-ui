@@ -1,16 +1,14 @@
 /**
- * Hook to get the count of pending approvals.
- * 
- * Issue #14: Used for notification badge showing total pending count.
+ * Hook to get the count of pending previews (proposals awaiting approval).
+ * Used for notification badge on Decisions tab.
  */
 import { useMemo } from "react";
-import { useUnifiedApprovals } from "./use-unified-approvals";
+import { useUnifiedPreviews } from "./use-unified-previews";
 
 export function useApprovalCount(): number {
-  const approvals = useUnifiedApprovals();
-  
+  const previews = useUnifiedPreviews();
+
   return useMemo(() => {
-    // Count only pending approvals (not processing/approved/rejected)
-    return approvals.filter(item => item.status === "pending").length;
-  }, [approvals]);
+    return previews.filter((item) => item.status === "pending").length;
+  }, [previews]);
 }

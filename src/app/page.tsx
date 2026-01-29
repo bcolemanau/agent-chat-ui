@@ -1,6 +1,6 @@
-import { redirect } from "next/navigation";
+import { Login } from "@/components/Login";
 
 export default function HomePage() {
-  // Redirect root URL to workbench view (home)
-  redirect("/workbench/map");
+  // Root URL shows the branded login screen
+  return <Login />;
 }

@@ -3,20 +3,30 @@
 
 import { useBranding } from "@/providers/Branding";
 import { Button } from "./ui/button";
-import { signIn } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export function Login() {
     const { branding, loading } = useBranding();
     const [isSigningIn, setIsSigningIn] = useState(false);
+    const { status } = useSession();
+    const router = useRouter();
+
+    // If already authenticated, go straight to workbench
+    useEffect(() => {
+        if (status === "authenticated") {
+            router.replace("/workbench/map");
+        }
+    }, [status, router]);
 
     const handleLogin = async () => {
         setIsSigningIn(true);
         await signIn("google");
     };
 
-    if (loading) {
+    if (loading || status === "loading") {
         return (
             <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
                 <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
