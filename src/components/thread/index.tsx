@@ -171,14 +171,9 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
         return updated;
       });
 
-      // Small delay to allow backend to process enrichment
-      const timer = setTimeout(() => {
-        setPendingArtifactIds((prev) => [...prev, ...newArtifactIds]);
-        // Switch to decisions view in workbench
-        stream.setWorkbenchView("decisions").catch(console.error);
-      }, 1500);
-
-      return () => clearTimeout(timer);
+      // Switch to decisions view in workbench
+      // The proposals will appear automatically via the stream injection from the backend
+      stream.setWorkbenchView("decisions").catch(console.error);
     }
   }, [uploadedDocuments, processedArtifactIds]);
 
@@ -257,15 +252,9 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     console.log("[Thread] uploadFolder result:", result);
 
     if (result && result.successful > 0) {
-      const artifactIds = result.artifacts
-        .filter((a) => a.status === "success")
-        .map((a) => a.artifact_id);
-      
-      if (artifactIds.length > 0) {
-        setPendingArtifactIds(artifactIds);
-        // Switch to decisions view in workbench
-        stream.setWorkbenchView("decisions").catch(console.error);
-      }
+      // Switch to decisions view in workbench
+      // The proposals will appear automatically via the stream injection from the backend
+      stream.setWorkbenchView("decisions").catch(console.error);
     }
 
     e.target.value = "";

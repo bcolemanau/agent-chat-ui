@@ -15,81 +15,14 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQueryState } from "nuqs";
 import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "@/components/thread/artifact";
-import { PanelLeft, FileText, Layout, GitGraph, CheckSquare, AlertCircle } from "lucide-react";
+import { PanelLeft, FileText, Layout, GitGraph, CheckSquare } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductPanel } from "@/components/product-panel/ProductPanel";
 import { useUnifiedPreviews } from "./hooks/use-unified-previews";
 import { useApprovalCount } from "./hooks/use-approval-count";
-import { ApprovalCard } from "./approval-card";
-
-function DecisionsView() {
-    const stream = useStreamContext();
-    const previews = useUnifiedPreviews();
-
-    const groupedPreviews = previews.reduce((acc, item) => {
-        if (!acc[item.type]) {
-            acc[item.type] = [];
-        }
-        acc[item.type].push(item);
-        return acc;
-    }, {} as Record<string, typeof previews>);
-
-    const previewTypes = Object.keys(groupedPreviews);
-
-    return (
-        <div className="flex flex-col h-full overflow-auto p-6">
-            <div className="mb-6 shrink-0">
-                <h1 className="text-2xl font-semibold">Decisions</h1>
-                <p className="text-sm text-muted-foreground mt-1">
-                    Review and approve pending actions from agents
-                </p>
-            </div>
-
-            {previews.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                    <div className="text-center max-w-md">
-                        <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                        <h3 className="text-lg font-semibold mb-2">No Pending Decisions</h3>
-                        <p className="text-sm text-muted-foreground">
-                            New decisions will appear here when agents have proposals for you to review.
-                        </p>
-                    </div>
-                </div>
-            ) : (
-                <div className="flex flex-col gap-6">
-                    {previewTypes.map((type) => (
-                        <div key={type}>
-                            <h2 className="text-lg font-medium mb-3 capitalize">
-                                {getTypeLabel(type)} ({groupedPreviews[type].length})
-                            </h2>
-                            <div className="grid gap-4">
-                                {groupedPreviews[type].map((item) => (
-                                    <ApprovalCard
-                                        key={item.id}
-                                        item={item}
-                                        stream={stream}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-function getTypeLabel(type: string): string {
-    const labels: Record<string, string> = {
-        classify_intent: "Project Classification",
-        propose_hydration_complete: "Hydration Complete",
-        generate_concept_brief: "Concept Brief Options",
-        approve_enrichment: "Enrichment",
-        enrichment: "Enrichment",
-    };
-    return labels[type] || type.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
-}
+import { DecisionsPanel } from "./decisions-panel";
 
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
@@ -98,14 +31,22 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const { status } = useSession();
     const { isRecording, startRecording, stopRecording, downloadRecording } = useRecording();
 
-    // Robust Mode Derivation
+    // Robust Mode Derivation (active_mode and active_agent are synced from graph/overlay)
     const values = (stream as any)?.values;
-    const rawAgent = values?.active_agent;
-    // Fallback: If active_agent is missing, infer from visualization content or default to supervisor
-    const activeAgent = rawAgent ||
-        (values?.visualization_html?.includes("active_node='hydrator'") || values?.visualization_html?.includes("Hydrator")
-            ? "hydrator"
-            : "supervisor");
+    const rawAgent = values?.active_mode ?? values?.active_agent;
+    const activeAgent: "supervisor" | "hydrator" | "concept" | "architecture" =
+        rawAgent === "hydrator" || rawAgent === "concept" || rawAgent === "architecture"
+            ? rawAgent
+            : (values?.visualization_html?.includes("active_node='hydrator'") || values?.visualization_html?.includes("Hydrator")
+                ? "hydrator"
+                : "supervisor");
+
+    const MODE_OPTIONS: { value: "supervisor" | "hydrator" | "concept" | "architecture"; label: string }[] = [
+        { value: "supervisor", label: "Supervisor" },
+        { value: "hydrator", label: "Hydrator" },
+        { value: "concept", label: "Concept" },
+        { value: "architecture", label: "Architecture" },
+    ];
 
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
     const [threadId] = useQueryState("threadId");
@@ -352,55 +293,44 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     </div>
 
                     <div className="flex items-center gap-3">
-                        {/* Workflow Status + Debug Agent Switcher */}
+                        {/* Active mode selector */}
                         <div className="flex items-center gap-2 mr-2">
-                            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted/50 border border-border shadow-sm">
-                                <Activity className={cn(
-                                    "w-3.5 h-3.5",
-                                    stream.isLoading ? "text-amber-500 animate-pulse" : "text-emerald-500"
-                                )} />
-                                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                                    Mode:
-                                </span>
-                                <span className="text-xs font-semibold text-foreground capitalize">
-                                    {activeAgent}
-                                </span>
-                            </div>
-
-                            {/* Debug-only agent switcher (quick manual override) */}
-                            <div className="flex items-center gap-1">
-                                {["supervisor", "hydrator", "concept"].map((agent) => (
-                                    <Tooltip key={agent}>
-                                        <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className={cn(
-                                                    "h-7 w-7 text-[10px] font-semibold uppercase rounded-full border border-dashed",
-                                                    activeAgent === agent
-                                                        ? "bg-primary/10 text-primary border-primary/40"
-                                                        : "text-muted-foreground hover:text-foreground"
-                                                )}
-                                                onClick={() => {
-                                                    const fn = (stream as any).setActiveAgentDebug as
-                                                        | ((a: "supervisor" | "hydrator" | "concept") => Promise<void>)
-                                                        | undefined;
-                                                    if (fn) {
-                                                        fn(agent as "supervisor" | "hydrator" | "concept").catch((e) =>
-                                                            console.warn("[WorkbenchShell] Failed to set active agent (debug):", e)
-                                                        );
-                                                    } else {
-                                                        console.warn("[WorkbenchShell] setActiveAgentDebug not available on stream context");
-                                                    }
-                                                }}
-                                            >
-                                                {agent.charAt(0).toUpperCase()}
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Debug: Switch to {agent} agent</TooltipContent>
-                                    </Tooltip>
-                                ))}
-                            </div>
+                            <Activity className={cn(
+                                "w-3.5 h-3.5 shrink-0",
+                                stream.isLoading ? "text-amber-500 animate-pulse" : "text-emerald-500"
+                            )} />
+                            <Select
+                                value={activeAgent}
+                                onValueChange={(value) => {
+                                    const fn = (stream as any).setActiveAgentDebug as
+                                        | ((a: "supervisor" | "hydrator" | "concept" | "architecture") => Promise<void>)
+                                        | undefined;
+                                    console.log("[WorkbenchShell] Mode dropdown changed to", value, "setActiveAgentDebug:", fn ? "present" : "MISSING");
+                                    if (fn) {
+                                        fn(value as "supervisor" | "hydrator" | "concept" | "architecture").catch((e) =>
+                                            console.warn("[WorkbenchShell] Failed to set active mode:", e)
+                                        );
+                                    } else {
+                                        console.warn("[WorkbenchShell] setActiveAgentDebug not on stream context — mode not sent to backend");
+                                    }
+                                }}
+                            >
+                                <SelectTrigger
+                                    className={cn(
+                                        "h-8 w-[140px] text-xs font-medium capitalize border-border bg-muted/50 shadow-sm",
+                                        stream.isLoading && "opacity-80"
+                                    )}
+                                >
+                                    <SelectValue placeholder="Mode" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {MODE_OPTIONS.map((opt) => (
+                                        <SelectItem key={opt.value} value={opt.value} className="text-xs capitalize">
+                                            {opt.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         <div className="h-6 w-[1px] bg-border mx-1" />
@@ -656,11 +586,11 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                             ) : pathname?.includes("/workbench/hydration") && viewMode === "decisions" ? (
                                 // If on hydration page but user selected Decisions tab, show Decisions view
                                 <div className="h-full w-full overflow-hidden">
-                                    <DecisionsView />
+                                    <DecisionsPanel />
                                 </div>
                             ) : viewMode === "decisions" ? (
                                 <div className="h-full w-full overflow-hidden">
-                                    <DecisionsView />
+                                    <DecisionsPanel />
                                 </div>
                             ) : (
                                 <div className="h-full w-full overflow-hidden">

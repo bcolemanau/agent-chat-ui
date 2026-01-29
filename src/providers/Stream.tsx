@@ -8,6 +8,7 @@ import React, {
   useEffect,
   useMemo,
   useRef,
+  useCallback,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -68,7 +69,12 @@ type StreamContextType = UseStream<StateType, {
   setWorkbenchView: (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "decisions") => Promise<void>;
   /** Issue 37: Update thread state (e.g. after Begin Enriching handoff). */
   updateState?: (update: { values?: Record<string, unknown> }) => Promise<void>;
-  setActiveAgentDebug?: (agent: "supervisor" | "hydrator" | "concept") => Promise<void>;
+  /** After Apply, backend triggers a graph run; call this after a short delay to refetch thread state (new messages, active_mode). */
+  refetchThreadState?: () => Promise<void>;
+  setActiveAgentDebug?: (agent: "supervisor" | "hydrator" | "concept" | "architecture") => Promise<void>;
+  /** Increment after a decision is applied so KG, Artifacts, Workflow refetch. */
+  workbenchRefreshKey?: number;
+  triggerWorkbenchRefresh?: () => void;
   apiUrl: string;
 };
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -205,21 +211,33 @@ const StreamSession = ({
     }
   };
 
-  // DEBUG: manually override the active agent for this thread.
-  const setActiveAgentDebug = async (agent: "supervisor" | "hydrator" | "concept") => {
-    if (!threadId || !apiUrl) return;
+  // When the user selects mode from the dropdown, we prefer overlay for a window so the selector doesn't revert.
+  const userSetModeAtRef = useRef<number>(0);
+  const USER_MODE_PRIORITY_MS = 60000; // 1 min: keep user's dropdown choice until backend/graph has caught up
 
-    console.log(`[Stream] DEBUG: Forcing active_agent -> ${agent}`);
+  // DEBUG: manually override the active agent for this thread.
+  const setActiveAgentDebug = async (agent: "supervisor" | "hydrator" | "concept" | "architecture") => {
+    if (!threadId || !apiUrl) {
+      console.warn(`[Stream] setActiveAgentDebug skipped: threadId=${threadId ?? "null"}, apiUrl=${apiUrl ? "set" : "null"} (need a thread; send a message first)`);
+      return;
+    }
+
+    console.log(`[Stream] Setting active mode -> ${agent} (threadId=${threadId}, apiUrl=${apiUrl})`);
+    userSetModeAtRef.current = Date.now();
+    // Optimistic update so the mode dropdown reflects the new value immediately (stream won't refetch until next message).
+    valuesOverlayRef.current = { ...valuesOverlayRef.current, active_agent: agent, active_mode: agent };
+    setValuesOverlay({ ...valuesOverlayRef.current });
     try {
       const headers: Record<string, string> = {};
       if (orgContext) headers["X-Organization-Context"] = orgContext;
 
       const client = createClient(apiUrl, apiKey ?? undefined, headers);
       await client.threads.updateState(threadId, {
-        values: { active_agent: agent },
+        values: { active_agent: agent, active_mode: agent },
       });
+      console.log(`[Stream] Backend state updated to mode=${agent}`);
     } catch (e) {
-      console.error("[Stream] Failed to set active agent (debug):", e);
+      console.error("[Stream] Failed to set active mode (backend may not have updated):", e);
     }
   };
 
@@ -231,23 +249,80 @@ const StreamSession = ({
       prevThreadIdRef.current = threadId ?? null;
       valuesOverlayRef.current = {};
       setValuesOverlay({});
+      userSetModeAtRef.current = 0;
     }
   }, [threadId]);
 
+  // When the agent sets mode (e.g. set_active_mode tool), stream updates; sync overlay so the dropdown shows it.
+  // Don't overwrite overlay if the user just set mode from the dropdown (avoid immediate revert).
+  const rawValues = (rawStream as any)?.values;
+  const streamMode = rawValues?.active_mode ?? rawValues?.active_agent;
+  useEffect(() => {
+    if (streamMode == null || typeof streamMode !== "string") return;
+    const userJustSetMode = Date.now() - userSetModeAtRef.current < USER_MODE_PRIORITY_MS;
+    if (userJustSetMode) return;
+    const overlayMode = valuesOverlayRef.current?.active_mode ?? valuesOverlayRef.current?.active_agent;
+    if (overlayMode === streamMode) return;
+    valuesOverlayRef.current = { ...valuesOverlayRef.current, active_agent: streamMode, active_mode: streamMode };
+    setValuesOverlay({ ...valuesOverlayRef.current });
+  }, [streamMode]);
+
   // Issue 37: Update thread state (e.g. after Begin Enriching → handoff to Enrichment).
+  // If values._appendMessages is present, merge those into overlay messages (so approval message appears in chat)
+  // and do not send _appendMessages to the backend (backend already wrote them to thread state).
   const updateState = async (update: { values?: Record<string, unknown> }) => {
     if (!threadId || !apiUrl || !update?.values) return;
     try {
-      valuesOverlayRef.current = { ...valuesOverlayRef.current, ...update.values };
+      const values = update.values;
+      const appendMessages = values._appendMessages as unknown[] | undefined;
+      const rest = appendMessages
+        ? Object.fromEntries(Object.entries(values).filter(([k]) => k !== "_appendMessages"))
+        : values;
+      if (appendMessages?.length && Array.isArray(appendMessages)) {
+        const currentMessages = (rawStream as any)?.values?.messages ?? [];
+        const merged = Array.isArray(currentMessages)
+          ? [...currentMessages, ...appendMessages]
+          : [...appendMessages];
+        valuesOverlayRef.current = { ...valuesOverlayRef.current, ...rest, messages: merged };
+      } else {
+        valuesOverlayRef.current = { ...valuesOverlayRef.current, ...rest };
+      }
       setValuesOverlay({ ...valuesOverlayRef.current });
       const headers: Record<string, string> = {};
       if (orgContext) headers["X-Organization-Context"] = orgContext;
       const client = createClient(apiUrl, apiKey ?? undefined, headers);
-      await client.threads.updateState(threadId, { values: update.values });
+      await client.threads.updateState(threadId, { values: rest });
     } catch (e) {
       console.error("[Stream] Failed to update state:", e);
     }
   };
+
+  // After Apply, backend triggers a graph run; refetch thread state so we see new messages and active_mode.
+  const refetchThreadState = useCallback(async () => {
+    if (!threadId || !apiUrl) return;
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (apiKey) headers["X-Api-Key"] = apiKey;
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      const base = apiUrl.replace(/\/+$/, "");
+      const res = await fetch(`${base}/threads/${threadId}/state`, { headers });
+      if (!res.ok) return;
+      const data = (await res.json()) as { values?: Record<string, unknown> };
+      const values = data?.values;
+      if (values && typeof values === "object") {
+        valuesOverlayRef.current = { ...valuesOverlayRef.current, ...values };
+        setValuesOverlay({ ...valuesOverlayRef.current });
+      }
+    } catch (e) {
+      console.warn("[Stream] refetchThreadState failed:", e);
+    }
+  }, [threadId, apiUrl, apiKey, orgContext]);
+
+  // Broad refresh after a decision is applied (KG, Artifacts, Workflow may have changed).
+  const [workbenchRefreshKey, setWorkbenchRefreshKey] = useState(0);
+  const triggerWorkbenchRefresh = useCallback(() => {
+    setWorkbenchRefreshKey((k) => k + 1);
+  }, []);
 
   // Dynamic Proxy Wrapper
   // This ensure ANY access to the context always gets the latest hook state 
@@ -260,7 +335,10 @@ const StreamSession = ({
         if (prop === "apiUrl") return apiUrl;
         if (prop === "setWorkbenchView") return setWorkbenchView;
         if (prop === "updateState") return updateState;
+        if (prop === "refetchThreadState") return refetchThreadState;
         if (prop === "setActiveAgentDebug") return setActiveAgentDebug;
+        if (prop === "workbenchRefreshKey") return workbenchRefreshKey;
+        if (prop === "triggerWorkbenchRefresh") return triggerWorkbenchRefresh;
         if (prop === "threadId") return threadId ?? (rawStream as any)?.[prop];
 
         // Safety check: if rawStream itself is null, provide safe defaults
@@ -277,13 +355,32 @@ const StreamSession = ({
         // We read from rawStream directly to ensure we have the absolute latest state
         let value = (rawStream as any)[prop];
 
-        // Merge valuesOverlay so Mode (active_agent) updates after updateState (e.g. Begin Enriching)
+        // Merge valuesOverlay so Mode and messages update. Prefer overlay when the user has set mode from the
+        // dropdown recently (USER_MODE_PRIORITY_MS) so the selector doesn't revert on refetch or stream updates.
         if (prop === "values" && value && Object.keys(valuesOverlay).length > 0) {
-          value = { ...value, ...valuesOverlay };
+          const merged = { ...value, ...valuesOverlay };
+          const overlayHasMode =
+            valuesOverlay.active_mode !== undefined || valuesOverlay.active_agent !== undefined;
+          const userJustSetMode = Date.now() - userSetModeAtRef.current < USER_MODE_PRIORITY_MS;
+          const useOverlayForMode = overlayHasMode && userJustSetMode;
+          if (!useOverlayForMode) {
+            const streamModeVal = (value as any).active_mode ?? (value as any).active_agent;
+            if (streamModeVal != null) {
+              merged.active_mode = streamModeVal;
+              merged.active_agent = streamModeVal;
+            }
+          }
+          value = merged;
+        }
+        // Prefer overlay messages only while stream hasn't caught up (e.g. after Apply we appended; once run adds more, use stream)
+        if (prop === "messages") {
+          const raw = (value ?? []) as any[];
+          const overlay = valuesOverlay.messages as any[] | undefined;
+          if (Array.isArray(overlay) && overlay.length > raw.length) return overlay;
+          return value ?? [];
         }
 
         // Safety Fallbacks
-        if (prop === "messages") return value ?? [];
         if (prop === "values") return value ?? { messages: [], ui: [] };
         if (prop === "error") return value ?? null;
         if (prop === "isLoading") return value ?? false;
@@ -294,7 +391,7 @@ const StreamSession = ({
         return value;
       }
     });
-  }, [rawStream, apiKey, apiUrl, threadId, orgContext, valuesOverlay]);
+  }, [rawStream, apiKey, apiUrl, threadId, orgContext, valuesOverlay, workbenchRefreshKey, triggerWorkbenchRefresh, refetchThreadState]);
 
   useEffect(() => {
     // For relative paths (like /api), check via /api/info endpoint
