@@ -8,10 +8,6 @@ const __dirname = path.dirname(__filename);
 const nextConfig = {
   output: "standalone",
   outputFileTracingRoot: path.join(__dirname), // Explicitly use current directory
-  // Disable telemetry for faster builds
-  telemetry: false,
-  // Optimize build performance
-  swcMinify: true,
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",

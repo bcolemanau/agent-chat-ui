@@ -10,7 +10,6 @@ import { CheckCircle2, XCircle, Edit, LoaderCircle, AlertCircle } from "lucide-r
 import { cn } from "@/lib/utils";
 import { UnifiedPreviewItem } from "./hooks/use-unified-previews";
 import { toast } from "sonner";
-import { Decision } from "@/components/thread/agent-inbox/types";
 import { HydrationDiffView } from "./hydration-diff-view";
 import { ConceptBriefDiffView as ConceptBriefDiffViewComponent } from "./concept-brief-diff-view";
 import { HydrationDiffView as HydrationDiffViewType, ConceptBriefDiffView } from "@/lib/diff-types";
@@ -18,9 +17,11 @@ import { HydrationDiffView as HydrationDiffViewType, ConceptBriefDiffView } from
 interface ApprovalCardProps {
   item: UnifiedPreviewItem;
   stream: any;
+  /** Called when user approves or rejects; used to persist in Decisions history (e.g. localStorage). */
+  onDecisionProcessed?: (item: UnifiedPreviewItem, status: "approved" | "rejected") => void;
 }
 
-export function ApprovalCard({ item, stream }: ApprovalCardProps) {
+export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCardProps) {
   const router = useRouter();
   const [threadIdFromUrl] = useQueryState("threadId");
   const [status, setStatus] = useState<"pending" | "processing" | "approved" | "rejected">(item.status);
@@ -34,6 +35,7 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
     if (item.type === "classify_intent") {
       if (decisionType === "reject") {
         setStatus("rejected");
+        onDecisionProcessed?.(item, "rejected");
         toast.info("Classification not applied");
         setIsLoading(false);
         return;
@@ -61,15 +63,25 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
           }
           const data = await res.json();
           setStatus("approved");
+          onDecisionProcessed?.(item, "approved");
           toast.success("Begin Enriching", {
             description: "Classification applied. You can now work with the Enrichment agent.",
           });
           if (typeof (stream as any).updateState === "function") {
             const values: Record<string, unknown> = {};
             if ((data as any).active_agent) values.active_agent = (data as any).active_agent;
+            if ((data as any).active_mode) values.active_mode = (data as any).active_mode;
             if ((data as any).current_trigger_id != null) values.current_trigger_id = (data as any).current_trigger_id;
+            if ((data as any).visualization_html) values.visualization_html = (data as any).visualization_html;
+            if ((data as any).project_name) values.project_name = (data as any).project_name;
+            if (Array.isArray((data as any).messages) && (data as any).messages.length)
+              values._appendMessages = (data as any).messages;
             if (Object.keys(values).length) await (stream as any).updateState({ values });
           }
+          if ((data as any).graph_run_triggered && typeof (stream as any).refetchThreadState === "function") {
+            setTimeout(() => (stream as any).refetchThreadState(), 3500);
+          }
+          (stream as any).triggerWorkbenchRefresh?.();
           // Land on map with Artifacts tab so user sees project content; /workbench/hydration only shows proposal diff (often empty)
           const href = threadId
             ? `/workbench/map?threadId=${encodeURIComponent(threadId)}&view=artifacts`
@@ -90,6 +102,7 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
     if (item.type === "propose_hydration_complete") {
       if (decisionType === "reject") {
         setStatus("rejected");
+        onDecisionProcessed?.(item, "rejected");
         toast.info("Hydration completion not applied");
         setIsLoading(false);
         return;
@@ -117,15 +130,25 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
           }
           const data = await res.json();
           setStatus("approved");
+          onDecisionProcessed?.(item, "approved");
           toast.success("Hydration Complete", {
             description: "Transitioning to Concept phase. The Concept agent will now help generate Concept Briefs.",
           });
           if (typeof (stream as any).updateState === "function") {
             const values: Record<string, unknown> = {};
             if ((data as any).active_agent) values.active_agent = (data as any).active_agent;
+            if ((data as any).active_mode) values.active_mode = (data as any).active_mode;
             if ((data as any).current_trigger_id != null) values.current_trigger_id = (data as any).current_trigger_id;
+            if ((data as any).visualization_html) values.visualization_html = (data as any).visualization_html;
+            if ((data as any).project_name) values.project_name = (data as any).project_name;
+            if (Array.isArray((data as any).messages) && (data as any).messages.length)
+              values._appendMessages = (data as any).messages;
             if (Object.keys(values).length) await (stream as any).updateState({ values });
           }
+          if ((data as any).graph_run_triggered && typeof (stream as any).refetchThreadState === "function") {
+            setTimeout(() => (stream as any).refetchThreadState(), 3500);
+          }
+          (stream as any).triggerWorkbenchRefresh?.();
           // Navigate to map view to see the transition
           const href = threadId
             ? `/workbench/map?threadId=${encodeURIComponent(threadId)}&view=artifacts`
@@ -146,6 +169,7 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
     if (item.type === "link_uploaded_document") {
       if (decisionType === "reject") {
         setStatus("rejected");
+        onDecisionProcessed?.(item, "rejected");
         toast.info("Artifact link not applied");
         setIsLoading(false);
         return;
@@ -172,11 +196,11 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
           }
           const data = await res.json();
           setStatus("approved");
+          onDecisionProcessed?.(item, "approved");
           toast.success("Artifact Linked", {
             description: `Successfully linked ${data.filename || "artifact"} to ${data.artifact_type || "KG"}`,
           });
-          // Optionally refresh the view to show the linked artifact
-          // No state update needed - KG changes are persisted
+          (stream as any).triggerWorkbenchRefresh?.();
         } catch (error: any) {
           console.error("[ApprovalCard] Error applying artifact link:", error);
           setStatus("pending");
@@ -188,66 +212,159 @@ export function ApprovalCard({ item, stream }: ApprovalCardProps) {
       }
     }
 
-    try {
-      // Find the interrupt for this item (HITL flow for other tools)
-      const interrupts = (stream as any)?.interrupt;
-      const interruptArray = Array.isArray(interrupts) ? interrupts : [interrupts];
-      const interrupt = item.interruptId
-        ? interruptArray.find((int: any) => int.id === item.interruptId)
-        : interruptArray[item.interruptIndex || 0];
+    // Enrichment from ToolMessages (upload/folder): apply via API; no LangGraph interrupt
+    const isEnrichmentType =
+      item.type === "enrichment" || item.type === "propose_enrichment" || item.type === "approve_enrichment";
+    if (isEnrichmentType && item.fromMessages) {
+      const artifactId =
+        item.data?.args?.artifact_id ?? item.data?.preview_data?.artifact_id;
+      const cycleId =
+        item.data?.args?.cycle_id ?? item.data?.preview_data?.cycle_id;
+      const enrichmentData =
+        item.data?.args?.enrichment_data ?? item.data?.preview_data?.enrichment_data;
+      const artifactTypes =
+        enrichmentData?.artifact_types ?? ["Requirements"];
 
-      if (!interrupt) {
-        throw new Error("Interrupt not found");
-      }
-
-      let decision: any;
-      if (decisionType === "approve") {
-        decision = { type: "approve" };
-      } else if (decisionType === "reject") {
-        decision = { type: "reject", message: "Rejected by user" };
-      } else {
-        decision = { type: "edit", edited_action: item.data };
-      }
-
-      const originThreadId = item.threadId as string | undefined;
-      const currentThreadId = (stream as any)?.threadId as string | undefined;
-      if (originThreadId && currentThreadId && originThreadId !== currentThreadId) {
-        setStatus("pending");
-        setIsLoading(false);
-        toast.error("This decision belongs to a different project", {
-          description: "Please select the original project in the sidebar, then approve the decision again.",
-        });
+      if (decisionType === "reject") {
+        try {
+          const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+          if (orgContext) headers["X-Organization-Context"] = orgContext;
+          const res = await fetch(
+            `/api/artifacts/${encodeURIComponent(artifactId)}/enrichment/${encodeURIComponent(cycleId)}/reject`,
+            { method: "POST", headers, body: JSON.stringify({ thread_id: threadId }) }
+          );
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error((err as any).detail || "Failed to reject enrichment");
+          }
+          setStatus("rejected");
+          onDecisionProcessed?.(item, "rejected");
+          toast.info("Enrichment rejected");
+        } catch (error: any) {
+          console.error("[ApprovalCard] Error rejecting enrichment:", error);
+          setStatus("pending");
+          toast.error("Error", { description: error.message || "Failed to reject enrichment" });
+        } finally {
+          setIsLoading(false);
+        }
         return;
       }
-
-      if (typeof (stream as any).submit === "function") {
-        (stream as any).submit(
-          {},
-          {
-            command: {
-              resume: {
-                decisions: [decision as Decision],
-              },
-            },
+      if (decisionType === "approve" && artifactId && cycleId) {
+        try {
+          const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+          if (orgContext) headers["X-Organization-Context"] = orgContext;
+          const res = await fetch(
+            `/api/artifacts/${encodeURIComponent(artifactId)}/enrichment/${encodeURIComponent(cycleId)}/approve`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                artifact_types: Array.isArray(artifactTypes) ? artifactTypes : [artifactTypes],
+                thread_id: threadId,
+              }),
+            }
+          );
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error((err as any).detail || "Failed to apply enrichment");
           }
-        );
-      } else {
-        throw new Error("Stream submit method not available");
+          setStatus("approved");
+          onDecisionProcessed?.(item, "approved");
+          toast.success("Enrichment applied", {
+            description: "Metadata and artifact types have been saved.",
+          });
+          (stream as any).triggerWorkbenchRefresh?.();
+        } catch (error: any) {
+          console.error("[ApprovalCard] Error applying enrichment:", error);
+          setStatus("pending");
+          toast.error("Error", { description: error.message || "Failed to apply enrichment" });
+        } finally {
+          setIsLoading(false);
+        }
+        return;
       }
-
-      setStatus(decisionType === "approve" ? "approved" : "rejected");
-      toast.success("Decision submitted", {
-        description: `Successfully ${decisionType}d ${item.type}`,
-      });
-    } catch (error: any) {
-      console.error("[ApprovalCard] Error submitting decision:", error);
-      setStatus("pending");
-      toast.error("Error", {
-        description: error.message || "Failed to submit decision",
-      });
-    } finally {
-      setIsLoading(false);
+      if (decisionType === "approve" && (!artifactId || !cycleId)) {
+        toast.error("Error", { description: "Missing artifact_id or cycle_id for this enrichment" });
+        setIsLoading(false);
+        return;
+      }
     }
+
+    // Artifact proposals (concept, UX, requirements, architecture, design): apply via API (preview-only, no interrupt)
+    const ARTIFACT_TOOL_TO_TYPE: Record<string, string> = {
+      generate_concept_brief: "concept_brief",
+      generate_ux_brief: "ux_brief",
+      generate_requirements_proposal: "requirements_package",
+      generate_architecture_proposal: "architecture",
+      generate_design_proposal: "design",
+    };
+    const artifactType = ARTIFACT_TOOL_TO_TYPE[item.type];
+    if (artifactType) {
+      if (decisionType === "reject") {
+        setStatus("rejected");
+        onDecisionProcessed?.(item, "rejected");
+        toast.info("Proposal rejected");
+        setIsLoading(false);
+        return;
+      }
+      if (decisionType === "approve") {
+        const cacheKey = item.data?.args?.cache_key ?? item.data?.preview_data?.cache_key;
+        const optionIndex = item.data?.args?.option_index ?? item.data?.args?.selected_option_index ?? -1;
+        const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+        if (!cacheKey) {
+          toast.error("Error", { description: "Missing cache_key for this artifact proposal" });
+          setIsLoading(false);
+          return;
+        }
+        try {
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+          if (orgContext) headers["X-Organization-Context"] = orgContext;
+          const res = await fetch("/api/artifact/apply", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              cache_key: cacheKey,
+              option_index: typeof optionIndex === "number" ? optionIndex : -1,
+              thread_id: threadId,
+              artifact_type: artifactType,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error((err as any).detail || "Failed to apply artifact");
+          }
+          const data = await res.json();
+          setStatus("approved");
+          onDecisionProcessed?.(item, "approved");
+          toast.success("Artifact applied", {
+            description: `Saved ${artifactType.replace(/_/g, " ")}.`,
+          });
+          if (typeof (stream as any).updateState === "function" && (data as any).active_agent) {
+            await (stream as any).updateState({ values: { active_agent: (data as any).active_agent } });
+          }
+          (stream as any).triggerWorkbenchRefresh?.();
+        } catch (error: any) {
+          console.error("[ApprovalCard] Error applying artifact:", error);
+          setStatus("pending");
+          toast.error("Error", { description: error.message || "Failed to apply artifact" });
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+    }
+
+    // Preview-only: no interrupt path. All proposals are applied via API branches above.
+    setStatus("pending");
+    toast.info("Apply not available", {
+      description: "This proposal type is not configured for apply from the Decisions pane.",
+    });
+    setIsLoading(false);
   };
   
   const getTypeBadgeColor = (type: string) => {

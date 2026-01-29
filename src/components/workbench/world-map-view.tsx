@@ -169,9 +169,17 @@ export function WorldMapView() {
         }
     };
 
+    const workbenchRefreshKey = (stream as any)?.workbenchRefreshKey ?? 0;
+
     useEffect(() => {
         fetchData();
-    }, [threadId, isFocusMode]);
+    }, [threadId, isFocusMode, workbenchRefreshKey]);
+
+    // After "Begin Enriching" we update thread state with current_trigger_id; refetch version list so the new commit shows.
+    const currentTriggerId = (stream as any)?.values?.current_trigger_id;
+    useEffect(() => {
+        if (threadId && currentTriggerId) fetchKgHistory();
+    }, [threadId, currentTriggerId]);
 
     useEffect(() => {
         if (!data || !svgRef.current || !containerRef.current) return;

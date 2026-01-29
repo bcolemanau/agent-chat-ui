@@ -1,16 +1,11 @@
 /**
  * Hook to unify all proposal previews from the graph into a single list.
  *
- * Unified Previews: aggregates proposals from stream.interrupt (HITL) and from
- * ToolMessages (classify_intent, propose_hydration_complete, generate_concept_brief,
- * enrichment) into one list for the Decisions view. Each item is a preview that
- * can be approved/applied via ApprovalCard.
+ * Preview-only: proposals come from ToolMessages (no HITL interrupt). Each item
+ * is a preview that can be approved/applied via ApprovalCard using API endpoints.
  */
 import { useMemo } from "react";
 import { useStreamContext } from "@/providers/Stream";
-import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
-import { Interrupt } from "@langchain/langgraph-sdk";
-import { HITLRequest } from "@/components/thread/agent-inbox/types";
 
 export interface UnifiedPreviewItem {
   id: string;
@@ -26,9 +21,8 @@ export interface UnifiedPreviewItem {
     description?: string;
     summary?: string;
   };
-  interruptId?: string; // Interrupt ID if from stream.interrupt
-  interruptIndex?: number; // Index in interrupt array
-  threadId?: string; // Original thread where the interrupt was raised
+  threadId?: string;
+  fromMessages?: boolean; // True = from ToolMessage (apply via API)
 }
 
 export function useUnifiedPreviews(): UnifiedPreviewItem[] {
@@ -40,45 +34,7 @@ export function useUnifiedPreviews(): UnifiedPreviewItem[] {
     const activeAgent = values.active_agent;
     const currentTriggerId = values.current_trigger_id;
 
-    // Extract from stream.interrupt (HITL interrupts)
-    const interrupts = (stream as any)?.interrupt;
-    if (interrupts && isAgentInboxInterruptSchema(interrupts)) {
-      const interruptArray = Array.isArray(interrupts) ? interrupts : [interrupts];
-
-      interruptArray.forEach((interrupt: Interrupt<HITLRequest>, interruptIndex: number) => {
-        if (!interrupt?.value?.action_requests) return;
-
-        interrupt.value.action_requests.forEach((request, requestIndex) => {
-          const toolName = request.name || "unknown";
-          const summary = request.summary || request.description || `${toolName} requires approval`;
-
-          // Extract diff from preview_data.diff (standard format) or fallback to request.diff
-          const diff = request.preview_data?.diff || request.diff;
-
-          items.push({
-            id: `${interrupt.id || `interrupt-${interruptIndex}`}-${requestIndex}`,
-            type: toolName,
-            title: getPreviewTitle(toolName, request),
-            summary: summary,
-            status: "pending",
-            data: {
-              name: toolName,
-              args: request.args || {},
-              preview_data: request.preview_data,
-              diff: diff,
-              description: request.description,
-              summary: request.summary,
-            },
-            interruptId: interrupt.id,
-            interruptIndex: interruptIndex,
-            threadId: (interrupt as any).thread_id,
-          });
-        });
-      });
-    }
-
-    // Proposals in ToolMessage (e.g. classify_intent, generate_concept_brief, propose_hydration_complete)
-    // when not using HITL interrupt. Surface the most recent so the Decisions pane can show it.
+    // Proposals in ToolMessage (classify_intent, propose_hydration_complete, generate_concept_brief, enrichment, etc.)
     const messages = (stream as any)?.messages ?? (stream as any)?.values?.messages ?? [];
     if (Array.isArray(messages) && messages.length > 0) {
       for (let i = messages.length - 1; i >= 0; i--) {
@@ -133,9 +89,9 @@ export function useUnifiedPreviews(): UnifiedPreviewItem[] {
                 diff,
               },
               threadId: (stream as any)?.threadId,
+              fromMessages: true,
             });
           }
-          break;
         }
       }
     }

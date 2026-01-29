@@ -8,23 +8,30 @@ import {
     FileText,
     Settings,
     CheckSquare,
-    Search
+    Search,
+    Trash2,
+    Clock
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryState } from "nuqs";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Search as SearchIcon } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
 
 interface Project {
     id: string;
     name: string;
+    updated_at?: string;
 }
 
 // Generate a more meaningful project name from thread ID
 function formatProjectName(project: Project): string {
     // If name is already meaningful (not just a UUID), use it
-    if (project.name && project.name !== project.id && !project.name.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+    // Fixed UUID regex to match standard 8-4-4-4-12 format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (project.name && project.name !== project.id && !uuidRegex.test(project.name)) {
         return project.name;
     }
     
@@ -50,6 +57,7 @@ export function Sidebar() {
     const [threadId, setThreadId] = useQueryState("threadId");
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
 
     // Check if user is Reflexion Admin (keys are reflexion_admin or admin)
     const isAdmin = userRole === "reflexion_admin" || userRole === "admin";
@@ -75,15 +83,58 @@ export function Sidebar() {
         }
     }, []);
 
+    const deleteProject = async (e: React.MouseEvent, projectId: string) => {
+        e.stopPropagation();
+        if (!confirm("Are you sure you want to delete this project and all its data? This cannot be undone.")) {
+            return;
+        }
+
+        try {
+            const orgContext = localStorage.getItem('reflexion_org_context');
+            const headers: Record<string, string> = {};
+            if (orgContext) {
+                headers['X-Organization-Context'] = orgContext;
+            }
+
+            const res = await fetch(`/api/projects?projectId=${projectId}`, { 
+                method: 'DELETE',
+                headers 
+            });
+
+            if (res.ok) {
+                toast.success("Project deleted successfully");
+                if (threadId === projectId) {
+                    setThreadId(null);
+                }
+                fetchProjects();
+            } else {
+                const error = await res.json();
+                toast.error(`Failed to delete project: ${error.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            console.error("Error deleting project:", error);
+            toast.error("An error occurred while deleting the project");
+        }
+    };
+
     useEffect(() => {
         fetchProjects();
         window.addEventListener('focus', fetchProjects);
         return () => window.removeEventListener('focus', fetchProjects);
     }, [fetchProjects]);
 
+    const filteredProjects = useMemo(() => {
+        if (!searchQuery) return projects;
+        const query = searchQuery.toLowerCase();
+        return projects.filter(p => 
+            p.name.toLowerCase().includes(query) || 
+            p.id.toLowerCase().includes(query)
+        );
+    }, [projects, searchQuery]);
+
     return (
-        <aside className="w-64 border-r bg-muted/20 flex flex-col h-full overflow-y-auto transition-all duration-300">
-            <div className="p-6">
+        <aside className="w-64 border-r bg-muted/20 flex flex-col h-full overflow-hidden transition-all duration-300">
+            <div className="p-6 shrink-0">
                 <Link href="/" className="inline-block transition-transform hover:scale-105">
                     <h2 className="text-xl font-bold tracking-tight text-primary flex items-center gap-2">
                         <span className="bg-primary text-primary-foreground px-1.5 py-0.5 rounded text-sm">R</span>
@@ -92,7 +143,20 @@ export function Sidebar() {
                 </Link>
             </div>
 
-            <nav className="flex-1 space-y-6 px-4 py-2">
+            <div className="px-4 mb-4 shrink-0">
+                <div className="relative">
+                    <SearchIcon className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                    <input
+                        type="text"
+                        placeholder="Search projects..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-background border rounded-md pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
+                    />
+                </div>
+            </div>
+
+            <nav className="flex-1 overflow-y-auto space-y-6 px-4 py-2 custom-scrollbar">
                 {/* Project Section */}
                 <div className="space-y-3">
                     <div className="flex items-center justify-between px-2">
@@ -113,27 +177,49 @@ export function Sidebar() {
                     <div className="space-y-1">
                         {loading && projects.length === 0 ? (
                             <div className="px-3 py-2 text-sm text-muted-foreground italic">Loading...</div>
+                        ) : filteredProjects.length === 0 ? (
+                            <div className="px-3 py-2 text-xs text-muted-foreground italic">
+                                {searchQuery ? "No matches found" : "No projects yet"}
+                            </div>
                         ) : (
-                            projects.map((project) => {
+                            filteredProjects.map((project) => {
                                 const isActive = threadId === project.id;
                                 return (
-                                    <button
-                                        key={project.id}
-                                        onClick={() => setThreadId(project.id)}
-                                        className={cn(
-                                            "w-full text-left group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-all truncate",
-                                            isActive ? "bg-primary/10 text-primary shadow-sm" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                                        )}
-                                    >
-                                        <FileText className={cn("mr-3 h-4 w-4 shrink-0 transition-transform group-hover:scale-110", isActive ? "text-primary" : "text-muted-foreground")} />
-                                        <span className="truncate" title={project.id}>{formatProjectName(project)}</span>
-                                    </button>
+                                    <div key={project.id} className="group relative">
+                                        <button
+                                            onClick={() => setThreadId(project.id)}
+                                            className={cn(
+                                                "w-full text-left flex flex-col rounded-md px-3 py-2.5 text-sm font-medium transition-all",
+                                                isActive ? "bg-primary/10 text-primary shadow-sm" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                                            )}
+                                        >
+                                            <div className="flex items-center w-full pr-6">
+                                                <FileText className={cn("mr-3 h-4 w-4 shrink-0 transition-transform group-hover:scale-110", isActive ? "text-primary" : "text-muted-foreground")} />
+                                                <span className="truncate font-semibold" title={project.id}>{formatProjectName(project)}</span>
+                                            </div>
+                                            {project.updated_at && (
+                                                <div className="flex items-center mt-1 ml-7 text-[10px] text-muted-foreground/70">
+                                                    <Clock className="h-2.5 w-2.5 mr-1" />
+                                                    {formatDistanceToNow(new Date(project.updated_at), { addSuffix: true })}
+                                                </div>
+                                            )}
+                                        </button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
+                                            onClick={(e) => deleteProject(e, project.id)}
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                            <span className="sr-only">Delete Project</span>
+                                        </Button>
+                                    </div>
                                 );
                             })
                         )}
                         <Button
                             variant="ghost"
-                            className="w-full justify-start text-muted-foreground hover:text-foreground px-3 py-2 h-auto font-normal"
+                            className="w-full justify-start text-muted-foreground hover:text-foreground px-3 py-2 h-auto font-normal mt-2"
                             onClick={() => setThreadId(null)}
                         >
                             <Plus className="mr-3 h-4 w-4" />

@@ -1,10 +1,76 @@
 import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, ClipboardCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useStreamContext } from "@/providers/Stream";
+import { Button } from "@/components/ui/button";
 
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
+}
+
+function getProposalTitle(toolName: string, proposal: Record<string, any>): string {
+  const args = proposal.args || {};
+  const preview = proposal.preview_data || {};
+  switch (toolName) {
+    case "classify_intent":
+      return `Project Classification: ${args.trigger_id || "Unknown Trigger"}`;
+    case "propose_hydration_complete":
+      return "Hydration Complete - Ready for Concept Phase";
+    case "generate_concept_brief":
+      return "Concept Brief Options";
+    case "propose_enrichment":
+    case "approve_enrichment":
+    case "enrichment":
+      return `Enrichment: ${args.artifact_id || preview.filename || "Unknown Artifact"}`;
+    case "link_uploaded_document":
+      return `Link Artifact: ${args.filename || preview.filename || args.document_id || "Unknown"}`;
+    default:
+      return proposal.model_summary || `${toolName} – review in Decisions`;
+  }
+}
+
+function DecisionProposalCard({
+  toolName,
+  proposal,
+}: {
+  toolName: string;
+  proposal: Record<string, any>;
+}) {
+  const router = useRouter();
+  const stream = useStreamContext();
+  const title = getProposalTitle(toolName, proposal);
+  const summary = proposal.model_summary || "A decision is ready for you to review.";
+
+  const handleReviewInDecisions = () => {
+    (stream as any)?.setWorkbenchView?.("decisions")?.catch?.(() => {});
+    const threadId = (stream as any)?.threadId;
+    const q = threadId ? `?threadId=${encodeURIComponent(threadId)}` : "";
+    router.push(`/workbench/decisions${q}`);
+  };
+
+  return (
+    <div className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="rounded-lg bg-primary/10 p-2">
+          <ClipboardCheck className="h-5 w-5 text-primary" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="font-medium text-foreground">{title}</p>
+          <p className="text-sm text-muted-foreground">{summary}</p>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleReviewInDecisions}
+            className="mt-2"
+          >
+            Review in Decisions
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ToolCalls({
@@ -83,6 +149,21 @@ export function ToolResult({ message }: { message: ToolMessage }) {
   } catch {
     // Content is not JSON, use as is
     parsedContent = message.content;
+  }
+
+  // Stream decision into chat: show a friendly card so the user sees the decision and can open Decisions view
+  const isProposal =
+    typeof parsedContent === "object" &&
+    parsedContent !== null &&
+    parsedContent.__type === "proposal" &&
+    parsedContent.tool_name;
+  if (isProposal) {
+    return (
+      <DecisionProposalCard
+        toolName={parsedContent.tool_name}
+        proposal={parsedContent}
+      />
+    );
   }
 
   const contentStr = isJsonContent
