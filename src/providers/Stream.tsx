@@ -219,6 +219,9 @@ const StreamSession = ({
   const setActiveAgentDebug = async (agent: "supervisor" | "hydrator" | "concept" | "architecture") => {
     if (!threadId || !apiUrl) {
       console.warn(`[Stream] setActiveAgentDebug skipped: threadId=${threadId ?? "null"}, apiUrl=${apiUrl ? "set" : "null"} (need a thread; send a message first)`);
+      toast.warning("Open a thread first to switch the active agent.", {
+        description: "Send a message or select a thread so we can update the backend.",
+      });
       return;
     }
 
@@ -238,12 +241,17 @@ const StreamSession = ({
       console.log(`[Stream] Backend state updated to mode=${agent}`);
     } catch (e) {
       console.error("[Stream] Failed to set active mode (backend may not have updated):", e);
+      toast.error("Failed to switch agent", {
+        description: e instanceof Error ? e.message : "Backend may not have updated. Check console.",
+      });
     }
   };
 
   // Optimistic overlay: stream hook doesn't refetch after updateState, so merge our updates so header (Mode) updates immediately.
   const [valuesOverlay, setValuesOverlay] = useState<Record<string, unknown>>({});
   const valuesOverlayRef = useRef<Record<string, unknown>>({});
+  // Track stream message count so refetch never overwrites with an older snapshot (prevents "bunch of messages inserted before mine").
+  const streamMessageCountRef = useRef(0);
   useEffect(() => {
     if (prevThreadIdRef.current !== (threadId ?? null)) {
       prevThreadIdRef.current = threadId ?? null;
@@ -252,6 +260,10 @@ const StreamSession = ({
       userSetModeAtRef.current = 0;
     }
   }, [threadId]);
+  useEffect(() => {
+    const list = (rawStream as any)?.values?.messages;
+    streamMessageCountRef.current = Array.isArray(list) ? list.length : 0;
+  }, [rawStream]);
 
   // When the agent sets mode (e.g. set_active_mode tool), stream updates; sync overlay so the dropdown shows it.
   // Don't overwrite overlay if the user just set mode from the dropdown (avoid immediate revert).
@@ -298,6 +310,8 @@ const StreamSession = ({
   };
 
   // After Apply, backend triggers a graph run; refetch thread state so we see new messages and active_mode.
+  // Never overwrite with an older snapshot: if refetched has fewer messages than the stream, keep current messages
+  // to avoid "bunch of messages inserted before mine" when user just sent a message and refetch returns stale state.
   const refetchThreadState = useCallback(async () => {
     if (!threadId || !apiUrl) return;
     try {
@@ -310,7 +324,13 @@ const StreamSession = ({
       const data = (await res.json()) as { values?: Record<string, unknown> };
       const values = data?.values;
       if (values && typeof values === "object") {
-        valuesOverlayRef.current = { ...valuesOverlayRef.current, ...values };
+        const refetchedCount = Array.isArray(values.messages) ? values.messages.length : 0;
+        const currentCount = streamMessageCountRef.current;
+        const merged = { ...valuesOverlayRef.current, ...values };
+        if (refetchedCount < currentCount && merged.messages) {
+          delete merged.messages;
+        }
+        valuesOverlayRef.current = merged;
         setValuesOverlay({ ...valuesOverlayRef.current });
       }
     } catch (e) {

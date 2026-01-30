@@ -293,45 +293,53 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     </div>
 
                     <div className="flex items-center gap-3">
-                        {/* Active mode selector */}
-                        <div className="flex items-center gap-2 mr-2">
-                            <Activity className={cn(
-                                "w-3.5 h-3.5 shrink-0",
-                                stream.isLoading ? "text-amber-500 animate-pulse" : "text-emerald-500"
-                            )} />
-                            <Select
-                                value={activeAgent}
-                                onValueChange={(value) => {
-                                    const fn = (stream as any).setActiveAgentDebug as
-                                        | ((a: "supervisor" | "hydrator" | "concept" | "architecture") => Promise<void>)
-                                        | undefined;
-                                    console.log("[WorkbenchShell] Mode dropdown changed to", value, "setActiveAgentDebug:", fn ? "present" : "MISSING");
-                                    if (fn) {
-                                        fn(value as "supervisor" | "hydrator" | "concept" | "architecture").catch((e) =>
-                                            console.warn("[WorkbenchShell] Failed to set active mode:", e)
-                                        );
-                                    } else {
-                                        console.warn("[WorkbenchShell] setActiveAgentDebug not on stream context — mode not sent to backend");
-                                    }
-                                }}
-                            >
-                                <SelectTrigger
-                                    className={cn(
-                                        "h-8 w-[140px] text-xs font-medium capitalize border-border bg-muted/50 shadow-sm",
-                                        stream.isLoading && "opacity-80"
-                                    )}
-                                >
-                                    <SelectValue placeholder="Mode" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {MODE_OPTIONS.map((opt) => (
-                                        <SelectItem key={opt.value} value={opt.value} className="text-xs capitalize">
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                        {/* Active mode selector — requires a thread so backend state can be updated */}
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <div className={cn("flex items-center gap-2 mr-2", !threadId && "cursor-not-allowed opacity-70")}>
+                                    <Activity className={cn(
+                                        "w-3.5 h-3.5 shrink-0",
+                                        stream.isLoading ? "text-amber-500 animate-pulse" : "text-emerald-500"
+                                    )} />
+                                    <Select
+                                        value={activeAgent}
+                                        disabled={!threadId}
+                                        onValueChange={(value) => {
+                                            const fn = (stream as any).setActiveAgentDebug as
+                                                | ((a: "supervisor" | "hydrator" | "concept" | "architecture") => Promise<void>)
+                                                | undefined;
+                                            console.log("[WorkbenchShell] Mode dropdown changed to", value, "setActiveAgentDebug:", fn ? "present" : "MISSING");
+                                            if (fn) {
+                                                fn(value as "supervisor" | "hydrator" | "concept" | "architecture").catch((e) =>
+                                                    console.warn("[WorkbenchShell] Failed to set active mode:", e)
+                                                );
+                                            } else {
+                                                console.warn("[WorkbenchShell] setActiveAgentDebug not on stream context — mode not sent to backend");
+                                            }
+                                        }}
+                                    >
+                                        <SelectTrigger
+                                            className={cn(
+                                                "h-8 w-[140px] text-xs font-medium capitalize border-border bg-muted/50 shadow-sm",
+                                                stream.isLoading && "opacity-80"
+                                            )}
+                                        >
+                                            <SelectValue placeholder="Mode" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {MODE_OPTIONS.map((opt) => (
+                                                <SelectItem key={opt.value} value={opt.value} className="text-xs capitalize">
+                                                    {opt.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {threadId ? "Switch which agent handles the next turn" : "Open a thread first to switch the active agent"}
+                            </TooltipContent>
+                        </Tooltip>
 
                         <div className="h-6 w-[1px] bg-border mx-1" />
 
