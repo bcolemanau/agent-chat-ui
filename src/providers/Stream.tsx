@@ -27,6 +27,13 @@ import { useSession } from "next-auth/react";
 import { createClient } from "./client";
 import { withThreadSpan } from "@/lib/otel-client";
 
+/** Filtered KG from backend (filter_graph_data(..., context_mode=true)); streamed when hydrator sets it. */
+export type FilteredKgType = {
+  nodes: Array<Record<string, unknown>>;
+  links: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+};
+
 export type StateType = {
   messages: Message[];
   ui?: UIMessage[];
@@ -40,6 +47,8 @@ export type StateType = {
   active_agent?: "supervisor" | "hydrator";
   visualization_html?: string;
   workbench_view?: "map" | "workflow" | "artifacts" | "discovery" | "settings";
+  /** Filtered KG for current trigger; set by hydrator, streamed to client. Use for map view without extra /api/kg-data. */
+  filtered_kg?: FilteredKgType;
 };
 
 const useTypedStream = useStream<
