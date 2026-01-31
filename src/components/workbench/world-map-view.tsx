@@ -49,6 +49,8 @@ export function WorldMapView() {
     const stream = useStreamContext();
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
     const visualizationHtml = (stream as any)?.values?.visualization_html;
+    /** Filtered KG streamed from backend when hydrator runs; use for map without extra /api/kg-data. */
+    const filteredKg = (stream as any)?.values?.filtered_kg as { nodes: any[]; links: any[]; metadata?: any } | undefined;
 
     const svgRef = useRef<SVGSVGElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -171,9 +173,31 @@ export function WorldMapView() {
 
     const workbenchRefreshKey = (stream as any)?.workbenchRefreshKey ?? 0;
 
+    // When backend streams filtered_kg (e.g. first hydrator run), use it for current view so we don't need /api/kg-data.
+    // On explicit Refresh (workbenchRefreshKey > 0) we refetch from API to get latest.
     useEffect(() => {
+        if (activeVersion) {
+            fetchData(activeVersion);
+            return;
+        }
+        if (filteredKg?.nodes && filteredKg?.links && workbenchRefreshKey === 0) {
+            const asGraphData: GraphData = {
+                nodes: filteredKg.nodes,
+                links: filteredKg.links,
+                metadata: {
+                    ...(filteredKg.metadata || {}),
+                    customer_id: (filteredKg.metadata as any)?.customer_id ?? '',
+                    thread_id: threadId ?? '',
+                },
+            };
+            setData(asGraphData);
+            setLoading(false);
+            setError(null);
+            if (threadId) fetchKgHistory();
+            return;
+        }
         fetchData();
-    }, [threadId, isFocusMode, workbenchRefreshKey]);
+    }, [threadId, isFocusMode, workbenchRefreshKey, activeVersion, filteredKg]);
 
     // After "Begin Enriching" we update thread state with current_trigger_id; refetch version list so the new commit shows.
     const currentTriggerId = (stream as any)?.values?.current_trigger_id;
