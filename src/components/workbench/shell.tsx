@@ -9,7 +9,7 @@ import { Breadcrumbs } from "./breadcrumbs";
 import { OrgSwitcher } from "./org-switcher";
 import { useStreamContext } from "@/providers/Stream";
 import { Thread } from "@/components/thread";
-import { MessageSquare, Map as MapIcon, Workflow, Activity, X, PanelRight, Sparkles, Circle, Download, Minus, Maximize2 } from "lucide-react";
+import { MessageSquare, Map as MapIcon, Workflow, Activity, X, PanelRight, Sparkles, Circle, Download, Minus, Maximize2, Settings } from "lucide-react";
 import { useRecording } from "@/providers/RecordingProvider";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -28,24 +28,28 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
     const router = useRouter();
     const pathname = usePathname();
-    const { status } = useSession();
+    const { data: session, status } = useSession();
+    const userRole = session?.user?.role;
+    const isAdmin = Boolean(userRole && ["reflexion_admin", "admin", "newco_admin"].includes(userRole as string));
     const { isRecording, startRecording, stopRecording, downloadRecording } = useRecording();
 
     // Robust Mode Derivation (active_mode and active_agent are synced from graph/overlay)
     const values = (stream as any)?.values;
     const rawAgent = values?.active_mode ?? values?.active_agent;
-    const activeAgent: "supervisor" | "hydrator" | "concept" | "architecture" =
-        rawAgent === "hydrator" || rawAgent === "concept" || rawAgent === "architecture"
+    type AgentMode = "supervisor" | "hydrator" | "concept" | "architecture" | "administration";
+    const activeAgent: AgentMode =
+        rawAgent === "hydrator" || rawAgent === "concept" || rawAgent === "architecture" || rawAgent === "administration"
             ? rawAgent
             : (values?.visualization_html?.includes("active_node='hydrator'") || values?.visualization_html?.includes("Hydrator")
                 ? "hydrator"
                 : "supervisor");
 
-    const MODE_OPTIONS: { value: "supervisor" | "hydrator" | "concept" | "architecture"; label: string }[] = [
+    const MODE_OPTIONS: { value: AgentMode; label: string }[] = [
         { value: "supervisor", label: "Supervisor" },
         { value: "hydrator", label: "Hydrator" },
         { value: "concept", label: "Concept" },
         { value: "architecture", label: "Architecture" },
+        ...(isAdmin ? [{ value: "administration" as const, label: "Administration" }] : []),
     ];
 
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
@@ -306,11 +310,11 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                         disabled={!threadId}
                                         onValueChange={(value) => {
                                             const fn = (stream as any).setActiveAgentDebug as
-                                                | ((a: "supervisor" | "hydrator" | "concept" | "architecture") => Promise<void>)
+                                                | ((a: AgentMode) => Promise<void>)
                                                 | undefined;
                                             console.log("[WorkbenchShell] Mode dropdown changed to", value, "setActiveAgentDebug:", fn ? "present" : "MISSING");
                                             if (fn) {
-                                                fn(value as "supervisor" | "hydrator" | "concept" | "architecture").catch((e) =>
+                                                fn(value as AgentMode).catch((e) =>
                                                     console.warn("[WorkbenchShell] Failed to set active mode:", e)
                                                 );
                                             } else {
@@ -528,6 +532,26 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                             </span>
                                         )}
                                     </Button>
+                                    {isAdmin && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                                "h-8 px-3 gap-2 text-xs font-medium transition-all",
+                                                pathname?.includes("/workbench/settings") ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                            )}
+                                            onClick={() => {
+                                                closeArtifact();
+                                                setViewMode("settings");
+                                                lastSyncedView.current = "settings";
+                                                stream.setWorkbenchView("settings" as any);
+                                                router.push(workbenchHref("/workbench/settings"));
+                                            }}
+                                        >
+                                            <Settings className="w-3.5 h-3.5" />
+                                            System Settings
+                                        </Button>
+                                    )}
                                 </div>
                                 {/* Workbench Panel Controls */}
                                 <div className="flex items-center gap-1">

@@ -114,6 +114,14 @@ function getPreviewTitle(toolName: string, request: any): string {
       return `Enrichment: ${request.args?.artifact_id || request.preview_data?.filename || "Unknown Artifact"}`;
     case "link_uploaded_document":
       return `Link Artifact: ${request.args?.filename || request.preview_data?.filename || request.args?.document_id || "Unknown"}`;
+    case "propose_organization":
+      return `Create organization: ${request.args?.name || request.preview_data?.name || request.args?.org_id || "Unknown"}`;
+    case "propose_user_add":
+      return `Add user: ${request.args?.email || request.preview_data?.email || "Unknown"} to ${request.args?.org_id || request.preview_data?.org_id || "org"}`;
+    case "propose_user_edit":
+      return `Update user: ${request.args?.user_email || request.preview_data?.user_email || "Unknown"} in ${request.args?.org_id || request.preview_data?.org_id || "org"}`;
+    case "propose_user_remove":
+      return `Remove user: ${request.args?.user_email || request.preview_data?.user_email || "Unknown"} from ${request.args?.org_id || request.preview_data?.org_id || "org"}`;
     default:
       return request.summary || request.description || `${toolName} Approval`;
   }

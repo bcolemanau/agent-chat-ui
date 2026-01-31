@@ -46,7 +46,7 @@ function formatProjectName(project: Project): string {
 const PRODUCT_LINKS = [
     { name: "Smart Backlog", href: "/workbench/backlog", icon: CheckSquare },
     { name: "Discovery", href: "/workbench/discovery", icon: Search },
-    { name: "Settings", href: "/workbench/settings", icon: Settings },
+    { name: "System Settings", href: "/workbench/settings", icon: Settings },
 ];
 
 export function Sidebar() {

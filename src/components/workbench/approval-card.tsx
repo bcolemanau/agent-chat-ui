@@ -381,6 +381,11 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
         return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200";
       case "link_uploaded_document":
         return "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200";
+      case "propose_organization":
+      case "propose_user_add":
+      case "propose_user_edit":
+      case "propose_user_remove":
+        return "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200";
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
     }

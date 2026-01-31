@@ -26,6 +26,14 @@ function getProposalTitle(toolName: string, proposal: Record<string, any>): stri
       return `Enrichment: ${args.artifact_id || preview.filename || "Unknown Artifact"}`;
     case "link_uploaded_document":
       return `Link Artifact: ${args.filename || preview.filename || args.document_id || "Unknown"}`;
+    case "propose_organization":
+      return `Create organization: ${args.name || preview.name || args.org_id || "Unknown"}`;
+    case "propose_user_add":
+      return `Add user: ${args.email || preview.email || "Unknown"} to ${args.org_id || preview.org_id || "org"}`;
+    case "propose_user_edit":
+      return `Update user: ${args.user_email || preview.user_email || "Unknown"} in ${args.org_id || preview.org_id || "org"}`;
+    case "propose_user_remove":
+      return `Remove user: ${args.user_email || preview.user_email || "Unknown"} from ${args.org_id || preview.org_id || "org"}`;
     default:
       return proposal.model_summary || `${toolName} – review in Decisions`;
   }
