@@ -1,5 +1,56 @@
 [
     {
+        "id": "v1.6.0",
+        "version": "1.6.0",
+        "date": "2026-01-31",
+        "title": "Agent Administrator & Configurable Agent Prompts",
+        "description": "New admin-only Agent Administrator in System Settings lets NewCo administrators view and edit workflow agent configuration. Agent prompts (primary role, workflow, critical instructions) and temperature are now sourced from a central registry and persisted overrides; the graph uses these settings on every run so edits take effect immediately.",
+        "features": [
+            {
+                "name": "Agent Administrator (System Settings)",
+                "description": "New section in System Settings (same pattern as Organization Management) for viewing and managing Reflexion workflow agents. Admin-only. Lists all five agents with expandable prompt details and Edit to update config."
+            },
+            {
+                "name": "Backend Agents Registry & API",
+                "description": "GET /auth/agents (admin-only) returns full agent config; PUT /auth/agents/:id (admin-only) updates overrides persisted to data/agent_config.json. Registry exposes primary role, tools, workflow, critical instructions, temperature per agent."
+            },
+            {
+                "name": "Prompt Config in UI",
+                "description": "Each agent card shows Primary Role, Tools, Workflow, Critical Instructions, Temperature. Edit dialog allows changing name, description, primary role, tools, workflow, critical instructions, and temperature. Save sends only changed fields."
+            },
+            {
+                "name": "Graph Uses Stored Config",
+                "description": "Graph builds each agent's system prompt from the registry (defaults + overrides). Primary role, workflow, and critical instructions from Agent Administrator are used on the next run. Temperature is read from config per agent; non-zero overrides apply on invoke."
+            },
+            {
+                "name": "Administration Agent: list_agents Tool",
+                "description": "Optional list_agents tool for the Administration agent returns the same registry so the agent can answer which agents exist or what phases are available from canonical data."
+            },
+            {
+                "name": "Settings Page Improvements",
+                "description": "System Settings page is scrollable and sections are collapsible (Organization Management, Agent Administrator, Account, Organization Context, Security & API). Fixes content running off the page and makes Agent Administrator reachable."
+            },
+            {
+                "name": "Admin Access & Messaging",
+                "description": "JWT role fallback treats reflexion_admin (and newco_admin, admin) as admin when RBAC seed file is missing. Frontend shows clear Admin access required message on 403. Backend logs RBAC seed path at startup and logs denied access for debugging."
+            }
+        ],
+        "businessValue": [
+            {
+                "name": "Operational Control",
+                "description": "Admins can tune agent behavior (temperature, instructions) without code changes."
+            },
+            {
+                "name": "Transparency",
+                "description": "Single place to view and edit what each agent is told (primary role, workflow, critical instructions)."
+            },
+            {
+                "name": "Consistency",
+                "description": "Registry is the source of truth for API, UI, Administration agent, and graph."
+            }
+        ]
+    },
+    {
         "id": "v1.5.0",
         "version": "1.5.0",
         "date": "2026-01-26",
