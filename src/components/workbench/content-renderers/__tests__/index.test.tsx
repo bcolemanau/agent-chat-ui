@@ -98,5 +98,9 @@ describe('ContentRendererRegistry', () => {
     it('should have binary renderer registered', () => {
       expect(contentRendererRegistry.has('binary')).toBe(true);
     });
+
+    it('should have diff renderer registered', () => {
+      expect(contentRendererRegistry.has('diff')).toBe(true);
+    });
   });
 });
