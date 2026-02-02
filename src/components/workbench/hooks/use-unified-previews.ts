@@ -9,7 +9,7 @@ import { useStreamContext } from "@/providers/Stream";
 
 export interface UnifiedPreviewItem {
   id: string;
-  type: string; // tool_name (e.g., "classify_intent", "propose_hydration_complete")
+  type: string; // tool_name (e.g., "classify_intent", "generate_project_configuration_summary")
   title: string;
   summary: string;
   status: "pending" | "processing" | "approved" | "rejected";
@@ -34,7 +34,7 @@ export function useUnifiedPreviews(): UnifiedPreviewItem[] {
     const activeAgent = values.active_agent;
     const currentTriggerId = values.current_trigger_id;
 
-    // Proposals in ToolMessage (classify_intent, propose_hydration_complete, generate_concept_brief, enrichment, etc.)
+    // Proposals in ToolMessage (classify_intent, generate_project_configuration_summary, generate_concept_brief, enrichment, etc.)
     const messages = (stream as any)?.messages ?? (stream as any)?.values?.messages ?? [];
     if (Array.isArray(messages) && messages.length > 0) {
       for (let i = messages.length - 1; i >= 0; i--) {
@@ -104,8 +104,9 @@ function getPreviewTitle(toolName: string, request: any): string {
   switch (toolName) {
     case "classify_intent":
       return `Project Classification: ${request.args?.trigger_id || "Unknown Trigger"}`;
+    case "generate_project_configuration_summary":
     case "propose_hydration_complete":
-      return "Hydration Complete - Ready for Concept Phase";
+      return "Project Configuration - Ready for Concept Phase";
     case "generate_concept_brief":
       return "Concept Brief Options";
     case "propose_enrichment":

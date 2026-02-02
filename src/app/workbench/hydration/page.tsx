@@ -1,15 +1,15 @@
 "use client";
 
-import { HydrationDiffView } from "@/components/workbench/hydration-diff-view";
+import { ProjectConfigurationDiffView } from "@/components/workbench/project-configuration-diff-view";
 import { useStreamContext } from "@/providers/Stream";
 import { useQueryState } from "nuqs";
 import { useEffect, useState } from "react";
-import { HydrationDiffView as HydrationDiffViewType } from "@/lib/diff-types";
+import { ProjectConfigurationDiffView as ProjectConfigurationDiffViewType } from "@/lib/diff-types";
 
 export default function HydrationPage() {
   const stream = useStreamContext();
   const [threadId] = useQueryState("threadId");
-  const [diffData, setDiffData] = useState<HydrationDiffViewType | undefined>();
+  const [diffData, setDiffData] = useState<ProjectConfigurationDiffViewType | undefined>();
 
   // Try to get diff data from stream context (from HITL proposal)
   useEffect(() => {
@@ -148,7 +148,7 @@ export default function HydrationPage() {
   };
 
   return (
-    <HydrationDiffView
+    <ProjectConfigurationDiffView
       diffData={diffData}
       onApprove={handleApprove}
       onReject={handleReject}

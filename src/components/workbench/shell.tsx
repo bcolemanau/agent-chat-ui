@@ -71,10 +71,43 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
     const agentPanelRef = useRef<HTMLDivElement>(null);
+
+    // Workflow strip in workbench pane: name, version, mini diagram (from GET /api/workflow)
+    type WorkflowDiagramStrip = { workflow_id: string; name?: string; version?: string; nodes: { id: string; label: string }[]; active_node?: string };
+    const [workflowStrip, setWorkflowStrip] = useState<WorkflowDiagramStrip | null>(null);
+    const [workflowStripLoading, setWorkflowStripLoading] = useState(false);
     
     // Issue #14: Approval count for badge
     const approvalCount = useApprovalCount();
     const lastApprovalCount = useRef<number>(0);
+
+    // Fetch workflow diagram for mini strip (header + workbench pane). Run when on workbench so strip is ready.
+    useEffect(() => {
+        const onWorkbench = pathname?.includes("/workbench");
+        if (!onWorkbench) return;
+        let cancelled = false;
+        setWorkflowStripLoading(true);
+        const params = new URLSearchParams();
+        if (activeAgent) params.set("active_node", activeAgent);
+        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data: WorkflowDiagramStrip | null) => {
+                if (!cancelled && data?.nodes) {
+                    setWorkflowStrip({
+                        workflow_id: data.workflow_id,
+                        name: data.name,
+                        version: data.version ?? data.workflow_id,
+                        nodes: data.nodes,
+                        active_node: data.active_node,
+                    });
+                } else if (!cancelled) {
+                    setWorkflowStrip(null);
+                }
+            })
+            .catch(() => { if (!cancelled) setWorkflowStrip(null); })
+            .finally(() => { if (!cancelled) setWorkflowStripLoading(false); });
+        return () => { cancelled = true; };
+    }, [pathname, activeAgent]);
     
     // Auth guard: redirect unauthenticated users to login
     useEffect(() => {
@@ -97,7 +130,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             const hydrationInterrupt = interruptArray.find(
                 (int: any) => {
                     const actionName = int?.value?.action_requests?.[0]?.name || int?.action_requests?.[0]?.name;
-                    return actionName === "propose_hydration_complete";
+                    return actionName === "generate_project_configuration_summary" || actionName === "propose_hydration_complete";
                 }
             );
 
@@ -265,86 +298,85 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     }
 
     return (
-        <div className="flex h-screen bg-background text-foreground overflow-hidden">
-            {/* Sidebar - Collapsible */}
-            <div className={cn(
-                "relative transition-all duration-300 border-r bg-muted/20 flex flex-col h-full overflow-hidden",
-                isSidebarCollapsed ? "w-0 border-0" : "w-64"
-            )}>
-                {!isSidebarCollapsed && <Sidebar />}
-                {/* Collapse Toggle Button */}
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                        "absolute top-4 z-50 h-6 w-6 rounded-full border bg-background shadow-md hover:bg-muted transition-all",
-                        isSidebarCollapsed ? "-right-3" : "-right-3"
-                    )}
-                    onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                >
-                    <PanelLeft className={cn("h-3.5 w-3.5 transition-transform", isSidebarCollapsed && "rotate-180")} />
-                </Button>
-            </div>
-
-            {/* Main Content Area */}
-            <div className="flex-1 flex flex-col h-full min-w-0" data-workbench-container>
-                {/* Level 1: Global Context Header */}
-                <header className="h-14 border-b flex items-center justify-between px-6 bg-background z-20 shrink-0">
-                    <div className="flex items-center gap-4">
+        <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+            {/* Level 1: Global header — full width, always left to right (above sidebar) */}
+            <header className="h-14 border-b flex items-center justify-between px-6 bg-background z-20 shrink-0" data-workbench-container>
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                         <Suspense fallback={<div className="h-4 w-32 bg-muted animate-pulse rounded" />}>
                             <Breadcrumbs />
                         </Suspense>
+                        <span className="text-muted-foreground/50 shrink-0">/</span>
+                        {/* Workflow visualization (connects to breadcrumb); active node = agent selector */}
+                        {workflowStripLoading ? (
+                            <div className="h-6 w-24 bg-muted animate-pulse rounded shrink-0" aria-hidden />
+                        ) : workflowStrip?.nodes?.length ? (
+                            <div className="flex items-center gap-1.5 shrink min-w-0 overflow-x-auto">
+                                <span className="text-sm text-foreground/90 shrink-0 whitespace-nowrap font-medium">
+                                    {workflowStrip.name ?? workflowStrip.workflow_id}
+                                    <span className="text-muted-foreground font-normal"> ({workflowStrip.version ?? workflowStrip.workflow_id})</span>
+                                </span>
+                                <div className="flex items-center gap-0.5 shrink-0 border border-border/50 rounded-md px-1.5 py-0.5 bg-muted/30">
+                                    {workflowStrip.nodes.map((node, i) => {
+                                        const isActive = workflowStrip.active_node === node.id;
+                                        const showSelect = isActive && threadId;
+                                        return (
+                                            <span key={node.id} className="flex items-center shrink-0 gap-0.5">
+                                                {showSelect ? (
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Select
+                                                                value={activeAgent}
+                                                                disabled={!threadId}
+                                                                onValueChange={(value) => {
+                                                                    const fn = (stream as any).setActiveAgentDebug as ((a: AgentMode) => Promise<void>) | undefined;
+                                                                    if (fn) fn(value as AgentMode).catch((e) => console.warn("[WorkbenchShell] Failed to set active mode:", e));
+                                                                }}
+                                                            >
+                                                                <SelectTrigger
+                                                                    className={cn(
+                                                                        "h-7 min-w-0 w-auto max-w-none overflow-visible px-2 py-0.5 text-sm font-medium border border-border rounded-md bg-muted/50 text-foreground hover:bg-muted shadow-none gap-1.5 ring-2 ring-primary/40 [&>span]:whitespace-nowrap [&>span]:overflow-visible [&>span]:text-inherit",
+                                                                        stream.isLoading && "opacity-80"
+                                                                    )}
+                                                                >
+                                                                    <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                                                    <SelectValue>{node.label}</SelectValue>
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {MODE_OPTIONS.map((opt) => (
+                                                                        <SelectItem key={opt.value} value={opt.value} className="text-sm capitalize">
+                                                                            {opt.label}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>Switch agent (current: {node.label})</TooltipContent>
+                                                    </Tooltip>
+                                                ) : (
+                                                    <span
+                                                        className={cn(
+                                                            "inline-block px-2 py-0.5 rounded-md text-sm font-medium whitespace-nowrap",
+                                                            isActive ? "bg-muted/50 text-foreground ring-2 ring-primary/40" : "bg-background/80 text-muted-foreground"
+                                                        )}
+                                                        title={node.label}
+                                                    >
+                                                        {node.label}
+                                                    </span>
+                                                )}
+                                                {i < workflowStrip.nodes.length - 1 && (
+                                                    <span className="text-muted-foreground/60 text-sm shrink-0">→</span>
+                                                )}
+                                            </span>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : (
+                            <span className="text-sm text-muted-foreground italic">Workflow: —</span>
+                        )}
                     </div>
 
-                    <div className="flex items-center gap-3">
-                        {/* Active mode selector — requires a thread so backend state can be updated */}
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <div className={cn("flex items-center gap-2 mr-2", !threadId && "cursor-not-allowed opacity-70")}>
-                                    <Activity className={cn(
-                                        "w-3.5 h-3.5 shrink-0",
-                                        stream.isLoading ? "text-amber-500 animate-pulse" : "text-emerald-500"
-                                    )} />
-                                    <Select
-                                        value={activeAgent}
-                                        disabled={!threadId}
-                                        onValueChange={(value) => {
-                                            const fn = (stream as any).setActiveAgentDebug as
-                                                | ((a: AgentMode) => Promise<void>)
-                                                | undefined;
-                                            console.log("[WorkbenchShell] Mode dropdown changed to", value, "setActiveAgentDebug:", fn ? "present" : "MISSING");
-                                            if (fn) {
-                                                fn(value as AgentMode).catch((e) =>
-                                                    console.warn("[WorkbenchShell] Failed to set active mode:", e)
-                                                );
-                                            } else {
-                                                console.warn("[WorkbenchShell] setActiveAgentDebug not on stream context — mode not sent to backend");
-                                            }
-                                        }}
-                                    >
-                                        <SelectTrigger
-                                            className={cn(
-                                                "h-8 w-[140px] text-xs font-medium capitalize border-border bg-muted/50 shadow-sm",
-                                                stream.isLoading && "opacity-80"
-                                            )}
-                                        >
-                                            <SelectValue placeholder="Mode" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {MODE_OPTIONS.map((opt) => (
-                                                <SelectItem key={opt.value} value={opt.value} className="text-xs capitalize">
-                                                    {opt.label}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                {threadId ? "Switch which agent handles the next turn" : "Open a thread first to switch the active agent"}
-                            </TooltipContent>
-                        </Tooltip>
-
+                    <div className="flex items-center gap-3 shrink-0">
                         <div className="h-6 w-[1px] bg-border mx-1" />
 
                         {/* What's New Trigger */}
@@ -436,9 +468,32 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
                         <UserMenu />
                     </div>
-                </header>
+            </header>
 
-                {/* Level 3: Content Stage - Workbench in center, Chat on right */}
+            {/* Level 2: Sidebar + main content (below global header) */}
+            <div className="flex flex-1 min-h-0 overflow-hidden">
+                {/* Sidebar - Collapsible */}
+                <div className={cn(
+                    "relative transition-all duration-300 border-r bg-muted/20 flex flex-col overflow-hidden",
+                    isSidebarCollapsed ? "w-0 border-0" : "w-64"
+                )}>
+                    {!isSidebarCollapsed && <Sidebar />}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            "absolute top-4 z-50 h-6 w-6 rounded-full border bg-background shadow-md hover:bg-muted transition-all",
+                            isSidebarCollapsed ? "-right-3" : "-right-3"
+                        )}
+                        onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                    >
+                        <PanelLeft className={cn("h-3.5 w-3.5 transition-transform", isSidebarCollapsed && "rotate-180")} />
+                    </Button>
+                </div>
+
+                {/* Main Content Area — workbench + agent panel only (no header) */}
+                <div className="flex-1 flex flex-col min-w-0" data-workbench-container>
+                {/* Content Stage - Workbench in center, Chat on right */}
                 <div className="flex-1 flex overflow-hidden min-h-0">
                     {/* Center Area - Workbench (and NodeDetailPanel when node selected) */}
                     <div 
@@ -769,6 +824,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                             </Button>
                         )}
                     </div>
+                </div>
                 </div>
             </div>
 

@@ -62,15 +62,15 @@ export interface ContextFile {
   path: string;
 }
 
-export interface HydrationDiffData {
+export interface ProjectConfigurationDiffData {
   artifacts: string[];
   external_context: ContextFile[];
 }
 
-export interface HydrationDiffView {
+export interface ProjectConfigurationDiffView {
   type: 'progression';
-  progress_diff: SemanticDiff<HydrationDiffData>;
-  remaining_diff: SemanticDiff<HydrationDiffData>;
+  progress_diff: SemanticDiff<ProjectConfigurationDiffData>;
+  remaining_diff: SemanticDiff<ProjectConfigurationDiffData>;
   metadata: {
     title: string;
     description: string;
@@ -87,6 +87,12 @@ export interface HydrationDiffView {
     };
   };
 }
+
+/** @deprecated Use ProjectConfigurationDiffData */
+export type HydrationDiffData = ProjectConfigurationDiffData;
+
+/** @deprecated Use ProjectConfigurationDiffView */
+export type HydrationDiffView = ProjectConfigurationDiffView;
 
 // Graph diff types (for future classify_intent)
 export interface Node {
@@ -132,6 +138,8 @@ export interface ConceptBriefOptionSummary {
   summary: string;
   compliance_score: number;
   validation: Record<string, unknown>;
+  /** When present, draft was saved to storage; user can click through to view full content */
+  artifact_id?: string;
 }
 
 /** View payload for concept brief options approval (similarity diff) */

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQueryState } from "nuqs";
 import { useStreamContext } from "@/providers/Stream";
-import { HydrationDiffView as HydrationDiffViewType } from "@/lib/diff-types";
+import { ProjectConfigurationDiffView as ProjectConfigurationDiffViewType } from "@/lib/diff-types";
 import { ProgressionDiffRenderer } from "./diff-renderers/progression-diff-renderer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,19 +11,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2, AlertCircle, TrendingUp, Map, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface HydrationDiffViewProps {
-  diffData?: HydrationDiffViewType;
+interface ProjectConfigurationDiffViewProps {
+  diffData?: ProjectConfigurationDiffViewType;
   onApprove?: () => void;
   onReject?: () => void;
   isLoading?: boolean;
 }
 
-export function HydrationDiffView({
+export function ProjectConfigurationDiffView({
   diffData,
   onApprove,
   onReject,
   isLoading = false,
-}: HydrationDiffViewProps) {
+}: ProjectConfigurationDiffViewProps) {
   const [activeTab, setActiveTab] = useState<"progress" | "remaining">("progress");
   const stream = useStreamContext();
   const [threadId] = useQueryState("threadId");
@@ -38,9 +38,9 @@ export function HydrationDiffView({
       <div className="flex items-center justify-center p-8 h-full">
         <div className="text-center max-w-md space-y-4">
           <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">No Hydration Data Available</h3>
+          <h3 className="text-lg font-semibold mb-2">No Project Configuration Data Available</h3>
           <p className="text-sm text-muted-foreground">
-            Waiting for hydration proposal data. This view will display when the hydration agent
+            Waiting for project configuration proposal data. This view will display when the project configurator agent
             proposes transitioning to the Concept phase.
           </p>
           {threadId && (

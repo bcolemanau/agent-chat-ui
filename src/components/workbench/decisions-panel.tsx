@@ -31,6 +31,7 @@ function setStoredView(mode: ViewMode) {
 function getTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     classify_intent: "Project Classification",
+    generate_project_configuration_summary: "Project Configuration",
     propose_hydration_complete: "Hydration Complete",
     generate_concept_brief: "Concept Brief",
     generate_ux_brief: "UX Brief",
@@ -58,7 +59,7 @@ export function DecisionsPanel() {
   const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
 
   const allPreviews = useUnifiedPreviews();
-  const { processed, addProcessed } = useProcessedDecisions(threadId);
+  const { processed, addProcessed, isLoading } = useProcessedDecisions(threadId);
 
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
   const pending = useMemo(
@@ -118,7 +119,7 @@ export function DecisionsPanel() {
   );
 
   const hasAny = pending.length > 0 || processed.length > 0;
-  const emptyMessage = pending.length === 0 && processed.length === 0;
+  const emptyMessage = !isLoading && pending.length === 0 && processed.length === 0;
 
   return (
     <div className="flex flex-col h-full min-h-0 p-6">
@@ -165,7 +166,13 @@ export function DecisionsPanel() {
         </div>
       </div>
 
-      {emptyMessage ? (
+      {isLoading ? (
+        <div className="flex flex-1 items-center justify-center min-h-[200px]">
+          <div className="text-center max-w-md text-muted-foreground text-sm">
+            Loading decisions…
+          </div>
+        </div>
+      ) : emptyMessage ? (
         <div className="flex flex-1 items-center justify-center min-h-[200px]">
           <div className="text-center max-w-md">
             <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
