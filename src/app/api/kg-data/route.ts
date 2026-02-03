@@ -1,38 +1,20 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl, getProxyHeaders } from "@/lib/backend-proxy";
 
 export async function GET(req: Request) {
     try {
         const session = await getServerSession(authOptions);
-
-        if (!session || !session.user) {
+        if (!session?.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
         const { searchParams } = new URL(req.url);
         const threadId = searchParams.get("thread_id") || "default";
-
-        // Build the backend URL
-        let backendUrl = process.env.LANGGRAPH_API_URL || "https://reflexion-staging.up.railway.app";
-        if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
-
-        const targetUrl = `${backendUrl}/kg/data?thread_id=${threadId}`;
-
-        // Extract organization context from headers sent by the client
-        // The client-side fetch should include the X-Organization-Context header
-        const orgContext = req.headers.get("X-Organization-Context");
-
-        const headers: Record<string, string> = {
-            "Authorization": `Bearer ${session.user.idToken}`,
-            "Content-Type": "application/json",
-        };
-
-        if (orgContext) {
-            headers["X-Organization-Context"] = orgContext;
-        }
-
-        console.log(`[PROXY] Fetching KG data from ${targetUrl} (Org Context: ${orgContext})`);
+        const baseUrl = getBackendBaseUrl();
+        const targetUrl = `${baseUrl}/kg/data?thread_id=${threadId}`;
+        const headers = getProxyHeaders(session, req);
 
         const resp = await fetch(targetUrl, { headers });
 
@@ -43,15 +25,12 @@ export async function GET(req: Request) {
         }
 
         const data = await resp.json();
-        const inactiveCount = data.nodes?.filter((n: any) => n.is_active === false).length || 0;
+        const inactiveCount = data.nodes?.filter((n: { is_active?: boolean }) => n.is_active === false).length || 0;
         console.log(`[PROXY] Delivered ${data.nodes?.length} nodes to client (${inactiveCount} inactive)`);
         return NextResponse.json(data, {
-            headers: {
-                'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-            }
+            headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
         });
-
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("[PROXY] KG Data fetch failed:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
