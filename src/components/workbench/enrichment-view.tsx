@@ -10,6 +10,7 @@ import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
 import { useQueryState } from "nuqs";
 import { useStreamContext } from "@/providers/Stream";
+import { KgDiffDiagramView } from "@/components/workbench/kg-diff-diagram-view";
 
 // Available KG Artifact types (from backend)
 const ARTIFACT_TYPES = [
@@ -32,11 +33,21 @@ export interface EnrichmentProposal {
     key_concepts: string[];
     relationships: string[];
     summary: string;
+    /** Entity types and instance IDs (e.g. ET-NEED → [NEED-01, NEED-02], ET-REQ → [SYS-REQ-01, ...]) */
+    extracted_entities?: Record<string, string[]>;
   };
   status: "pending" | "approved" | "rejected";
   filename?: string;
   preview_data?: {
     diff?: any; // SemanticDiff structure from backend
+    /** Traceability: KG coverage validation during enrichment (from backend) */
+    coverage_valid?: boolean;
+    coverage_results?: Array<{ entity_type_id: string; source_template_id: string; min_instances: number; count: number; satisfied: boolean; description?: string }>;
+    coverage_errors?: string[];
+    /** Issue #63: downstream templates that may need re-validation */
+    impact_forecast?: { message?: string; downstream_template_ids?: string[] };
+    /** Issue #63: uncovered CRITs (risks in scope); uncovered_crits_with_labels has id + label for display */
+    coverage_analysis?: { message?: string; uncovered_crits?: string[]; uncovered_crits_with_labels?: Array<{ id: string; label: string }> };
   };
 }
 
@@ -245,9 +256,18 @@ export function EnrichmentView() {
       });
 
       if (res.ok) {
+        const result = await res.json().catch(() => ({}));
+        const kgDiff = result?.diff?.type === "kg_diff" ? result.diff : undefined;
         setProposals((prev) => {
           const newMap = new Map(prev);
-          const updated = { ...proposal, status: "approved" as const };
+          const updated = {
+            ...proposal,
+            status: "approved" as const,
+            preview_data: {
+              ...proposal.preview_data,
+              ...(kgDiff ? { diff: kgDiff } : {}),
+            },
+          };
           newMap.set(artifactId, updated);
           return newMap;
         });
@@ -409,10 +429,98 @@ export function EnrichmentView() {
                   </div>
                 </div>
 
-                {/* Diff Preview (if available) */}
+                {/* Extracted entity types (nodes) and link types */}
+                {proposal.enrichment.extracted_entities && Object.keys(proposal.enrichment.extracted_entities).length > 0 && (
+                  <div className="mb-4 p-3 border border-border rounded-lg bg-muted/20 text-sm space-y-2">
+                    <p className="font-medium text-foreground">Extracted entity types (nodes)</p>
+                    <ul className="list-none space-y-1.5 text-muted-foreground">
+                      {Object.entries(proposal.enrichment.extracted_entities).map(([entityTypeId, ids]) => (
+                        <li key={entityTypeId}>
+                          <span className="font-mono text-foreground">{entityTypeId}</span>
+                          {" → "}
+                          <span className="font-mono text-xs">{(ids ?? []).join(", ")}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-xs text-muted-foreground pt-1 border-t border-border/50 mt-2">
+                      Link type: <code className="font-mono">addresses_entity_type</code> (artifact → entity types for traceability)
+                    </p>
+                  </div>
+                )}
+
+                {/* Diff Preview (if available): KG diff (nodes/links added) after approve, or progression diff before */}
                 {proposal.preview_data?.diff && (
                   <div className="mb-4 p-4 border rounded-lg bg-muted/30">
-                    {renderEnrichmentDiff(proposal.preview_data.diff)}
+                    {proposal.preview_data.diff.type === "kg_diff" ? (
+                      <KgDiffDiagramView payload={proposal.preview_data.diff} isLoading={false} />
+                    ) : (
+                      renderEnrichmentDiff(proposal.preview_data.diff)
+                    )}
+                  </div>
+                )}
+
+                {/* Traceability / Coverage (during enrichment) */}
+                {proposal.preview_data && "coverage_valid" in proposal.preview_data && (
+                  <div className={cn(
+                    "mb-4 p-3 border rounded-lg text-sm",
+                    proposal.preview_data.coverage_valid === true
+                      ? "border-green-500/50 bg-green-500/10"
+                      : "border-amber-500/50 bg-amber-500/10"
+                  )}>
+                    <span className="font-medium">
+                      {proposal.preview_data.coverage_valid === true ? (
+                        <><CheckCircle2 className="inline h-4 w-4 mr-1.5 text-green-600" /> Coverage OK</>
+                      ) : (
+                        <><AlertCircle className="inline h-4 w-4 mr-1.5 text-amber-600" /> Coverage gaps</>
+                      )}
+                    </span>
+                    {proposal.preview_data.coverage_errors?.length ? (
+                      <ul className="mt-2 list-disc list-inside text-muted-foreground">
+                        {proposal.preview_data.coverage_errors.slice(0, 5).map((err: string, i: number) => (
+                          <li key={i}>{err}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* Issue #63: Impact forecast and coverage analysis (risks in scope) */}
+                {(proposal.preview_data?.impact_forecast || proposal.preview_data?.coverage_analysis) && (
+                  <div className="mb-4 p-3 border border-border rounded-lg bg-muted/30 text-sm space-y-3">
+                    {proposal.preview_data.impact_forecast && (
+                      <div>
+                        <p className="font-medium text-foreground">Impact forecast</p>
+                        <p className="text-muted-foreground text-xs mt-0.5">{proposal.preview_data.impact_forecast.message}</p>
+                        {(proposal.preview_data.impact_forecast.downstream_template_ids?.length ?? 0) > 0 ? (
+                          <ul className="list-disc list-inside text-xs text-muted-foreground mt-1">
+                            {(proposal.preview_data.impact_forecast.downstream_template_ids ?? []).map((id: string) => (
+                              <li key={id}>{id}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    )}
+                    {proposal.preview_data.coverage_analysis && (
+                      <div>
+                        <p className="font-medium text-foreground">Coverage (risks in scope)</p>
+                        <p className="text-muted-foreground text-xs mt-0.5">{proposal.preview_data.coverage_analysis.message}</p>
+                        {(proposal.preview_data.coverage_analysis.uncovered_crits_with_labels?.length ?? proposal.preview_data.coverage_analysis.uncovered_crits?.length ?? 0) > 0 ? (
+                          <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                            <span className="font-medium">Uncovered:</span>
+                            <ul className="list-disc list-inside mt-0.5 space-y-0.5">
+                              {(proposal.preview_data.coverage_analysis.uncovered_crits_with_labels?.length
+                                ? proposal.preview_data.coverage_analysis.uncovered_crits_with_labels
+                                : (proposal.preview_data.coverage_analysis.uncovered_crits ?? []).map((id: string) => ({ id, label: id }))
+                              ).map((item: { id: string; label: string }) => (
+                                <li key={item.id}>
+                                  {item.label === item.id ? item.id : `${item.id}: ${item.label}`}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -27,7 +27,7 @@ import { useSession } from "next-auth/react";
 import { createClient } from "./client";
 import { withThreadSpan } from "@/lib/otel-client";
 
-/** Filtered KG from backend (filter_graph_data(..., context_mode=true)); streamed when hydrator sets it. */
+/** Filtered KG from backend (filter_graph_data(..., context_mode=true)); streamed when Project Configurator sets it. */
 export type FilteredKgType = {
   nodes: Array<Record<string, unknown>>;
   links: Array<Record<string, unknown>>;
@@ -44,10 +44,10 @@ export type StateType = {
   active_risks?: string[];
   user_project_description?: string;
   context?: Record<string, unknown>;
-  active_agent?: "supervisor" | "hydrator";
+  active_agent?: "supervisor" | "project_configurator";
   visualization_html?: string;
   workbench_view?: "map" | "workflow" | "artifacts" | "discovery" | "settings";
-  /** Filtered KG for current trigger; set by hydrator, streamed to client. Use for map view without extra /api/kg-data. */
+  /** Filtered KG for current trigger; set by Project Configurator, streamed to client. Use for map view without extra /api/kg-data. */
   filtered_kg?: FilteredKgType;
 };
 
@@ -80,7 +80,7 @@ type StreamContextType = UseStream<StateType, {
   updateState?: (update: { values?: Record<string, unknown> }) => Promise<void>;
   /** After Apply, backend triggers a graph run; call this after a short delay to refetch thread state (new messages, active_mode). */
   refetchThreadState?: () => Promise<void>;
-  setActiveAgentDebug?: (agent: "supervisor" | "hydrator" | "concept" | "architecture") => Promise<void>;
+  setActiveAgentDebug?: (agent: "supervisor" | "project_configurator" | "concept" | "architecture") => Promise<void>;
   /** Increment after a decision is applied so KG, Artifacts, Workflow refetch. */
   workbenchRefreshKey?: number;
   triggerWorkbenchRefresh?: () => void;
@@ -202,21 +202,38 @@ const StreamSession = ({
     }
   }, [rawStream.values]);
 
-  // Method to update the backend state with the current view
+  // Method to update the backend state with the current view.
+  // On 409 (thread busy), retry briefly then show a soft message instead of failing noisily.
   const setWorkbenchView = async (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "decisions") => {
     if (!threadId || !apiUrl) return;
 
-    console.log(`[Stream] Updating active view to: ${view}`);
-    try {
-      const headers: Record<string, string> = {};
-      if (orgContext) headers['X-Organization-Context'] = orgContext;
+    const maxRetries = 2;
+    const retryDelayMs = 2000;
+    const is409 = (e: unknown) =>
+      (e as Error)?.message?.includes?.("409") || (e as Error)?.message?.includes?.("Conflict") || (e as { status?: number })?.status === 409;
 
-      const client = createClient(apiUrl, apiKey ?? undefined, headers);
-      await client.threads.updateState(threadId, {
-        values: { workbench_view: view }
-      });
-    } catch (e) {
-      console.error("[Stream] Failed to update workbench view:", e);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const headers: Record<string, string> = {};
+        if (orgContext) headers["X-Organization-Context"] = orgContext;
+        const client = createClient(apiUrl, apiKey ?? undefined, headers);
+        await client.threads.updateState(threadId, {
+          values: { workbench_view: view },
+        });
+        return;
+      } catch (e) {
+        if (is409(e) && attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+          continue;
+        }
+        if (is409(e)) {
+          console.warn("[Stream] Thread busy; workbench view will update when the run finishes.");
+          toast.info("Thread is busy. View will update when the run finishes.", { duration: 4000 });
+          return;
+        }
+        console.error("[Stream] Failed to update workbench view:", e);
+        return;
+      }
     }
   };
 
@@ -225,7 +242,7 @@ const StreamSession = ({
   const USER_MODE_PRIORITY_MS = 60000; // 1 min: keep user's dropdown choice until backend/graph has caught up
 
   // DEBUG: manually override the active agent for this thread.
-  const setActiveAgentDebug = async (agent: "supervisor" | "hydrator" | "concept" | "architecture") => {
+  const setActiveAgentDebug = async (agent: "supervisor" | "project_configurator" | "concept" | "architecture") => {
     if (!threadId || !apiUrl) {
       console.warn(`[Stream] setActiveAgentDebug skipped: threadId=${threadId ?? "null"}, apiUrl=${apiUrl ? "set" : "null"} (need a thread; send a message first)`);
       toast.warning("Open a thread first to switch the active agent.", {
@@ -321,15 +338,27 @@ const StreamSession = ({
   // After Apply, backend triggers a graph run; refetch thread state so we see new messages and active_mode.
   // Never overwrite with an older snapshot: if refetched has fewer messages than the stream, keep current messages
   // to avoid "bunch of messages inserted before mine" when user just sent a message and refetch returns stale state.
-  const refetchThreadState = useCallback(async () => {
+  // Handles 409 (thread busy) and connection resets with retries; 409 is expected while a run is in progress.
+  const refetchThreadState = useCallback(async (attempt = 0) => {
     if (!threadId || !apiUrl) return;
+    const maxRetries = 2;
+    const retryDelayMs = 2000;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["X-Api-Key"] = apiKey;
+    if (orgContext) headers["X-Organization-Context"] = orgContext;
+    const base = apiUrl.replace(/\/+$/, "");
+    const url = `${base}/threads/${threadId}/state`;
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (apiKey) headers["X-Api-Key"] = apiKey;
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
-      const base = apiUrl.replace(/\/+$/, "");
-      const res = await fetch(`${base}/threads/${threadId}/state`, { headers });
-      if (!res.ok) return;
+      const res = await fetch(url, { headers });
+      if (res.status === 409 && attempt < maxRetries) {
+        if (attempt > 0) console.debug("[Stream] refetchThreadState: thread busy (409), retrying…");
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+        return refetchThreadState(attempt + 1);
+      }
+      if (!res.ok) {
+        if (res.status === 409) console.warn("[Stream] refetchThreadState: thread still busy after retries.");
+        return;
+      }
       const data = (await res.json()) as { values?: Record<string, unknown> };
       const values = data?.values;
       if (values && typeof values === "object") {
@@ -343,7 +372,17 @@ const StreamSession = ({
         setValuesOverlay({ ...valuesOverlayRef.current });
       }
     } catch (e) {
-      console.warn("[Stream] refetchThreadState failed:", e);
+      const isNetworkError =
+        e instanceof TypeError && e.message === "Failed to fetch" ||
+        (e as Error)?.message?.includes("Connection") ||
+        (e as Error)?.message?.includes("reset");
+      if (isNetworkError && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+        return refetchThreadState(attempt + 1);
+      }
+      if (attempt > 0 || !isNetworkError) {
+        console.warn("[Stream] refetchThreadState failed:", e);
+      }
     }
   }, [threadId, apiUrl, apiKey, orgContext]);
 

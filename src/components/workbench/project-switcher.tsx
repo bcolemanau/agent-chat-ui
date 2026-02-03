@@ -17,6 +17,16 @@ interface Project {
     name: string;
 }
 
+// Match sidebar display: meaningful names as-is, UUIDs as "Project xxxxxxxx"
+function formatProjectLabel(project: Project): string {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (project.name && project.name !== project.id && !uuidRegex.test(project.name)) {
+        return project.name;
+    }
+    const shortId = project.id.substring(0, 8);
+    return `Project ${shortId}`;
+}
+
 export function ProjectSwitcher() {
     const { data: session } = useSession();
     const [projects, setProjects] = React.useState<Project[]>([]);
@@ -53,19 +63,28 @@ export function ProjectSwitcher() {
         return () => window.removeEventListener('focus', handleFocus);
     }, [fetchProjects]);
 
+    const currentProject = threadId ? projects.find((p) => p.id === threadId) : null;
+    const currentLabel = currentProject ? formatProjectLabel(currentProject) : null;
+    const triggerTitle = currentProject ? (currentProject.name || currentProject.id) : undefined;
+
     return (
         <Select
             value={threadId || "new"}
             onValueChange={(val) => setThreadId(val === "new" ? null : val)}
         >
-            <SelectTrigger className="w-[180px] bg-background border-border text-foreground h-9">
-                <Briefcase className="w-4 h-4 mr-2 text-blue-500" />
-                <SelectValue placeholder="Select Project" />
+            <SelectTrigger
+                title={triggerTitle}
+                className="h-7 w-auto min-w-0 max-w-[220px] px-2 py-0.5 text-sm font-medium bg-muted/50 border border-border rounded-md text-foreground hover:bg-muted gap-1.5 shadow-none [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"
+            >
+                <Briefcase className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <SelectValue placeholder="Select Project">
+                    {currentLabel ?? undefined}
+                </SelectValue>
             </SelectTrigger>
             <SelectContent className="bg-background border-border text-foreground">
                 {projects.map((project) => (
                     <SelectItem key={project.id} value={project.id} className="focus:bg-muted focus:text-foreground italic">
-                        {project.name}
+                        {formatProjectLabel(project)}
                     </SelectItem>
                 ))}
                 <SelectItem value="new" className="focus:bg-muted focus:text-foreground font-medium border-t border-border mt-1">

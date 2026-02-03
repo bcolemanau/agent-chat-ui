@@ -21,7 +21,7 @@ export interface BrandingConfig {
 }
 
 export const defaultBranding: ClientBranding = {
-  name: "Reflexion",
+  name: "NewCo",
   brand_title: "Reflexion Agent",
   colors: {
     primary: "#000000",

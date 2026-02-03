@@ -10,7 +10,8 @@ import {
     CheckSquare,
     Search,
     Trash2,
-    Clock
+    Clock,
+    Pencil
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryState } from "nuqs";
@@ -58,6 +59,8 @@ export function Sidebar() {
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
+    const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+    const [editingName, setEditingName] = useState("");
 
     // Check if user is Reflexion Admin (keys are reflexion_admin or admin)
     const isAdmin = userRole === "reflexion_admin" || userRole === "admin";
@@ -82,6 +85,52 @@ export function Sidebar() {
             setLoading(false);
         }
     }, []);
+
+    const startEditing = (e: React.MouseEvent, project: Project) => {
+        e.stopPropagation();
+        setEditingProjectId(project.id);
+        setEditingName(formatProjectName(project));
+    };
+
+    const cancelEditing = () => {
+        setEditingProjectId(null);
+        setEditingName("");
+    };
+
+    const saveRename = useCallback(async () => {
+        if (!editingProjectId || !editingName.trim()) {
+            cancelEditing();
+            return;
+        }
+        const name = editingName.trim();
+        try {
+            const orgContext = localStorage.getItem("reflexion_org_context");
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (orgContext) headers["X-Organization-Context"] = orgContext;
+
+            const res = await fetch(`/api/projects/${encodeURIComponent(editingProjectId)}`, {
+                method: "PATCH",
+                headers,
+                body: JSON.stringify({ name }),
+            });
+
+            if (res.ok) {
+                toast.success("Project renamed");
+                cancelEditing();
+                fetchProjects();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                if (res.status === 409) {
+                    toast.warning(err?.error || err?.detail || "Project is busy. Try again in a moment.");
+                } else {
+                    toast.error(err?.error || "Failed to rename project");
+                }
+            }
+        } catch (error) {
+            console.error("Error renaming project:", error);
+            toast.error("An error occurred while renaming");
+        }
+    }, [editingProjectId, editingName, fetchProjects]);
 
     const deleteProject = async (e: React.MouseEvent, projectId: string) => {
         e.stopPropagation();
@@ -137,8 +186,8 @@ export function Sidebar() {
             <div className="p-6 shrink-0">
                 <Link href="/" className="inline-block transition-transform hover:scale-105">
                     <h2 className="text-xl font-bold tracking-tight text-primary flex items-center gap-2">
-                        <span className="bg-primary text-primary-foreground px-1.5 py-0.5 rounded text-sm">R</span>
-                        Reflexion
+                        <span className="bg-primary text-primary-foreground px-1.5 py-0.5 rounded text-sm">N</span>
+                        NewCo
                     </h2>
                 </Link>
             </div>
@@ -184,35 +233,70 @@ export function Sidebar() {
                         ) : (
                             filteredProjects.map((project) => {
                                 const isActive = threadId === project.id;
+                                const isEditing = editingProjectId === project.id;
                                 return (
                                     <div key={project.id} className="group relative">
                                         <button
-                                            onClick={() => setThreadId(project.id)}
+                                            onClick={() => !isEditing && setThreadId(project.id)}
                                             className={cn(
                                                 "w-full text-left flex flex-col rounded-md px-3 py-2.5 text-sm font-medium transition-all",
                                                 isActive ? "bg-primary/10 text-primary shadow-sm" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                                             )}
                                         >
-                                            <div className="flex items-center w-full pr-6">
+                                            <div className="flex items-center w-full pr-12">
                                                 <FileText className={cn("mr-3 h-4 w-4 shrink-0 transition-transform group-hover:scale-110", isActive ? "text-primary" : "text-muted-foreground")} />
-                                                <span className="truncate font-semibold" title={project.id}>{formatProjectName(project)}</span>
+                                                {isEditing ? (
+                                                    <input
+                                                        type="text"
+                                                        value={editingName}
+                                                        onChange={(e) => setEditingName(e.target.value)}
+                                                        onBlur={() => saveRename()}
+                                                        onKeyDown={(e) => {
+                                                            e.stopPropagation();
+                                                            if (e.key === "Enter") {
+                                                                e.currentTarget.blur();
+                                                            } else if (e.key === "Escape") {
+                                                                cancelEditing();
+                                                            }
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="flex-1 min-w-0 bg-background border rounded px-2 py-0.5 text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
+                                                        autoFocus
+                                                        aria-label="Rename project"
+                                                    />
+                                                ) : (
+                                                    <span className="truncate font-semibold" title={project.id}>{formatProjectName(project)}</span>
+                                                )}
                                             </div>
-                                            {project.updated_at && (
+                                            {project.updated_at && !isEditing && (
                                                 <div className="flex items-center mt-1 ml-7 text-[10px] text-muted-foreground/70">
                                                     <Clock className="h-2.5 w-2.5 mr-1" />
                                                     {formatDistanceToNow(new Date(project.updated_at), { addSuffix: true })}
                                                 </div>
                                             )}
                                         </button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
-                                            onClick={(e) => deleteProject(e, project.id)}
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                            <span className="sr-only">Delete Project</span>
-                                        </Button>
+                                        {!isEditing && (
+                                            <>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="absolute right-8 top-1/2 -translate-y-1/2 h-7 w-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                                                    onClick={(e) => startEditing(e, project)}
+                                                >
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                    <span className="sr-only">Rename Project</span>
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
+                                                    onClick={(e) => deleteProject(e, project.id)}
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                    <span className="sr-only">Delete Project</span>
+                                                </Button>
+                                            </>
+                                        )}
                                     </div>
                                 );
                             })
@@ -232,7 +316,7 @@ export function Sidebar() {
                 {isAdmin && (
                     <div className="space-y-3 pt-2">
                         <h3 className="px-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
-                            Reflexion Product
+                            NewCo Product
                         </h3>
                         <div className="space-y-1">
                             {PRODUCT_LINKS.map((link) => {

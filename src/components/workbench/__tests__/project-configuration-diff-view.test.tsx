@@ -1,5 +1,5 @@
 /**
- * Unit tests for HydrationDiffView
+ * Unit tests for ProjectConfigurationDiffView
  * Tests cover:
  * 1. Component rendering with diff data
  * 2. Empty state handling
@@ -10,9 +10,9 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { HydrationDiffView } from '../hydration-diff-view';
-import { HydrationDiffView as HydrationDiffViewType } from '@/lib/diff-types';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { ProjectConfigurationDiffView } from '../project-configuration-diff-view';
+import { ProjectConfigurationDiffView as ProjectConfigurationDiffViewType } from '@/lib/diff-types';
 
 // Mock nuqs to avoid ESM import issues
 jest.mock('nuqs', () => ({
@@ -67,14 +67,14 @@ jest.mock('@/components/ui/card', () => ({
   CardContent: ({ children }: any) => <div data-testid="card-content">{children}</div>,
 }));
 
-describe('HydrationDiffView', () => {
+describe('ProjectConfigurationDiffView', () => {
   const createMockDiffData = (
     completionPercentage: number = 50,
     artifactsCompleted: number = 2,
     artifactsTotal: number = 4,
     contextCompleted: number = 1,
     contextTotal: number = 2
-  ): HydrationDiffViewType => {
+  ): ProjectConfigurationDiffViewType => {
     return {
       type: 'progression',
       progress_diff: {
@@ -94,10 +94,10 @@ describe('HydrationDiffView', () => {
           unchangedCount: 0,
         },
         metadata: {
-          title: 'Hydration Progress',
+          title: 'Project Configuration Progress',
           leftLabel: 'Start State',
           rightLabel: 'Current State',
-          description: 'What has been gathered during hydration',
+          description: 'What has been gathered',
           progression: {
             completionPercentage,
             itemsAdded: 3,
@@ -136,8 +136,8 @@ describe('HydrationDiffView', () => {
         },
       },
       metadata: {
-        title: 'Hydration Progress',
-        description: 'Compare hydration states to see progress and remaining work',
+        title: 'Project Configuration Progress',
+        description: 'Compare states to see progress and remaining work',
         completion_percentage: completionPercentage,
         artifacts: {
           completed: artifactsCompleted,
@@ -154,49 +154,48 @@ describe('HydrationDiffView', () => {
   };
 
   it('should render empty state when no diff data', () => {
-    render(<HydrationDiffView diffData={undefined} />);
+    render(<ProjectConfigurationDiffView diffData={undefined} />);
 
-    expect(screen.getByText(/No Hydration Data Available/i)).toBeInTheDocument();
-    expect(screen.getByText(/Waiting for hydration proposal data/i)).toBeInTheDocument();
+    expect(screen.getByText(/No Project Configuration Data Available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for project configuration proposal data/i)).toBeInTheDocument();
   });
 
   it('should render with diff data', () => {
     const diffData = createMockDiffData();
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
-    // "Hydration Progress" appears multiple times (in metadata and diff renderers)
-    expect(screen.getAllByText('Hydration Progress').length).toBeGreaterThan(0);
-    expect(screen.getByText(/Compare hydration states/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Project Configuration Progress').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Compare states to see progress/i)).toBeInTheDocument();
   });
 
   it('should display completion badge', () => {
     const diffData = createMockDiffData(75);
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
     expect(screen.getByText(/75.0% Complete/i)).toBeInTheDocument();
   });
 
   it('should display summary stats cards', () => {
     const diffData = createMockDiffData(50, 2, 4, 1, 2);
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
     expect(screen.getByText(/Artifacts/i)).toBeInTheDocument();
     expect(screen.getByText(/External Context/i)).toBeInTheDocument();
-    expect(screen.getByText(/2 \/ 4/i)).toBeInTheDocument(); // artifacts completed/total
-    expect(screen.getByText(/1 \/ 2/i)).toBeInTheDocument(); // context completed/total
+    expect(screen.getByText(/2 \/ 4/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 \/ 2/i)).toBeInTheDocument();
   });
 
   it('should display remaining counts', () => {
     const diffData = createMockDiffData(50, 2, 4, 1, 2);
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
-    expect(screen.getByText(/2 remaining/i)).toBeInTheDocument(); // artifacts
-    expect(screen.getByText(/1 remaining/i)).toBeInTheDocument(); // context
+    expect(screen.getByText(/2 remaining/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 remaining/i)).toBeInTheDocument();
   });
 
   it('should render tabs for progress and remaining', () => {
     const diffData = createMockDiffData();
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
     expect(screen.getByTestId('tabs-list')).toBeInTheDocument();
     expect(screen.getByTestId('tab-progress')).toBeInTheDocument();
@@ -205,19 +204,18 @@ describe('HydrationDiffView', () => {
 
   it('should switch tabs when clicked', () => {
     const diffData = createMockDiffData();
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
     const remainingTab = screen.getByTestId('tab-remaining');
     fireEvent.click(remainingTab);
 
-    // Tab should be active (implementation depends on Tabs component)
     expect(remainingTab).toBeInTheDocument();
   });
 
   it('should call onApprove when approve button clicked', () => {
     const diffData = createMockDiffData();
     const onApprove = jest.fn();
-    render(<HydrationDiffView diffData={diffData} onApprove={onApprove} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} onApprove={onApprove} />);
 
     const approveButton = screen.getByText(/Approve Transition/i);
     fireEvent.click(approveButton);
@@ -228,7 +226,7 @@ describe('HydrationDiffView', () => {
   it('should call onReject when reject button clicked', () => {
     const diffData = createMockDiffData();
     const onReject = jest.fn();
-    render(<HydrationDiffView diffData={diffData} onReject={onReject} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} onReject={onReject} />);
 
     const rejectButton = screen.getByText(/Reject/i);
     fireEvent.click(rejectButton);
@@ -239,7 +237,7 @@ describe('HydrationDiffView', () => {
   it('should disable buttons when isLoading is true', () => {
     const diffData = createMockDiffData();
     const onApprove = jest.fn();
-    render(<HydrationDiffView diffData={diffData} onApprove={onApprove} isLoading={true} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} onApprove={onApprove} isLoading={true} />);
 
     const approveButton = screen.getByText(/Approve Transition/i);
     expect(approveButton).toBeDisabled();
@@ -247,7 +245,7 @@ describe('HydrationDiffView', () => {
 
   it('should not render action buttons when callbacks not provided', () => {
     const diffData = createMockDiffData();
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
     expect(screen.queryByText(/Approve Transition/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Reject/i)).not.toBeInTheDocument();
@@ -255,51 +253,29 @@ describe('HydrationDiffView', () => {
 
   it('should display progress diff renderer in progress tab', () => {
     const diffData = createMockDiffData();
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
-    // There are multiple progression-diff-renderers (one for progress, one for remaining)
     expect(screen.getAllByTestId('progression-diff-renderer').length).toBeGreaterThan(0);
-    // "Hydration Progress" appears in both the metadata and the diff renderer
-    expect(screen.getAllByText('Hydration Progress').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Project Configuration Progress').length).toBeGreaterThan(0);
   });
 
   it('should display remaining diff renderer in remaining tab', () => {
     const diffData = createMockDiffData();
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
-    // Should show both diffs (implementation may vary based on tab switching)
-    // Use getAllByText since "Remaining Work" appears in both the tab content and the diff renderer
     expect(screen.getAllByText('Remaining Work').length).toBeGreaterThan(0);
   });
 
   it('should apply correct badge color for high completion', () => {
     const diffData = createMockDiffData(85);
-    const { container } = render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
-    // Check for green badge class (implementation specific)
-    const badge = screen.getByText(/85.0% Complete/i);
-    expect(badge).toBeInTheDocument();
-  });
-
-  it('should apply correct badge color for medium completion', () => {
-    const diffData = createMockDiffData(60);
-    render(<HydrationDiffView diffData={diffData} />);
-
-    const badge = screen.getByText(/60.0% Complete/i);
-    expect(badge).toBeInTheDocument();
-  });
-
-  it('should apply correct badge color for low completion', () => {
-    const diffData = createMockDiffData(30);
-    render(<HydrationDiffView diffData={diffData} />);
-
-    const badge = screen.getByText(/30.0% Complete/i);
-    expect(badge).toBeInTheDocument();
+    expect(screen.getByText(/85.0% Complete/i)).toBeInTheDocument();
   });
 
   it('should handle zero completion', () => {
     const diffData = createMockDiffData(0, 0, 4, 0, 2);
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
     expect(screen.getByText(/0.0% Complete/i)).toBeInTheDocument();
     expect(screen.getByText(/0 \/ 4/i)).toBeInTheDocument();
@@ -307,7 +283,7 @@ describe('HydrationDiffView', () => {
 
   it('should handle 100% completion', () => {
     const diffData = createMockDiffData(100, 4, 4, 2, 2);
-    render(<HydrationDiffView diffData={diffData} />);
+    render(<ProjectConfigurationDiffView diffData={diffData} />);
 
     expect(screen.getByText(/100.0% Complete/i)).toBeInTheDocument();
     expect(screen.getByText(/4 \/ 4/i)).toBeInTheDocument();

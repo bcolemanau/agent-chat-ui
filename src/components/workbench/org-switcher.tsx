@@ -22,7 +22,7 @@ export function OrgSwitcher() {
     const [selectedOrgId, setSelectedOrgId] = React.useState<string>('');
     const [loading, setLoading] = React.useState(false);
 
-    // Check if user is Reflexion Admin (matching sidebar logic)
+    // Check if user is NewCo Admin (matching sidebar logic)
     const userRole = session?.user?.role;
     const isAdmin = userRole === 'reflexion_admin' || userRole === 'admin';
 
@@ -99,8 +99,8 @@ export function OrgSwitcher() {
     return (
         <div className="flex items-center gap-2">
             <Select value={selectedOrgId} onValueChange={handleValueChange}>
-                <SelectTrigger className="w-[180px] h-9 bg-background border-border text-foreground">
-                    <Building2 className="w-4 h-4 mr-2 text-muted-foreground" />
+                <SelectTrigger className="h-7 w-auto min-w-0 max-w-[200px] px-2 py-0.5 text-sm font-medium bg-muted/50 border border-border rounded-md text-foreground hover:bg-muted gap-1.5 shadow-none [&>span]:whitespace-nowrap [&>span]:overflow-visible">
+                    <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                     <SelectValue placeholder="Organization">
                         {organizations.find(org => org.id === selectedOrgId)?.name || 'Organization'}
                     </SelectValue>

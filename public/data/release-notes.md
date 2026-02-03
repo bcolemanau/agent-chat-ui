@@ -4,6 +4,25 @@ Stay up to date with the latest features and improvements.
 
 ---
 
+## v1.7.0 - See What Changed, Decide With Context (KG-diff & Traceability)
+
+**Release Date:** February 2, 2026
+
+### What you get
+
+- **See exactly what changed.** Compare any two KG versions on the map: added (green), removed (red), modified (amber), plus a short summary and optional prose so you can judge impact at a glance.
+- **One experience for every diff.** Version compare and proposal review (architecture, requirements, enrichment, etc.) use the same diagram and summary — no switching between different diff modes.
+- **Approve with full context.** Proposals now show **impact** (which downstream work may need re-check) and **coverage** (which risks are covered vs still open). You decide with the full picture.
+- **Traceability that follows your content.** Uploads and enrichments keep entity types and risk links in sync with what you add. “Risks for this trigger” reflect your actual content, not only a pre-built graph.
+
+### Details
+
+- Map compare: force-directed graph with change-type styling; summary strip and optional semantic summary from the same payload.
+- Proposals (concept brief, UX brief, link document, enrichment, architecture/requirements/design): impact forecast and coverage analysis shown in the diff renderer, concept brief view, and enrichment view when present.
+- Upload and enrichment: system finds or creates entity type nodes and links (e.g. CRIT → entity type) so traceability stays aligned.
+
+---
+
 ## v1.6.0 - Agent Administrator & Configurable Agent Prompts
 
 **Release Date:** January 31, 2026

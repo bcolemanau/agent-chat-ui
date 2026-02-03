@@ -62,15 +62,15 @@ export interface ContextFile {
   path: string;
 }
 
-export interface HydrationDiffData {
+export interface ProjectConfigurationDiffData {
   artifacts: string[];
   external_context: ContextFile[];
 }
 
-export interface HydrationDiffView {
+export interface ProjectConfigurationDiffView {
   type: 'progression';
-  progress_diff: SemanticDiff<HydrationDiffData>;
-  remaining_diff: SemanticDiff<HydrationDiffData>;
+  progress_diff: SemanticDiff<ProjectConfigurationDiffData>;
+  remaining_diff: SemanticDiff<ProjectConfigurationDiffData>;
   metadata: {
     title: string;
     description: string;
@@ -87,6 +87,12 @@ export interface HydrationDiffView {
     };
   };
 }
+
+/** @deprecated Use ProjectConfigurationDiffData */
+export type HydrationDiffData = ProjectConfigurationDiffData;
+
+/** @deprecated Use ProjectConfigurationDiffView */
+export type HydrationDiffView = ProjectConfigurationDiffView;
 
 // Graph diff types (for future classify_intent)
 export interface Node {
@@ -132,6 +138,8 @@ export interface ConceptBriefOptionSummary {
   summary: string;
   compliance_score: number;
   validation: Record<string, unknown>;
+  /** When present, draft was saved to storage; user can click through to view full content */
+  artifact_id?: string;
 }
 
 /** View payload for concept brief options approval (similarity diff) */
@@ -174,3 +182,67 @@ export interface ClassifyIntentDiffView {
     };
   };
 }
+
+// ---------------------------------------------------------------------------
+// KG-diff contract (Issue #56): artifact-type-agnostic diagram + summary view
+// ---------------------------------------------------------------------------
+
+export type KgDiffChangeType = 'added' | 'modified' | 'removed' | 'unchanged';
+
+/** Shared semantic colors for KG-diff (D3, legend, badges). Use in world-map-view and KgDiffDiagramView. */
+export const KG_DIFF_COLORS: Record<KgDiffChangeType, string> = {
+  added: '#10b981',
+  modified: '#f59e0b',
+  removed: '#ef4444',
+  unchanged: '#94a3b8',
+};
+
+export interface KgDiffNode {
+  id: string;
+  changeType: KgDiffChangeType;
+  name?: string;
+  description?: string;
+  type?: string;
+  [key: string]: unknown;
+}
+
+export interface KgDiffEdge {
+  source: string | { id: string };
+  target: string | { id: string };
+  changeType: KgDiffChangeType;
+  type?: string;
+  id?: string;
+  [key: string]: unknown;
+}
+
+export interface KgDiffSummary {
+  nodesAdded: number;
+  nodesRemoved: number;
+  nodesModified: number;
+  edgesAdded: number;
+  edgesRemoved: number;
+  edgesModified: number;
+  semanticSummary?: string;
+}
+
+export interface KgDiffMetadata {
+  title: string;
+  description?: string;
+  leftLabel: string;
+  rightLabel: string;
+  artifactType?: string;
+}
+
+/** Payload for KG-diff diagram and summary views (shared contract). */
+export interface KgDiffPayload {
+  type: 'kg_diff';
+  nodes: KgDiffNode[];
+  edges: KgDiffEdge[];
+  summary?: KgDiffSummary;
+  metadata?: KgDiffMetadata;
+  /** Legacy: backend may send links instead of edges */
+  links?: KgDiffEdge[];
+}
+
+/** View payload for KG-diff diagram view (diagram-consumable shape). */
+export type KgDiffView = KgDiffPayload;

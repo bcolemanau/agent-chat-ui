@@ -184,7 +184,7 @@ export function AgentAdministrator() {
         <div className="space-y-6">
             <div>
                 <h2 className="text-2xl font-bold">Agent Administrator</h2>
-                <p className="text-muted-foreground">View registered Reflexion workflow agents and prompt configuration</p>
+                <p className="text-muted-foreground">View registered NewCo workflow agents and prompt configuration</p>
             </div>
 
             <div className="grid gap-4">

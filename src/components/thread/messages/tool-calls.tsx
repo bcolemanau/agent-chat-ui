@@ -16,8 +16,9 @@ function getProposalTitle(toolName: string, proposal: Record<string, any>): stri
   switch (toolName) {
     case "classify_intent":
       return `Project Classification: ${args.trigger_id || "Unknown Trigger"}`;
+    case "generate_project_configuration_summary":
     case "propose_hydration_complete":
-      return "Hydration Complete - Ready for Concept Phase";
+      return "Project Configuration - Ready for Concept Phase";
     case "generate_concept_brief":
       return "Concept Brief Options";
     case "propose_enrichment":

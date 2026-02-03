@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryState } from "nuqs";
 import { useUnifiedPreviews, UnifiedPreviewItem } from "./hooks/use-unified-previews";
 import { useProcessedDecisions, ProcessedDecision } from "./hooks/use-processed-decisions";
 import { ApprovalCard } from "./approval-card";
+import { KgDiffDiagramView } from "./kg-diff-diagram-view";
 import { useStreamContext } from "@/providers/Stream";
 import { AlertCircle, LayoutGrid, Table2, Rows3, PanelRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ function setStoredView(mode: ViewMode) {
 function getTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     classify_intent: "Project Classification",
+    generate_project_configuration_summary: "Project Configuration",
     propose_hydration_complete: "Hydration Complete",
     generate_concept_brief: "Concept Brief",
     generate_ux_brief: "UX Brief",
@@ -58,7 +60,7 @@ export function DecisionsPanel() {
   const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
 
   const allPreviews = useUnifiedPreviews();
-  const { processed, addProcessed } = useProcessedDecisions(threadId);
+  const { processed, addProcessed, isLoading } = useProcessedDecisions(threadId);
 
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
   const pending = useMemo(
@@ -80,13 +82,18 @@ export function DecisionsPanel() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const onDecisionProcessed = useCallback(
-    (item: UnifiedPreviewItem, status: "approved" | "rejected") => {
+    (
+      item: UnifiedPreviewItem,
+      status: "approved" | "rejected",
+      extra?: { kg_version_sha?: string }
+    ) => {
       addProcessed({
         id: item.id,
         type: item.type,
         title: item.title,
         status,
         timestamp: Date.now(),
+        ...(extra?.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
       });
     },
     [addProcessed]
@@ -118,7 +125,7 @@ export function DecisionsPanel() {
   );
 
   const hasAny = pending.length > 0 || processed.length > 0;
-  const emptyMessage = pending.length === 0 && processed.length === 0;
+  const emptyMessage = !isLoading && pending.length === 0 && processed.length === 0;
 
   return (
     <div className="flex flex-col h-full min-h-0 p-6">
@@ -165,7 +172,13 @@ export function DecisionsPanel() {
         </div>
       </div>
 
-      {emptyMessage ? (
+      {isLoading ? (
+        <div className="flex flex-1 items-center justify-center min-h-[200px]">
+          <div className="text-center max-w-md text-muted-foreground text-sm">
+            Loading decisions…
+          </div>
+        </div>
+      ) : emptyMessage ? (
         <div className="flex flex-1 items-center justify-center min-h-[200px]">
           <div className="text-center max-w-md">
             <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -316,7 +329,7 @@ export function DecisionsPanel() {
                       <h2 className="text-lg font-medium mb-3">Processed ({processed.length})</h2>
                       <div className="grid gap-4">
                         {processed.map((p) => (
-                          <ProcessedRow key={p.id} decision={p} />
+                          <ProcessedRow key={p.id} decision={p} threadId={threadId} />
                         ))}
                       </div>
                     </section>
@@ -331,7 +344,7 @@ export function DecisionsPanel() {
                       onDecisionProcessed={onDecisionProcessed}
                     />
                   ) : selectedProcessed ? (
-                    <ProcessedRow decision={selectedProcessed} />
+                    <ProcessedRow decision={selectedProcessed} threadId={threadId} />
                   ) : (
                     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                       Select a row to see details
@@ -351,27 +364,98 @@ export function DecisionsPanel() {
   );
 }
 
-function ProcessedRow({ decision }: { decision: ProcessedDecision }) {
+/** Fetches and shows KG diff for a decision that produced a KG version (kg_version_sha). */
+function DecisionKgDiffView({
+  threadId,
+  kgVersionSha,
+}: {
+  threadId: string | undefined;
+  kgVersionSha: string;
+}) {
+  const [payload, setPayload] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!threadId || !kgVersionSha) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const headers: Record<string, string> = {};
+    const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+    if (orgContext) headers["X-Organization-Context"] = orgContext;
+
+    (async () => {
+      try {
+        const historyRes = await fetch(`/api/project/history?thread_id=${encodeURIComponent(threadId)}`, { headers });
+        if (!historyRes.ok || cancelled) return;
+        const historyData = await historyRes.json();
+        const versions = Array.isArray(historyData?.versions) ? historyData.versions : [];
+        const idx = versions.findIndex((v: { id?: string }) => v.id === kgVersionSha);
+        const versionBefore = idx >= 0 && idx < versions.length - 1 ? versions[idx + 1]?.id : undefined;
+        if (versionBefore == null) {
+          setPayload(null);
+          setLoading(false);
+          return;
+        }
+        const diffRes = await fetch(
+          `/api/project/diff?thread_id=${encodeURIComponent(threadId)}&version1=${encodeURIComponent(versionBefore)}&version2=${encodeURIComponent(kgVersionSha)}`,
+          { headers }
+        );
+        if (!diffRes.ok || cancelled) return;
+        const diffData = await diffRes.json();
+        if (diffData?.diff?.type === "kg_diff") setPayload(diffData.diff);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load KG diff");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId, kgVersionSha]);
+
+  if (error) return <div className="text-xs text-muted-foreground mt-2">KG diff: {error}</div>;
+  if (loading) return <KgDiffDiagramView payload={null} isLoading />;
+  if (!payload) return null;
   return (
-    <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-4 py-3 text-sm">
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium shrink-0">
-          {getTypeLabel(decision.type)}
-        </span>
-        <span className="truncate">{decision.title}</span>
+    <div className="mt-4 border rounded-lg p-4 bg-muted/30">
+      <div className="text-[10px] font-bold text-muted-foreground uppercase mb-2">KG diff (this decision)</div>
+      <KgDiffDiagramView payload={payload} isLoading={false} />
+    </div>
+  );
+}
+
+function ProcessedRow({ decision, threadId }: { decision: ProcessedDecision; threadId: string | undefined }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 text-sm">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium shrink-0">
+            {getTypeLabel(decision.type)}
+          </span>
+          <span className="truncate">{decision.title}</span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span
+            className={cn(
+              "text-xs font-medium",
+              decision.status === "approved" && "text-green-600 dark:text-green-400",
+              decision.status === "rejected" && "text-muted-foreground"
+            )}
+          >
+            {decision.status}
+          </span>
+          <span className="text-muted-foreground text-xs">{relativeTime(decision.timestamp)}</span>
+        </div>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <span
-          className={cn(
-            "text-xs font-medium",
-            decision.status === "approved" && "text-green-600 dark:text-green-400",
-            decision.status === "rejected" && "text-muted-foreground"
-          )}
-        >
-          {decision.status}
-        </span>
-        <span className="text-muted-foreground text-xs">{relativeTime(decision.timestamp)}</span>
-      </div>
+      {decision.kg_version_sha && threadId && (
+        <div className="px-4 pb-4">
+          <DecisionKgDiffView threadId={threadId} kgVersionSha={decision.kg_version_sha} />
+        </div>
+      )}
     </div>
   );
 }

@@ -12,7 +12,7 @@ Adds Decisions/workbench UX for hydration and other previews: unified previews h
 - **Approval card:** Uses `UnifiedPreviewItem` from the new hook; threadId-aware submit so approvals apply to the correct thread and don’t cross threads after navigation.
 
 ### Workbench shell and Stream
-- **Shell:** Mode label (supervisor/hydrator/concept); debug agent switcher (S/H/C) that calls `setActiveAgentDebug(agent)` to force active agent for the current thread.
+- **Shell:** Mode label (supervisor/project_configurator/concept); debug agent switcher (S/H/C) that calls `setActiveAgentDebug(agent)` to force active agent for the current thread.
 - **Stream provider:** `setActiveAgentDebug(agent)` implemented via LangGraph client `threads.updateState` to set `active_agent` on the backend.
 - **Approval count:** Preserved; badge and auto-route to Decisions view on new approvals (integrated with unified previews where applicable).
 - **Auth:** Redirect unauthenticated users to login; authenticated users land in the workbench as before.

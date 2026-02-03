@@ -8,6 +8,7 @@ import type { ConceptBriefDiffView as ConceptBriefDiffViewType } from "@/lib/dif
 export default function ConceptBriefPage() {
   const stream = useStreamContext();
   const [diffData, setDiffData] = useState<ConceptBriefDiffViewType | undefined>();
+  const [previewData, setPreviewData] = useState<Record<string, unknown> | undefined>();
 
   useEffect(() => {
     let interrupts: unknown = null;
@@ -77,6 +78,7 @@ export default function ConceptBriefPage() {
   return (
     <ConceptBriefDiffView
       diffData={diffData}
+      previewData={previewData}
       onApprove={handleApprove}
       onReject={handleReject}
     />

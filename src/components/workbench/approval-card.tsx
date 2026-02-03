@@ -6,19 +6,105 @@ import { useQueryState } from "nuqs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, XCircle, Edit, LoaderCircle, AlertCircle } from "lucide-react";
+import { CheckCircle2, XCircle, Edit, LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UnifiedPreviewItem } from "./hooks/use-unified-previews";
 import { toast } from "sonner";
-import { HydrationDiffView } from "./hydration-diff-view";
-import { ConceptBriefDiffView as ConceptBriefDiffViewComponent } from "./concept-brief-diff-view";
-import { HydrationDiffView as HydrationDiffViewType, ConceptBriefDiffView } from "@/lib/diff-types";
+import { contentRendererRegistry } from "./content-renderers";
+import "./content-renderers/diff-renderer";
 
 interface ApprovalCardProps {
   item: UnifiedPreviewItem;
   stream: any;
   /** Called when user approves or rejects; used to persist in Decisions history (e.g. localStorage). */
-  onDecisionProcessed?: (item: UnifiedPreviewItem, status: "approved" | "rejected") => void;
+  onDecisionProcessed?: (
+    item: UnifiedPreviewItem,
+    status: "approved" | "rejected",
+    extra?: { kg_version_sha?: string }
+  ) => void;
+}
+
+/** Resolve threadId to project id so decisions GET/POST use id, not name. */
+async function resolveThreadIdToProjectId(threadId: string | undefined): Promise<string | undefined> {
+  if (typeof window === "undefined" || !threadId?.trim()) return threadId;
+  try {
+    const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+    const headers: Record<string, string> = {};
+    if (orgContext) headers["X-Organization-Context"] = orgContext;
+    const res = await fetch("/api/projects", { headers });
+    if (!res.ok) return threadId;
+    const projects = (await res.json()) as { id: string; name: string }[];
+    if (!Array.isArray(projects)) return threadId;
+    if (projects.some((p) => p.id === threadId)) return threadId;
+    const byName = projects.find((p) => p.name === threadId);
+    return byName ? byName.id : threadId;
+  } catch {
+    return threadId;
+  }
+}
+
+/** Fetch latest KG version (commit sha) for a thread so we can link the decision to the version it produced. */
+async function fetchLatestKgVersionSha(threadId: string | undefined): Promise<string | undefined> {
+  if (!threadId) return undefined;
+  try {
+    const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+    const headers: Record<string, string> = {};
+    if (orgContext) headers["X-Organization-Context"] = orgContext;
+    const res = await fetch(`/api/project/history?thread_id=${encodeURIComponent(threadId)}`, { headers });
+    if (!res.ok) return undefined;
+    const data = await res.json();
+    const versions = data?.versions;
+    if (Array.isArray(versions) && versions.length > 0 && versions[0]?.id) return versions[0].id;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist decision record to backend for lineage / audit (survives refresh, enables revisit and retries). */
+async function persistDecision(
+  item: UnifiedPreviewItem,
+  status: "approved" | "rejected",
+  threadId: string | undefined,
+  extra: { option_index?: number; artifact_id?: string; kg_version_sha?: string } = {}
+): Promise<void> {
+  try {
+    const projectId = await resolveThreadIdToProjectId(threadId) ?? threadId ?? "default";
+    const args = item.data?.args ?? {};
+    const generation_inputs =
+      args.project_context != null || args.trigger_id != null || args.num_options != null
+        ? {
+            project_context: args.project_context,
+            trigger_id: args.trigger_id,
+            num_options: args.num_options,
+            kg_version: (args as any).kg_version,
+          }
+        : undefined;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+    if (orgContext) headers["X-Organization-Context"] = orgContext;
+    await fetch("/api/decisions", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        thread_id: projectId,
+        decision: {
+          id: item.id,
+          type: item.type,
+          title: item.title,
+          status,
+          cache_key: args.cache_key ?? (item.data as any)?.preview_data?.cache_key ?? undefined,
+          generation_inputs,
+          option_index: extra.option_index ?? args.option_index ?? args.selected_option_index ?? undefined,
+          artifact_id: extra.artifact_id,
+          args: { cache_key: args.cache_key, trigger_id: args.trigger_id },
+          ...(extra.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
+        },
+      }),
+    });
+  } catch (e) {
+    console.warn("[ApprovalCard] Failed to persist decision:", e);
+  }
 }
 
 export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCardProps) {
@@ -36,6 +122,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
+        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined);
         toast.info("Classification not applied");
         setIsLoading(false);
         return;
@@ -63,7 +150,10 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           }
           const data = await res.json();
           setStatus("approved");
-          onDecisionProcessed?.(item, "approved");
+          // Link decision to KG version so Decisions panel can show KG diff and Map can navigate by decision
+          const kg_version_sha = await fetchLatestKgVersionSha(threadId);
+          onDecisionProcessed?.(item, "approved", { kg_version_sha });
+          await persistDecision(item, "approved", threadId, { kg_version_sha });
           toast.success("Begin Enriching", {
             description: "Classification applied. You can now work with the Enrichment agent.",
           });
@@ -98,11 +188,12 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       }
     }
 
-    // propose_hydration_complete is preview-only; apply via API (transition to Concept), not graph resume
-    if (item.type === "propose_hydration_complete") {
+    // generate_project_configuration_summary (ex propose_hydration_complete) is preview-only; apply via API (transition to Concept), not graph resume
+    if (item.type === "generate_project_configuration_summary" || item.type === "propose_hydration_complete") {
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
+        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined);
         toast.info("Hydration completion not applied");
         setIsLoading(false);
         return;
@@ -131,6 +222,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           const data = await res.json();
           setStatus("approved");
           onDecisionProcessed?.(item, "approved");
+          await persistDecision(item, "approved", threadId);
           toast.success("Hydration Complete", {
             description: "Transitioning to Concept phase. The Concept agent will now help generate Concept Briefs.",
           });
@@ -170,6 +262,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
+        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined);
         toast.info("Artifact link not applied");
         setIsLoading(false);
         return;
@@ -197,6 +290,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           const data = await res.json();
           setStatus("approved");
           onDecisionProcessed?.(item, "approved");
+          await persistDecision(item, "approved", threadId);
           toast.success("Artifact Linked", {
             description: `Successfully linked ${data.filename || "artifact"} to ${data.artifact_type || "KG"}`,
           });
@@ -241,6 +335,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           }
           setStatus("rejected");
           onDecisionProcessed?.(item, "rejected");
+          await persistDecision(item, "rejected", threadId);
           toast.info("Enrichment rejected");
         } catch (error: any) {
           console.error("[ApprovalCard] Error rejecting enrichment:", error);
@@ -274,6 +369,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           }
           setStatus("approved");
           onDecisionProcessed?.(item, "approved");
+          await persistDecision(item, "approved", threadId);
           toast.success("Enrichment applied", {
             description: "Metadata and artifact types have been saved.",
           });
@@ -307,13 +403,24 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
+        await persistDecision(
+          item,
+          "rejected",
+          item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined
+        );
         toast.info("Proposal rejected");
         setIsLoading(false);
         return;
       }
       if (decisionType === "approve") {
         const cacheKey = item.data?.args?.cache_key ?? item.data?.preview_data?.cache_key;
-        const optionIndex = item.data?.args?.option_index ?? item.data?.args?.selected_option_index ?? -1;
+        // For concept/UX brief, backend needs option_index (0, 1, or 2). Use selected, else recommended from proposal.
+        const optionIndex =
+          item.data?.args?.option_index ??
+          item.data?.args?.selected_option_index ??
+          (item.data?.preview_data?.diff as { recommended_index?: number } | undefined)?.recommended_index ??
+          (item.data?.preview_data as { best_option_index?: number } | undefined)?.best_option_index ??
+          -1;
         const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
         if (!cacheKey) {
           toast.error("Error", { description: "Missing cache_key for this artifact proposal" });
@@ -341,6 +448,11 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           const data = await res.json();
           setStatus("approved");
           onDecisionProcessed?.(item, "approved");
+          const effectiveOptionIndex = typeof optionIndex === "number" ? optionIndex : -1;
+          await persistDecision(item, "approved", threadId, {
+            option_index: effectiveOptionIndex >= 0 ? effectiveOptionIndex : undefined,
+            artifact_id: (data as any).artifact_id,
+          });
           toast.success("Artifact applied", {
             description: `Saved ${artifactType.replace(/_/g, " ")}.`,
           });
@@ -371,6 +483,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
     switch (type) {
       case "classify_intent":
         return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
+      case "generate_project_configuration_summary":
       case "propose_hydration_complete":
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
       case "generate_concept_brief":
@@ -427,10 +540,22 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       </CardHeader>
       
       <CardContent className="space-y-4">
-        {/* Diff Preview */}
+        {/* Diff Preview — Concept Brief / UX Brief: no inner scroll so Decisions panel scroll shows all options */}
         {(item.data.diff || item.data.preview_data?.diff) && (
-          <div className="border rounded-lg p-4 bg-muted/50 max-h-[600px] overflow-y-auto">
-            {renderDiffPreview(item.type, item.data.diff || item.data.preview_data?.diff, item.data.preview_data)}
+          <div
+            className={cn(
+              "border rounded-lg p-4 bg-muted/50",
+              item.type === "generate_concept_brief" || item.type === "generate_ux_brief"
+                ? "min-h-0"
+                : "max-h-[600px] overflow-y-auto"
+            )}
+          >
+            {contentRendererRegistry.get("diff")?.render("", {
+              diff: item.data.diff || item.data.preview_data?.diff,
+              previewData: item.data.preview_data,
+              threadId: item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined,
+              proposalType: item.type,
+            })}
           </div>
         )}
         
@@ -490,181 +615,3 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
   );
 }
 
-function renderDiffPreview(
-  type: string,
-  diff: any,
-  previewData?: any
-): React.ReactNode {
-  switch (type) {
-    case "propose_hydration_complete":
-      // Hydration diff view expects HydrationDiffViewType
-      if (diff?.type === "progression" && diff.progress_diff) {
-        return (
-          <HydrationDiffView
-            diffData={diff as HydrationDiffViewType}
-            isLoading={false}
-          />
-        );
-      }
-      break;
-      
-    case "generate_concept_brief":
-      // Concept brief diff view expects ConceptBriefDiffView
-      if (diff?.type === "similarity" && diff.options) {
-        return (
-          <ConceptBriefDiffViewComponent
-            diffData={diff as ConceptBriefDiffView}
-            isLoading={false}
-          />
-        );
-      }
-      break;
-      
-    case "classify_intent":
-      // Classify intent uses subset diff - render summary
-      if (diff?.type === "subset" && diff.metadata) {
-        const metadata = diff.metadata;
-        return (
-          <div className="space-y-2">
-            <div className="text-sm font-medium">{metadata.title}</div>
-            <div className="text-xs text-muted-foreground">{metadata.description}</div>
-            {metadata.subset && (
-              <div className="flex gap-4 text-xs">
-                <span>Active: {metadata.subset.activeCount} nodes</span>
-                <span>Inactive: {metadata.subset.inactiveCount} nodes</span>
-                <span>Reduction: {metadata.subset.reductionPercentage.toFixed(1)}%</span>
-              </div>
-            )}
-          </div>
-        );
-      }
-      break;
-      
-    case "link_uploaded_document":
-      // Link artifact uses subset diff - render KG changes
-      if (diff?.type === "subset" && diff.metadata) {
-        const metadata = diff.metadata;
-        const kgChanges = metadata.kg_changes || {};
-        return (
-          <div className="space-y-3">
-            <div className="text-sm font-medium">{metadata.title}</div>
-            {metadata.description && (
-              <div className="text-xs text-muted-foreground">{metadata.description}</div>
-            )}
-            <div className="grid grid-cols-2 gap-4 text-xs">
-              <div>
-                <div className="font-medium mb-1">{metadata.leftLabel || "Current KG State"}</div>
-                {diff.left && (
-                  <div className="space-y-1 text-muted-foreground">
-                    {diff.left.kg_node_id && (
-                      <div>Node: {diff.left.kg_node_id}</div>
-                    )}
-                    {diff.left.kg_artifact_types?.length > 0 && (
-                      <div>Types: {diff.left.kg_artifact_types.join(", ")}</div>
-                    )}
-                    {!diff.left.kg_node_exists && (
-                      <div className="text-xs italic">No KG node</div>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div>
-                <div className="font-medium mb-1">{metadata.rightLabel || "Proposed KG Changes"}</div>
-                {diff.right && (
-                  <div className="space-y-1">
-                    {diff.right.kg_node_id && (
-                      <div className="text-green-600 dark:text-green-400">
-                        Node: {diff.right.kg_node_id} {kgChanges.node_action === "create" && "(new)"}
-                      </div>
-                    )}
-                    {diff.right.kg_artifact_types?.length > 0 && (
-                      <div className="text-green-600 dark:text-green-400">
-                        Types: {diff.right.kg_artifact_types.join(", ")}
-                      </div>
-                    )}
-                    {diff.right.trigger_link && (
-                      <div className="text-blue-600 dark:text-blue-400">
-                        Link: {diff.right.trigger_link}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-            {kgChanges.artifact_types_added?.length > 0 && (
-              <div className="text-xs text-muted-foreground">
-                Adding artifact types: {kgChanges.artifact_types_added.join(", ")}
-              </div>
-            )}
-          </div>
-        );
-      }
-      break;
-      
-    case "propose_enrichment":
-    case "approve_enrichment":
-    case "enrichment":
-      // Enrichment uses progression diff - similar to hydration
-      if (diff?.type === "progression" && diff.metadata) {
-        const metadata = diff.metadata;
-        const progression = metadata.progression || {};
-        return (
-          <div className="space-y-3">
-            <div className="text-sm font-medium">{metadata.title}</div>
-            {metadata.description && (
-              <div className="text-xs text-muted-foreground">{metadata.description}</div>
-            )}
-            <div className="grid grid-cols-2 gap-4 text-xs">
-              <div>
-                <div className="font-medium mb-1">{metadata.leftLabel || "Previous"}</div>
-                {diff.left && (
-                  <div className="space-y-1 text-muted-foreground">
-                    {diff.left.artifact_types?.length > 0 && (
-                      <div>Types: {diff.left.artifact_types.join(", ")}</div>
-                    )}
-                    {diff.left.category && <div>Category: {diff.left.category}</div>}
-                    {diff.left.title && <div>Title: {diff.left.title}</div>}
-                  </div>
-                )}
-              </div>
-              <div>
-                <div className="font-medium mb-1">{metadata.rightLabel || "Proposed"}</div>
-                {diff.right && (
-                  <div className="space-y-1">
-                    {diff.right.artifact_types?.length > 0 && (
-                      <div className="text-green-600 dark:text-green-400">
-                        Types: {diff.right.artifact_types.join(", ")}
-                      </div>
-                    )}
-                    {diff.right.category && (
-                      <div>Category: {diff.right.category}</div>
-                    )}
-                    {diff.right.title && (
-                      <div>Title: {diff.right.title}</div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-            {progression.completionPercentage !== undefined && (
-              <div className="text-xs text-muted-foreground">
-                Completion: {progression.completionPercentage.toFixed(0)}%
-              </div>
-            )}
-          </div>
-        );
-      }
-      break;
-      
-    default:
-      // Fallback: show diff summary
-      return (
-        <div className="text-sm text-muted-foreground">
-          <AlertCircle className="h-4 w-4 inline mr-2" />
-          Preview not available for {type}
-        </div>
-      );
-  }
-  
-  return null;
-}

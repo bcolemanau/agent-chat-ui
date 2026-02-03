@@ -1,15 +1,17 @@
 "use client";
 
 import React, { useState } from "react";
-import { Settings, Shield, User, Globe, Activity, Building2, Bot, ChevronDown, ChevronRight } from "lucide-react";
+import { Settings, Shield, User, Globe, Activity, Building2, Bot, GitBranch, ChevronDown, ChevronRight } from "lucide-react";
 import { OrganizationManagement } from "@/components/workbench/organization-management";
 import { AgentAdministrator } from "@/components/workbench/agent-administrator";
-type SectionKey = "org" | "agent" | "account" | "context" | "security";
+import { WorkflowAdministrator } from "@/components/workbench/workflow-administrator";
+type SectionKey = "org" | "agent" | "workflow" | "account" | "context" | "security";
 
 export default function SettingsPage() {
     const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
         org: true,
         agent: true,
+        workflow: true,
         account: true,
         context: true,
         security: true,
@@ -79,6 +81,30 @@ export default function SettingsPage() {
                         {openSections.agent && (
                             <div className="px-6 pb-6 pt-0">
                                 <AgentAdministrator />
+                            </div>
+                        )}
+                    </section>
+
+                    {/* Workflow Config - Collapsible */}
+                    <section className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+                        <button
+                            type="button"
+                            onClick={() => toggleSection("workflow")}
+                            className="w-full flex items-center gap-2 p-4 text-left hover:bg-muted/20 transition-colors"
+                        >
+                            {openSections.workflow ? (
+                                <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                            ) : (
+                                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                            )}
+                            <GitBranch className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span className="text-sm font-bold uppercase tracking-widest text-muted-foreground/80">
+                                Workflow Config
+                            </span>
+                        </button>
+                        {openSections.workflow && (
+                            <div className="px-6 pb-6 pt-0">
+                                <WorkflowAdministrator />
                             </div>
                         )}
                     </section>

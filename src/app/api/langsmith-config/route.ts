@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     // Server-side only - has access to all environment variables
     const apiKey = process.env.LANGSMITH_API_KEY;
     const endpoint = process.env.LANGSMITH_ENDPOINT || process.env.NEXT_PUBLIC_LANGSMITH_ENDPOINT || 'https://api.smith.langchain.com';
-    const project = process.env.LANGSMITH_PROJECT || process.env.LANGCHAIN_PROJECT || process.env.NEXT_PUBLIC_LANGSMITH_PROJECT || 'Reflexion';
+    const project = process.env.LANGSMITH_PROJECT || process.env.LANGCHAIN_PROJECT || process.env.NEXT_PUBLIC_LANGSMITH_PROJECT || 'NewCo';
 
     if (!apiKey) {
       return NextResponse.json(

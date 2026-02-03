@@ -80,7 +80,7 @@ export function BacklogView() {
                         Smart Backlog
                     </h1>
                     <p className="text-muted-foreground font-medium">
-                        Reflexion Product Realm — Proposing and tracking system enhancements.
+                        NewCo Product Realm — Proposing and tracking system enhancements.
                     </p>
                 </div>
                 <Button variant="secondary" size="sm" onClick={fetchIssues} className="gap-2 backdrop-blur-sm bg-white/5 hover:bg-white/10">

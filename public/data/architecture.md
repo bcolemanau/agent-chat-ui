@@ -113,7 +113,7 @@ erDiagram
         array governing_mechanisms
         array active_risks
         string user_project_description
-        string active_agent "supervisor|hydrator"
+        string active_agent "supervisor|project_configurator"
         string workbench_view "map|workflow|artifacts|discovery|settings"
     }
     

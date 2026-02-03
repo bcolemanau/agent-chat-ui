@@ -27,7 +27,7 @@ export async function initializeOpenTelemetry(): Promise<boolean> {
     // This avoids build-time NEXT_PUBLIC_ variables which are difficult with Docker/Railway
     let apiKey: string | undefined;
     let endpoint: string = 'https://api.smith.langchain.com';
-    let project: string = 'Reflexion';
+    let project: string = 'NewCo';
 
     try {
       const configResponse = await fetch('/api/langsmith-config');

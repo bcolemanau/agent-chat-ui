@@ -1,5 +1,44 @@
 [
     {
+        "id": "v1.7.0",
+        "version": "1.7.0",
+        "date": "2026-02-02",
+        "title": "KG-diff & Traceability (Issues #56, #63)",
+        "description": "Richer Knowledge Graph diff (KG-diff) with a single contract for version and artifact-type diffs, diagram and summary views, and end-to-end traceability: upload and enrichment create addresses_entity_type links; proposals show impact_forecast and coverage_analysis so you can approve with full context.",
+        "features": [
+            {
+                "name": "KG-diff – Unified contract and diagram view (Issue #56)",
+                "description": "Single artifact-type-agnostic payload: nodes and edges with change type (added, modified, removed, unchanged), summary counts, optional semantic summary. Map compare shows force-directed graph with added (green, dashed), removed (red), modified (amber); summary and semantic views from same payload. GET /project/diff returns documented contract."
+            },
+            {
+                "name": "Traceability – addresses_entity_type from upload and enrichment (Issue #63)",
+                "description": "Upload and enrichment find or create entity type nodes (ET-REQ, ET-PERS, etc.) and create addresses_entity_type links (CRIT → entity type). Traceability and risks for trigger stay aligned with uploaded and enriched content."
+            },
+            {
+                "name": "Impact forecast and coverage analysis in proposals",
+                "description": "Concept brief, UX brief, link document, enrichment, and architecture/requirements/design proposals include impact_forecast (downstream templates that may need re-validation) and coverage_analysis (covered vs uncovered CRITs/risks)."
+            },
+            {
+                "name": "Traceability in the UI",
+                "description": "Diff renderer, concept brief view, and enrichment view show impact forecast (message + downstream templates) and coverage analysis (message + uncovered CRITs) when present."
+            }
+        ],
+        "businessValue": [
+            {
+                "name": "Clearer change visibility",
+                "description": "One diagram and one summary for any KG diff (version compare or artifact approval)."
+            },
+            {
+                "name": "Traceability that follows content",
+                "description": "Risks and entity types stay in sync with uploads and enrichments, not only the pre-built enhanced KG."
+            },
+            {
+                "name": "Better decisions",
+                "description": "Coverage and impact are visible in the proposal so you can approve with full context."
+            }
+        ]
+    },
+    {
         "id": "v1.6.0",
         "version": "1.6.0",
         "date": "2026-01-31",
@@ -55,7 +94,7 @@
         "version": "1.5.0",
         "date": "2026-01-26",
         "title": "Customer Onboarding Complete - Unified Artifact Ingestion",
-        "description": "Harmonize the two artifact ingestion flows (`save_external_context` and `upload_document`) into a unified system that supports both text-based and file-based domain/method context ingestion for the Concept → Design → Operations loop. This major update streamlines the process of bringing external knowledge into the Reflexion Knowledge Graph, from initial upload through enrichment approval to final integration, with a significantly improved user experience. This release completes Issue #12 and marks the completion of the Customer Onboarding experience, ready for the Concept, Design, and Operate cycle.",
+        "description": "Harmonize the two artifact ingestion flows (`save_external_context` and `upload_document`) into a unified system that supports both text-based and file-based domain/method context ingestion for the Concept → Design → Operations loop. This major update streamlines the process of bringing external knowledge into the NewCo Knowledge Graph, from initial upload through enrichment approval to final integration, with a significantly improved user experience. This release completes Issue #12 and marks the completion of the Customer Onboarding experience, ready for the Concept, Design, and Operate cycle.",
         "features": [
             {
                 "name": "Folder Upload Support",

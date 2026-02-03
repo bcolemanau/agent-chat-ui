@@ -16,7 +16,7 @@ import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 // Fetch LangSmith configuration from environment
 const apiKey = process.env.LANGSMITH_API_KEY;
 const endpoint = process.env.LANGSMITH_ENDPOINT || process.env.LANGSMITH_URL || 'https://api.smith.langchain.com';
-const project = process.env.LANGSMITH_PROJECT || process.env.LANGCHAIN_PROJECT || 'Reflexion';
+const project = process.env.LANGSMITH_PROJECT || process.env.LANGCHAIN_PROJECT || 'NewCo';
 
 if (!apiKey) {
   console.warn('[OTEL] LANGSMITH_API_KEY not set, skipping server-side OpenTelemetry initialization');
