@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect, useLayoutEffect, useRef } from "react";
+import { Suspense, useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { Sidebar } from "./sidebar";
 import { useRouter, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -36,21 +36,13 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     // Robust Mode Derivation (active_mode and active_agent are synced from graph/overlay)
     const values = (stream as any)?.values;
     const rawAgent = values?.active_mode ?? values?.active_agent;
-    type AgentMode = "supervisor" | "project_configurator" | "concept" | "architecture" | "administration";
-    const activeAgent: AgentMode =
-        rawAgent === "project_configurator" || rawAgent === "concept" || rawAgent === "architecture" || rawAgent === "administration"
+    // Accept any mode string from backend; fallback to supervisor so we stay in sync when new phases are added
+    const activeAgent: string =
+        typeof rawAgent === "string" && rawAgent.trim() !== ""
             ? rawAgent
             : (values?.visualization_html?.includes("project_configurator")
                 ? "project_configurator"
                 : "supervisor");
-
-    const MODE_OPTIONS: { value: AgentMode; label: string }[] = [
-        { value: "supervisor", label: "Supervisor" },
-        { value: "project_configurator", label: "Project Configurator" },
-        { value: "concept", label: "Concept" },
-        { value: "architecture", label: "Architecture" },
-        ...(isAdmin ? [{ value: "administration" as const, label: "Administration" }] : []),
-    ];
 
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
     const [threadId] = useQueryState("threadId");
@@ -108,7 +100,18 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             .finally(() => { if (!cancelled) setWorkflowStripLoading(false); });
         return () => { cancelled = true; };
     }, [pathname, activeAgent]);
-    
+
+    // Nodes to show in strip and dropdown (from API); hide Administration for non-admins
+    const displayNodes = useMemo(
+        () =>
+            workflowStrip?.nodes
+                ? isAdmin
+                    ? workflowStrip.nodes
+                    : workflowStrip.nodes.filter((n) => n.id !== "administration")
+                : [],
+        [workflowStrip?.nodes, isAdmin]
+    );
+
     // Auth guard: redirect unauthenticated users to login
     useEffect(() => {
         if (status === "unauthenticated") {
@@ -316,15 +319,15 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                         {/* Workflow visualization (connects to breadcrumb); active node = agent selector */}
                         {workflowStripLoading ? (
                             <div className="h-6 w-24 bg-muted animate-pulse rounded shrink-0" aria-hidden />
-                        ) : workflowStrip?.nodes?.length ? (
+                        ) : workflowStrip && displayNodes.length > 0 ? (
                             <div className="flex items-center gap-1.5 shrink min-w-0 overflow-x-auto">
                                 <span className="text-sm text-foreground/90 shrink-0 whitespace-nowrap font-medium">
                                     {workflowStrip.name ?? workflowStrip.workflow_id}
                                     <span className="text-muted-foreground font-normal"> ({workflowStrip.version ?? workflowStrip.workflow_id})</span>
                                 </span>
                                 <div className="flex items-center gap-0.5 shrink-0 border border-border/50 rounded-md px-1.5 py-0.5 bg-muted/30">
-                                    {workflowStrip.nodes.map((node, i) => {
-                                        const isActive = workflowStrip.active_node === node.id;
+                                    {displayNodes.map((node, i) => {
+                                        const isActive = workflowStrip.active_node === node.id || activeAgent === node.id;
                                         const showSelect = isActive && threadId;
                                         return (
                                             <span key={node.id} className="flex items-center shrink-0 gap-0.5">
@@ -335,8 +338,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                                                 value={activeAgent}
                                                                 disabled={!threadId}
                                                                 onValueChange={(value) => {
-                                                                    const fn = (stream as any).setActiveAgentDebug as ((a: AgentMode) => Promise<void>) | undefined;
-                                                                    if (fn) fn(value as AgentMode).catch((e) => console.warn("[WorkbenchShell] Failed to set active mode:", e));
+                                                                    const fn = (stream as any).setActiveAgentDebug as ((a: string) => Promise<void>) | undefined;
+                                                                    if (fn) fn(value).catch((e) => console.warn("[WorkbenchShell] Failed to set active mode:", e));
                                                                 }}
                                                             >
                                                                 <SelectTrigger
@@ -349,8 +352,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                                                     <SelectValue>{node.label}</SelectValue>
                                                                 </SelectTrigger>
                                                                 <SelectContent>
-                                                                    {MODE_OPTIONS.map((opt) => (
-                                                                        <SelectItem key={opt.value} value={opt.value} className="text-sm capitalize">
+                                                                    {displayNodes.map((opt) => (
+                                                                        <SelectItem key={opt.id} value={opt.id} className="text-sm capitalize">
                                                                             {opt.label}
                                                                         </SelectItem>
                                                                     ))}
@@ -370,7 +373,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                                         {node.label}
                                                     </span>
                                                 )}
-                                                {i < workflowStrip.nodes.length - 1 && (
+                                                {i < displayNodes.length - 1 && (
                                                     <span className="text-muted-foreground/60 text-sm shrink-0">→</span>
                                                 )}
                                             </span>

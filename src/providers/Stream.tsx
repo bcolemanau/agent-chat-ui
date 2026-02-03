@@ -44,7 +44,8 @@ export type StateType = {
   active_risks?: string[];
   user_project_description?: string;
   context?: Record<string, unknown>;
-  active_agent?: "supervisor" | "project_configurator";
+  /** Active workflow phase (from backend); e.g. supervisor, project_configurator, concept, requirements, architecture, design, administration */
+  active_agent?: string;
   visualization_html?: string;
   workbench_view?: "map" | "workflow" | "artifacts" | "discovery" | "settings";
   /** Filtered KG for current trigger; set by Project Configurator, streamed to client. Use for map view without extra /api/kg-data. */
@@ -80,7 +81,7 @@ type StreamContextType = UseStream<StateType, {
   updateState?: (update: { values?: Record<string, unknown> }) => Promise<void>;
   /** After Apply, backend triggers a graph run; call this after a short delay to refetch thread state (new messages, active_mode). */
   refetchThreadState?: () => Promise<void>;
-  setActiveAgentDebug?: (agent: "supervisor" | "project_configurator" | "concept" | "architecture") => Promise<void>;
+  setActiveAgentDebug?: (agent: string) => Promise<void>;
   /** Increment after a decision is applied so KG, Artifacts, Workflow refetch. */
   workbenchRefreshKey?: number;
   triggerWorkbenchRefresh?: () => void;
@@ -242,7 +243,7 @@ const StreamSession = ({
   const USER_MODE_PRIORITY_MS = 60000; // 1 min: keep user's dropdown choice until backend/graph has caught up
 
   // DEBUG: manually override the active agent for this thread.
-  const setActiveAgentDebug = async (agent: "supervisor" | "project_configurator" | "concept" | "architecture") => {
+  const setActiveAgentDebug = async (agent: string) => {
     if (!threadId || !apiUrl) {
       console.warn(`[Stream] setActiveAgentDebug skipped: threadId=${threadId ?? "null"}, apiUrl=${apiUrl ? "set" : "null"} (need a thread; send a message first)`);
       toast.warning("Open a thread first to switch the active agent.", {
