@@ -2,13 +2,15 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Activity, Globe, GitGraph, FileText, GitCompare } from 'lucide-react';
+import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitGraph, FileText, GitCompare } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
+import { KG_DIFF_COLORS } from '@/lib/diff-types';
 import { NodeDetailPanel } from './node-detail-panel';
 import { ArtifactsListView } from './artifacts-list-view';
+import { KgDiffDiagramView } from './kg-diff-diagram-view';
 
 interface Node extends d3.SimulationNodeDatum {
     id: string;
@@ -25,6 +27,8 @@ interface Link extends d3.SimulationLinkDatum<Node> {
     source: string | Node;
     target: string | Node;
     is_active?: boolean;
+    type?: string;
+    is_anchor?: boolean;
 }
 
 interface GraphData {
@@ -35,16 +39,6 @@ interface GraphData {
         customer_id: string;
         thread_id: string;
     };
-}
-
-/** Workflow diagram from GET /api/workflow (#50 Phase 4). */
-interface WorkflowDiagram {
-    workflow_id: string;
-    name?: string;
-    version?: string;
-    nodes: { id: string; label: string }[];
-    links: { source: string; target: string }[];
-    active_node?: string;
 }
 
 const typeConfig: Record<string, { color: string; label: string }> = {
@@ -58,12 +52,12 @@ const typeConfig: Record<string, { color: string; label: string }> = {
 export function WorldMapView() {
     const stream = useStreamContext();
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
-    const visualizationHtml = (stream as any)?.values?.visualization_html;
-    /** Filtered KG streamed from backend when hydrator runs; use for map without extra /api/kg-data. */
+    /** Filtered KG streamed from backend when Project Configurator runs; use for map without extra /api/kg-data. */
     const filteredKg = (stream as any)?.values?.filtered_kg as { nodes: any[]; links: any[]; metadata?: any } | undefined;
 
     const svgRef = useRef<SVGSVGElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const simulationRef = useRef<d3.Simulation<Node, Link> | null>(null);
     const [data, setData] = useState<GraphData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -71,8 +65,8 @@ export function WorldMapView() {
     const [threadId] = useQueryState("threadId");
 
     const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
+    const [kgDecisions, setKgDecisions] = useState<{ id: string; type: string; title: string; kg_version_sha?: string }[]>([]);
     const [historyOpen, setHistoryOpen] = useState(false);
-    const [isFocusMode, setIsFocusMode] = useState(false);
 
     const [showHistory, setShowHistory] = useState(false);
     const [activeVersion, setActiveVersion] = useState<string | null>(null);
@@ -82,50 +76,10 @@ export function WorldMapView() {
     const [compareVersion2, setCompareVersion2] = useState<string | null>(null);
     const [diffData, setDiffData] = useState<any>(null);
     const [loadingDiff, setLoadingDiff] = useState(false);
+    /** When in compare mode: 'graph' = force-directed map with diff colors; 'diff' = KgDiffDiagramView (list by change type). Harmonized with KG_DIFF_CONTRACT. */
+    const [compareViewMode, setCompareViewMode] = useState<'graph' | 'diff'>('graph');
 
-    /** Workflow diagram from API (#50 Phase 4); single source of truth for Workflow tab. */
-    const [workflowDiagram, setWorkflowDiagram] = useState<WorkflowDiagram | null>(null);
-    const [loadingWorkflow, setLoadingWorkflow] = useState(false);
-    const activeMode = (stream as any)?.values?.active_mode as string | undefined;
-
-    // Fetch workflow diagram when on Workflow tab or when active_mode is set
-    const fetchWorkflowDiagram = async () => {
-        setLoadingWorkflow(true);
-        try {
-            const params = new URLSearchParams();
-            if (activeMode) params.set('active_node', activeMode);
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const url = `/api/workflow${params.toString() ? `?${params.toString()}` : ''}`;
-            const res = await fetch(url, { headers });
-            if (res.ok) {
-                const diagram = await res.json();
-                setWorkflowDiagram(diagram);
-            } else {
-                setWorkflowDiagram(null);
-            }
-        } catch (e) {
-            console.error('[WorldMapView] Workflow diagram fetch error:', e);
-            setWorkflowDiagram(null);
-        } finally {
-            setLoadingWorkflow(false);
-        }
-    };
-
-    useEffect(() => {
-        if (viewMode === 'workflow') fetchWorkflowDiagram();
-    }, [viewMode, activeMode]);
-
-    // Auto-toggle to workflow when a new visualization arrives
-    useEffect(() => {
-        if (visualizationHtml && viewMode !== 'workflow') {
-            const timer = setTimeout(() => setViewMode('workflow'), 500);
-            return () => clearTimeout(timer);
-        }
-    }, [visualizationHtml]);
-
-    // Note: Artifact history and content fetching is now handled by NodeDetailPanel
+    // Note: Workflow workbench view removed; version/orientation is in global header. Artifact history and content fetching is handled by NodeDetailPanel.
 
     const fetchKgHistory = async () => {
         try {
@@ -136,6 +90,20 @@ export function WorldMapView() {
             const res = await fetch(url, { headers });
             if (res.ok) setKgHistory(await res.json());
         } catch (e) { console.error('History fetch error:', e); }
+    };
+
+    const fetchKgDecisions = async () => {
+        if (!threadId) return;
+        try {
+            const orgContext = localStorage.getItem('reflexion_org_context');
+            const headers: Record<string, string> = {};
+            if (orgContext) headers['X-Organization-Context'] = orgContext;
+            const res = await fetch(`/api/decisions?thread_id=${encodeURIComponent(threadId)}`, { headers });
+            if (res.ok) {
+                const list = await res.json();
+                setKgDecisions(Array.isArray(list) ? list.filter((r: any) => r && r.id) : []);
+            }
+        } catch (e) { console.error('Decisions fetch error:', e); }
     };
 
     const fetchDiff = async (v1: string, v2: string) => {
@@ -149,13 +117,20 @@ export function WorldMapView() {
             const res = await fetch(url, { headers });
             if (res.ok) {
                 const diff = await res.json();
-                console.log('[WorldMapView] Fetched diff data:', {
+                const apiSummary = diff.summary ?? diff.diff?.summary ?? {};
+                console.log('[WorldMapView] Fetched diff:', {
                     version1: v1,
                     version2: v2,
-                    diff: diff,
-                    diffNodes: diff.diff?.nodes?.length || 0,
-                    summary: diff.summary
+                    nodesInDiff: diff.diff?.nodes?.length ?? 0,
+                    edgesInDiff: (diff.diff?.links ?? diff.diff?.edges)?.length ?? 0,
+                    summary: { added: apiSummary.added, modified: apiSummary.modified, removed: apiSummary.removed, total_nodes_v1: apiSummary.total_nodes_v1, total_nodes_v2: apiSummary.total_nodes_v2, total_links_v1: apiSummary.total_links_v1, total_links_v2: apiSummary.total_links_v2 },
+                    semanticSummary: (apiSummary.semanticSummary ?? diff.diff?.summary?.semanticSummary) ? String(apiSummary.semanticSummary ?? diff.diff?.summary?.semanticSummary).slice(0, 120) + '…' : undefined,
                 });
+                setCompareMode(true);
+                setViewMode('map'); // Compare always shows map/diff view (workflow tab removed)
+                setActiveVersion(v2 === "current" ? null : v2);
+                // Load v2 graph first so diff is applied to correct data (avoids race where diff showed on stale graph).
+                await fetchData(v2 === "current" ? undefined : v2, true);
                 setDiffData(diff);
             } else {
                 console.error('Diff fetch failed:', await res.text());
@@ -176,11 +151,6 @@ export function WorldMapView() {
             if (orgContext) headers['X-Organization-Context'] = orgContext;
 
             let url = threadId ? `/api/kg-data?thread_id=${threadId}` : '/api/kg-data';
-            // When viewing with diff, disable focus mode to show all nodes (including newly added ones)
-            const useFocus = isFocusMode && !preserveDiff;
-            if (useFocus) {
-                url += threadId ? `&focus=true` : `?focus=true`;
-            }
             if (version) {
                 url += `&version=${version}`;
                 setActiveVersion(version);
@@ -188,7 +158,7 @@ export function WorldMapView() {
                 setActiveVersion(null);
             }
 
-            console.log('[WorldMapView] Fetching data:', { url, preserveDiff, useFocus, version });
+            console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version });
             const res = await fetch(url, { headers });
             if (!res.ok) throw new Error('Failed to fetch graph data');
             const json = await res.json();
@@ -203,7 +173,7 @@ export function WorldMapView() {
             // Only update history list if we are loading the latest version, 
             // otherwise we might get a stale list if we time travel back
             if (!version) fetchKgHistory();
-            // Clear diff data unless we're preserving it (e.g., when viewing version 2 with diff)
+            // Clear diff data unless we're preserving it (e.g., when in compare mode showing version 2 with diff)
             if (!preserveDiff && !compareMode) {
                 setDiffData(null);
             }
@@ -217,11 +187,21 @@ export function WorldMapView() {
 
     const workbenchRefreshKey = (stream as any)?.workbenchRefreshKey ?? 0;
 
-    // When backend streams filtered_kg (e.g. first hydrator run), use it for current view so we don't need /api/kg-data.
-    // On explicit Refresh (workbenchRefreshKey > 0) we refetch from API to get latest.
+    // When we have a project (threadId), always fetch from API so map/artifacts show persisted KG
+    // (uploaded/enriched). When no threadId, use filtered_kg if streamed or fallback to fetch.
+    // When showing version 2 with diff (compare mode), skip refetch so we don't double-fetch and cause a visible reload.
     useEffect(() => {
         if (activeVersion) {
             fetchData(activeVersion);
+            return;
+        }
+        // Prefer API when project is selected so we see latest from GitHub (avoids stale filtered_kg after upload/enrichment).
+        if (threadId) {
+            if (compareMode && diffData) {
+                // We're showing version 2 with diff; data was already loaded by the button handler — don't refetch.
+                return;
+            }
+            fetchData();
             return;
         }
         if (filteredKg?.nodes && filteredKg?.links && workbenchRefreshKey === 0) {
@@ -237,11 +217,11 @@ export function WorldMapView() {
             setData(asGraphData);
             setLoading(false);
             setError(null);
-            if (threadId) fetchKgHistory();
+            fetchKgHistory();
             return;
         }
         fetchData();
-    }, [threadId, isFocusMode, workbenchRefreshKey, activeVersion, filteredKg]);
+    }, [threadId, workbenchRefreshKey, activeVersion, filteredKg, compareMode, diffData]);
 
     // After "Begin Enriching" we update thread state with current_trigger_id; refetch version list so the new commit shows.
     const currentTriggerId = (stream as any)?.values?.current_trigger_id;
@@ -249,8 +229,17 @@ export function WorldMapView() {
         if (threadId && currentTriggerId) fetchKgHistory();
     }, [threadId, currentTriggerId]);
 
+    // Load decisions when we have history so we can show which decision produced each version
+    useEffect(() => {
+        if (threadId && kgHistory) fetchKgDecisions();
+    }, [threadId, kgHistory]);
+
     useEffect(() => {
         if (!data || !svgRef.current || !containerRef.current) return;
+
+        // Single prominent log so you can filter console by "WorldMapView" and ignore 404/Stream noise
+        const hasDiff = !!(diffData?.diff?.nodes?.length && (diffData?.diff?.links?.length ?? diffData?.diff?.edges?.length));
+        console.log('[WorldMapView] graph rendering', { nodes: data.nodes?.length, links: data.links?.length, hasDiff, diffNodes: diffData?.diff?.nodes?.length, diffEdges: (diffData?.diff?.links ?? diffData?.diff?.edges)?.length });
 
         const width = containerRef.current.clientWidth;
         const height = containerRef.current.clientHeight;
@@ -281,16 +270,42 @@ export function WorldMapView() {
             .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
             .attr('fill', '#888');
 
-        // Filter out nodes and links that should be completely hidden (if any)
-        // With current transparency model, we might still want to show all but ghosted
-        const nodes = data.nodes.map(d => ({ ...d }));
-        const links = data.links.map(d => ({ ...d }));
-        
-        // If we have diff data, merge it into nodes for visualization
-        // Note: We only show nodes that exist in the current version (version 2)
-        // Removed nodes are filtered out since they don't exist in version 2
-        if (diffData && diffData.diff && diffData.diff.nodes) {
-            console.log('[WorldMapView] Applying diff visualization:', {
+        // In compare mode, use the diff payload as the single source of truth for nodes and links
+        // so link endpoints always match node ids (no orphaned added nodes).
+        const diffEdges = (diffData?.diff?.links ?? diffData?.diff?.edges) as Array<{ source?: string | number | { id?: string }; target?: string | number | { id?: string }; changeType?: string; type?: string }> | undefined;
+        const diffNodesList = diffData?.diff?.nodes as Array<{ id: string; name?: string; changeType?: string; diff_status?: string }> | undefined;
+        const useDiffPayload = diffNodesList?.length && diffEdges?.length;
+
+        let nodes: Node[];
+        let links: Link[] = [];
+
+        if (useDiffPayload) {
+            // Nodes: non-removed only (v2 graph); diff payload has id, type, name, etc. at runtime
+            nodes = diffNodesList
+                .filter((n: { changeType?: string; diff_status?: string }) => (n.changeType ?? n.diff_status) !== 'removed')
+                .map((n) => ({ ...n })) as Node[];
+            const seen = new Set<string>();
+            for (const e of diffEdges) {
+                if (e.changeType === 'removed') continue;
+                const src = typeof e.source === 'object' && e.source && 'id' in e.source ? e.source.id : e.source;
+                const tgt = typeof e.target === 'object' && e.target && 'id' in e.target ? e.target.id : e.target;
+                const srcStr = src != null ? String(src) : '';
+                const tgtStr = tgt != null ? String(tgt) : '';
+                if (!srcStr || !tgtStr) continue;
+                const key = `${srcStr}\t${tgtStr}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                links.push({ source: srcStr, target: tgtStr, type: e.type } as Link);
+            }
+            console.log('[WorldMapView] Using diff payload for graph: nodes=', nodes.length, 'links=', links.length);
+        } else {
+            nodes = data.nodes.map(d => ({ ...d }));
+            links = data.links.map((d: Link) => ({ ...d }));
+        }
+
+        // If we have diff data but didn't use diff payload (e.g. no edges), merge diff_status into nodes for coloring.
+        if (diffData && diffData.diff && diffData.diff.nodes && !useDiffPayload) {
+            console.log('[WorldMapView] Applying diff visualization (data nodes + diff status):', {
                 diffDataStructure: {
                     hasDiff: !!diffData.diff,
                     hasNodes: !!diffData.diff.nodes,
@@ -303,9 +318,13 @@ export function WorldMapView() {
                 sampleCurrentNode: nodes[0]
             });
             
-            // Create maps for both ID and name matching (fallback)
+            // Create maps for both ID and name/label matching (KG-diff contract: changeType or diff_status)
             const diffNodesById = new Map(diffData.diff.nodes.map((n: any) => [n.id, n]));
-            const diffNodesByName = new Map(diffData.diff.nodes.map((n: any) => [n.name || (n as any).label, n]));
+            const diffNodesByName = new Map(
+                diffData.diff.nodes
+                    .filter((n: any) => n.name != null || (n as any).label != null)
+                    .map((n: any) => [n.name ?? (n as any).label, n])
+            );
             
             // Log detailed structure
             const sampleDiffNode = diffData.diff.nodes[0];
@@ -355,32 +374,19 @@ export function WorldMapView() {
             
             let matchedCount = 0;
             nodes.forEach(node => {
-                // Try to match by ID first, then by name as fallback
+                // Try to match by ID first, then by name/label as fallback
                 let diffNode = diffNodesById.get(node.id) as Node | undefined;
-                if (!diffNode && node.name) {
-                    diffNode = diffNodesByName.get(node.name) as Node | undefined;
+                if (!diffNode) {
+                    const nameOrLabel = node.name ?? (node as any).label;
+                    if (nameOrLabel) diffNode = diffNodesByName.get(nameOrLabel) as Node | undefined;
                 }
-                
+                // KG-diff contract: backend may send changeType; treat same as diff_status
+                const status = (diffNode as any)?.diff_status ?? (diffNode as any)?.changeType;
                 if (diffNode) {
-                    // Log what we found
-                    if (diffNode.diff_status) {
-                        console.log(`[WorldMapView] Found diff node for "${node.id}":`, {
-                            hasDiffStatus: !!diffNode.diff_status,
-                            diffStatus: diffNode.diff_status,
-                            willApply: diffNode.diff_status !== 'removed'
-                        });
-                    }
-                    
-                    // Only apply diff_status for nodes that exist in current version
-                    // Skip "removed" status since those nodes aren't in the current data
-                    if (diffNode.diff_status && diffNode.diff_status !== 'removed') {
-                        node.diff_status = diffNode.diff_status;
+                    // Only apply for nodes that exist in current version; skip "removed"
+                    if (status && status !== 'removed') {
+                        (node as any).diff_status = status;
                         matchedCount++;
-                        console.log(`[WorldMapView] ✓ Applied diff_status "${diffNode.diff_status}" to node "${node.id}" (${node.name})`);
-                    } else if (diffNode.diff_status === 'removed') {
-                        console.log(`[WorldMapView] ✗ Skipped removed node "${node.id}" (should not be in current data)`);
-                    } else {
-                        console.log(`[WorldMapView] ⚠ Diff node found for "${node.id}" but no diff_status property`);
                     }
                 }
             });
@@ -410,40 +416,176 @@ export function WorldMapView() {
             inactive_nodes: nodes.filter(n => n.is_active === false).map(n => n.id)
         });
 
-        // Create a Set of valid node IDs for fast lookup
-        const validNodeIds = new Set(nodes.map(n => n.id));
-        
-        // Filter links to only include those where both source and target nodes exist
-        const validLinks = links.filter(link => {
-            const sourceId = typeof link.source === 'string' ? link.source : (link.source as Node)?.id;
-            const targetId = typeof link.target === 'string' ? link.target : (link.target as Node)?.id;
-            const sourceExists = sourceId && validNodeIds.has(sourceId);
-            const targetExists = targetId && validNodeIds.has(targetId);
-            
-            if (!sourceExists || !targetExists) {
-                console.warn(`[WorldMapView] Filtering out link: ${sourceId} -> ${targetId} (missing nodes)`);
-                return false;
+        // Resolve link source/target to nodes: API may send ids that don't match node.id (e.g. ART-xxx_pdf vs ART-xxx, TRIGGER-O1 vs O1).
+        // Build a map from all possible endpoint keys (id, name, _pdf variant, without prefix) to node so links resolve and green nodes aren't orphaned.
+        const nodeByKey = new Map<string, Node>();
+        const PREFIXES = ['TRIGGER-', 'ART-', 'ET-', 'FM-'];
+        const addKey = (key: string, node: Node) => {
+            if (key != null && key !== '') nodeByKey.set(String(key), node);
+        };
+        for (const n of nodes) {
+            nodeByKey.set(n.id, n);
+            if (n.name) addKey(n.name, n);
+            const label = (n as { label?: string }).label;
+            if (label) addKey(label, n);
+            if (typeof n.id === 'string') {
+                if (n.id.endsWith('_pdf')) {
+                    nodeByKey.set(n.id.replace(/_pdf$/, ''), n);
+                    addKey(n.id.replace(/_pdf$/, ''), n);
+                } else {
+                    nodeByKey.set(n.id + '_pdf', n);
+                    addKey(n.id + '_pdf', n);
+                }
+                // Register id without common prefix so link "O1" resolves to node "TRIGGER-O1"
+                for (const prefix of PREFIXES) {
+                    if (n.id.startsWith(prefix)) {
+                        addKey(n.id.slice(prefix.length), n);
+                        break;
+                    }
+                }
+                // Trigger id confusion: "01" (zero-one) vs "O1" (letter O) — register both so links resolve
+                if (/^O\d+$/i.test(n.id)) addKey('0' + n.id.slice(1), n);
+                else if (/^0\d+$/.test(n.id)) addKey('O' + n.id.slice(1), n);
             }
-            return true;
-        });
-        
-        console.log(`[WorldMapView] Filtered links: ${links.length} -> ${validLinks.length} (removed ${links.length - validLinks.length} invalid links)`);
+        }
+        const resolveEndpoint = (endpoint: string | number | Node | undefined): Node | undefined => {
+            if (endpoint == null) return undefined;
+            if (typeof endpoint !== 'string' && typeof endpoint !== 'number') return endpoint as Node;
+            // Index-based: when source/target is a number, treat as index into nodes (some APIs send indices)
+            if (typeof endpoint === 'number' && endpoint >= 0 && endpoint < nodes.length) return nodes[endpoint];
+            const s = String(endpoint);
+            return (
+                nodeByKey.get(s) ??
+                nodeByKey.get(s.replace(/_pdf$/, '')) ??
+                nodeByKey.get(s + '_pdf') ??
+                (s.startsWith('TRIGGER-') ? nodeByKey.get(s.slice('TRIGGER-'.length)) : undefined) ??
+                // Trigger id: try "01" <-> "O1" and similar
+                (() => {
+                    const alt = /^O(\d+)$/i.test(s) ? '0' + s.slice(1) : /^0(\d+)$/.test(s) ? 'O' + s.slice(1) : null;
+                    if (alt) return nodeByKey.get(alt) ?? undefined;
+                    return undefined;
+                })() ??
+                (() => {
+                    for (const prefix of PREFIXES) {
+                        if (s.startsWith(prefix)) {
+                            const out = nodeByKey.get(s.slice(prefix.length));
+                            if (out) return out;
+                        }
+                    }
+                    return undefined;
+                })()
+            );
+        };
+        const resolvedLinks: Link[] = [];
+        const droppedLinks: { source: string; target: string }[] = [];
+        const allSourceTargets = new Set<string>();
+        for (const link of links) {
+            const rawSource = typeof link.source === 'string' ? link.source : typeof (link.source as Node)?.id !== 'undefined' ? (link.source as Node).id : link.source;
+            const rawTarget = typeof link.target === 'string' ? link.target : typeof (link.target as Node)?.id !== 'undefined' ? (link.target as Node).id : link.target;
+            if (rawSource != null) allSourceTargets.add(String(rawSource));
+            if (rawTarget != null) allSourceTargets.add(String(rawTarget));
+            const sourceNode = resolveEndpoint(rawSource ?? (link.source as Node));
+            const targetNode = resolveEndpoint(rawTarget ?? (link.target as Node));
+            if (sourceNode && targetNode) {
+                resolvedLinks.push({
+                    ...link,
+                    source: sourceNode,
+                    target: targetNode,
+                });
+            } else {
+                droppedLinks.push({ source: String(rawSource), target: String(rawTarget) });
+                console.warn('[WorldMapView] Filtering out link:', rawSource, '->', rawTarget);
+            }
+        }
+        // Build set of node ids that appear as link endpoints (after resolution) for orphan detection
+        const allEndpointIdsFromResolved = new Set<string>();
+        for (const l of resolvedLinks) {
+            const a = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+            const b = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+            if (a) allEndpointIdsFromResolved.add(String(a));
+            if (b) allEndpointIdsFromResolved.add(String(b));
+        }
+        const orphanNodeIds = nodes.filter((n) => !allEndpointIdsFromResolved.has(n.id) && !allEndpointIdsFromResolved.has(String(n.id))).map((n) => n.id);
+        const orphanAddedNodes = orphanNodeIds
+            .map((id) => nodes.find((n) => n.id === id))
+            .filter((n): n is Node => !!n && (n as any).diff_status === 'added');
+
+        // In diff mode: add anchor links for orphan added nodes so they are pulled into the layout (no floating).
+        let validLinks: Link[] = resolvedLinks;
+        if (diffData && orphanAddedNodes.length > 0) {
+            const anchor = nodes.find((n) => allEndpointIdsFromResolved.has(n.id)) ?? nodes[0];
+            if (anchor) {
+                const anchorLinks: Link[] = orphanAddedNodes.map((orphan) => ({
+                    source: orphan,
+                    target: anchor,
+                    type: '_anchor',
+                    is_anchor: true,
+                })) as Link[];
+                validLinks = [...resolvedLinks, ...anchorLinks];
+            }
+        } else {
+            validLinks = resolvedLinks;
+        }
+
+        // Unconditional logging so console always shows resolution result (filter by "WorldMapView").
+        const addedNodeIds = new Set(nodes.filter((n: Node) => (n as any).diff_status === 'added').map((n: Node) => n.id));
+        const endpointSet = allSourceTargets;
+        const addedNodesWithNoLink = addedNodeIds.size ? Array.from(addedNodeIds).filter(id => !endpointSet.has(id) && !endpointSet.has(String(id))) : [];
+        console.log(
+            `[WorldMapView] Link resolution: ${links.length} links -> ${resolvedLinks.length} resolved, ${droppedLinks.length} dropped.` +
+            (orphanAddedNodes.length ? ` ${orphanAddedNodes.length} orphan added nodes anchored.` : '') +
+            (droppedLinks.length === 0 ? ' (No links dropped; if nodes look orphaned, the API may not return links for those node ids.)' : '')
+        );
+        if (addedNodeIds.size > 0) {
+            console.log('[WorldMapView] Added node ids:', Array.from(addedNodeIds));
+            if (addedNodesWithNoLink.length > 0) {
+                console.warn('[WorldMapView] Added nodes with no link endpoint (likely orphaned):', addedNodesWithNoLink);
+            }
+        }
+        if (droppedLinks.length > 0) {
+            console.warn(`[WorldMapView] Dropped ${droppedLinks.length} links (unresolvable endpoints):`, droppedLinks.slice(0, 5), droppedLinks.length > 5 ? `... and ${droppedLinks.length - 5} more` : '');
+        }
+        console.log('[WorldMapView] Endpoint sample (from links) vs node ids:', { endpoints: Array.from(endpointSet).slice(0, 15), nodeIds: nodes.slice(0, 12).map((n: Node) => n.id) });
+
+        // Consolidated diff debug: filter console by "WorldMapView" to hide 404/Stream noise
+        if (diffData) {
+            const added = nodes.filter((n: Node) => (n as any).diff_status === 'added');
+            const summaryFromApi = diffData.summary ?? (diffData.diff as any)?.summary ?? {};
+            const allEndpointIds = allEndpointIdsFromResolved;
+            const orphans = orphanNodeIds;
+            const linkSample = links.slice(0, 8).map((l: Link) => ({
+                source: typeof l.source === 'string' ? l.source : (l.source as Node)?.id,
+                target: typeof l.target === 'string' ? l.target : (l.target as Node)?.id,
+            }));
+            console.group('[WorldMapView] Diff debug — filter by this to hide 404s');
+            console.log('source', useDiffPayload ? 'diff payload' : 'data + diff status');
+            console.log('counts', { nodes: nodes.length, links: links.length, resolved: validLinks.length, dropped: droppedLinks.length });
+            console.log('apiSummary', { added: summaryFromApi.added, modified: summaryFromApi.modified, removed: summaryFromApi.removed, total_nodes_v2: summaryFromApi.total_nodes_v2, total_links_v2: summaryFromApi.total_links_v2 });
+            console.log('semanticSummary', (summaryFromApi.semanticSummary ?? (diffData.diff as any)?.summary?.semanticSummary) ? String(summaryFromApi.semanticSummary ?? (diffData.diff as any)?.summary?.semanticSummary).slice(0, 200) : undefined);
+            console.log('added nodes (ids)', added.map((n: Node) => n.id));
+            console.log('orphans (nodes with no link endpoint)', orphans.length ? orphans : 'none');
+            if (orphans.length) console.warn('orphan node ids', orphans);
+            console.log('link sample (first 8)', linkSample);
+            console.groupEnd();
+        }
 
         const simulation = d3.forceSimulation<Node>(nodes)
             .force('link', d3.forceLink<Node, Link>(validLinks).id(d => d.id).distance(150))
             .force('charge', d3.forceManyBody().strength(-800))
             .force('center', d3.forceCenter(width / 2, height / 2))
             .force('collide', d3.forceCollide().radius(60));
+        simulationRef.current = simulation;
 
         const link = g.append('g')
             .attr('class', 'links')
             .selectAll('line')
             .data(validLinks)
             .enter().append('line')
-            .attr('stroke', '#888')
-            .attr('stroke-width', 1.5)
-            .attr('marker-end', 'url(#arrowhead)')
-            .style('opacity', d => d.is_active === false ? inactiveOpacity : 0.5);
+            .attr('stroke', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? '#94a3b8' : '#888')
+            .attr('stroke-width', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? 1 : 1.5)
+            .attr('stroke-dasharray', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? '4,4' : null)
+            .attr('marker-end', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? null : 'url(#arrowhead)')
+            .style('opacity', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? 0.35 : (d.is_active === false ? inactiveOpacity : 0.5));
 
         const node = g.append('g')
             .attr('class', 'nodes')
@@ -496,10 +638,9 @@ export function WorldMapView() {
             .attr('fill', d => {
                 // Selected node gets special color
                 if (selectedNode && d.id === selectedNode.id) return '#3b82f6';
-                // Color by diff status if available
-                if ((d as any).diff_status === 'added') return '#10b981'; // green
-                if ((d as any).diff_status === 'modified') return '#f59e0b'; // yellow
-                if ((d as any).diff_status === 'removed') return '#ef4444'; // red
+                // Color by diff status (KG-diff contract, same as KgDiffDiagramView)
+                const status = (d as any).diff_status;
+                if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS];
                 return typeConfig[d.type]?.color || '#444';
             })
             .attr('stroke', d => {
@@ -514,9 +655,8 @@ export function WorldMapView() {
             })
             .style('filter', d => {
                 if (selectedNode && d.id === selectedNode.id) return 'drop-shadow(0 0 12px #3b82f6)';
-                if ((d as any).diff_status === 'added') return 'drop-shadow(0 0 6px #10b981)';
-                if ((d as any).diff_status === 'modified') return 'drop-shadow(0 0 6px #f59e0b)';
-                if ((d as any).diff_status === 'removed') return 'drop-shadow(0 0 6px #ef4444)';
+                const status = (d as any).diff_status;
+                if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return `drop-shadow(0 0 6px ${KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]})`;
                 return d.id === data.metadata.active_trigger ? 'drop-shadow(0 0 8px #fbbf24)' : 'none';
             });
 
@@ -524,7 +664,8 @@ export function WorldMapView() {
             .attr('dx', 16)
             .attr('dy', 4)
             .text(d => {
-                let label = d.name;
+                const nameOrLabel = d.name ?? (d as { label?: string }).label ?? d.id ?? 'Unknown';
+                let label = String(nameOrLabel);
                 if ((d as any).diff_status === 'added') label += ' [+]';
                 if ((d as any).diff_status === 'modified') label += ' [~]';
                 if ((d as any).diff_status === 'removed') label += ' [-]';
@@ -532,10 +673,9 @@ export function WorldMapView() {
                 return label;
             })
             .attr('fill', d => {
-                if ((d as any).diff_status === 'added') return '#10b981';
-                if ((d as any).diff_status === 'modified') return '#f59e0b';
-                if ((d as any).diff_status === 'removed') return '#ef4444';
-                return d.is_active === false ? '#94a3b8' : 'gray';
+                const status = (d as any).diff_status;
+                if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS];
+                return d.is_active === false ? KG_DIFF_COLORS.unchanged : 'gray';
             })
             .style('font-size', '10px')
             .style('font-weight', d => (d as any).diff_status ? '600' : '500')
@@ -613,7 +753,21 @@ export function WorldMapView() {
             );
         }, 500);
 
-    }, [data, viewMode, inactiveOpacity, diffData, selectedNode]);
+        return () => {
+            simulationRef.current?.stop();
+            simulationRef.current = null;
+            const el = svgRef.current;
+            if (el && el.parentNode) {
+                try {
+                    // Clear SVG with a single DOM write to avoid removeChild errors when
+                    // React and D3 disagree (e.g. on project switch / unmount).
+                    el.innerHTML = '';
+                } catch (_) {
+                    // Ignore if already detached or other DOM errors
+                }
+            }
+        };
+    }, [data, viewMode, inactiveOpacity, diffData, selectedNode, compareViewMode]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -693,30 +847,6 @@ export function WorldMapView() {
             {/* Toolbar */}
             <div className="h-12 border-b border-border bg-muted/30 flex items-center justify-between px-4 z-20">
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1 bg-muted rounded-md p-1">
-                        <UIButton
-                            variant="ghost"
-                            size="sm"
-                            className={cn(
-                                "h-7 text-xs px-3 transition-all",
-                                !isFocusMode ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-                            )}
-                            onClick={() => setIsFocusMode(false)}
-                        >
-                            Full Map
-                        </UIButton>
-                        <UIButton
-                            variant="ghost"
-                            size="sm"
-                            className={cn(
-                                "h-7 text-xs px-3 transition-all",
-                                isFocusMode ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-                            )}
-                            onClick={() => setIsFocusMode(true)}
-                        >
-                            Focus
-                        </UIButton>
-                    </div>
                     {kgHistory && (
                         <>
                             <UIButton
@@ -855,6 +985,9 @@ export function WorldMapView() {
                                                     <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                                 )}
                                             </div>
+                                            {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -895,6 +1028,9 @@ export function WorldMapView() {
                                                     <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                                 )}
                                             </div>
+                                            {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -928,27 +1064,14 @@ export function WorldMapView() {
                                                 <span>Links: {diffData.summary.total_links_v1} → {diffData.summary.total_links_v2}</span>
                                             </div>
                                         </div>
+                                        {(diffData.diff?.summary?.semanticSummary ?? (diffData.summary as { semanticSummary?: string })?.semanticSummary) && (
+                                            <div className="pt-2 border-t border-border mt-2">
+                                                <p className="text-[10px] text-muted-foreground italic">
+                                                    {(diffData.diff?.summary?.semanticSummary ?? (diffData.summary as { semanticSummary?: string })?.semanticSummary) as string}
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
-                                    <UIButton
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full mt-3 text-[10px] h-7 border-border"
-                                        onClick={async () => {
-                                            // Load version2 with diff visualization
-                                            const version = compareVersion2 === "current" ? undefined : (compareVersion2 || undefined);
-                                            // Ensure diff data is preserved by setting compareMode
-                                            setCompareMode(true);
-                                            // Fetch the diff again to ensure it's fresh
-                                            if (compareVersion1 && compareVersion2) {
-                                                await fetchDiff(compareVersion1, compareVersion2);
-                                            }
-                                            // Then load version 2 with diff preserved
-                                            fetchData(version, true);
-                                            setActiveVersion(compareVersion2 === "current" ? null : compareVersion2);
-                                        }}
-                                    >
-                                        View Version 2 with Diff
-                                    </UIButton>
                                 </div>
                             )}
                         </div>
@@ -986,6 +1109,9 @@ export function WorldMapView() {
                                             <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                         )}
                                     </div>
+                                    {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                        <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -1003,76 +1129,7 @@ export function WorldMapView() {
                             setSelectedNode(null);
                         }
                     }}>
-                        {viewMode === 'workflow' ? (
-                    <div className="absolute inset-0 flex flex-col bg-background">
-                        {loadingWorkflow ? (
-                            <div className="flex-1 flex items-center justify-center">
-                                <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                            </div>
-                        ) : workflowDiagram?.nodes?.length ? (
-                            <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-                                <div className="flex flex-wrap items-center justify-center gap-2">
-                                    {workflowDiagram.nodes.map((node, i) => (
-                                        <React.Fragment key={node.id}>
-                                            <div
-                                                className={cn(
-                                                    'px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
-                                                    workflowDiagram.active_node === node.id
-                                                        ? 'bg-primary text-primary-foreground border-primary'
-                                                        : 'bg-muted/50 text-muted-foreground border-border'
-                                                )}
-                                            >
-                                                {node.label}
-                                            </div>
-                                            {i < workflowDiagram.nodes.length - 1 && (
-                                                <span className="text-muted-foreground">→</span>
-                                            )}
-                                        </React.Fragment>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : !visualizationHtml ? (
-                            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
-                                <Activity className="w-12 h-12 opacity-20" />
-                                <div className="text-center">
-                                    <h3 className="text-sm font-medium text-foreground">No active orientation</h3>
-                                    <p className="text-xs text-muted-foreground mt-1 max-w-[200px]">Ask the agent to "show orientation" or switch phase to see the workflow here.</p>
-                                </div>
-                                <UIButton
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-4 border-border text-xs"
-                                    onClick={() => setViewMode('map')}
-                                >
-                                    Switch to Map View
-                                </UIButton>
-                            </div>
-                        ) : (
-                            <iframe
-                                srcDoc={`
-                                    <html>
-                                        <head>
-                                            <style>
-                                                body { margin: 0; background: transparent; color: inherit; font-family: sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-                                            </style>
-                                        </head>
-                                        <body>
-                                            ${visualizationHtml}
-                                        </body>
-                                    </html>
-                                `}
-                                className="w-full h-full border-none"
-                                title="Workflow Orientation"
-                            />
-                        )}
-                        <div className="absolute bottom-6 left-6 z-20">
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
-                                <GitGraph className="w-3.5 h-3.5 text-muted-foreground" />
-                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Workflow State Mode</span>
-                            </div>
-                        </div>
-                    </div>
-                ) : viewMode === 'artifacts' ? (
+                        {viewMode === 'artifacts' ? (
                     <ArtifactsView />
                 ) : (
                     <>
@@ -1094,13 +1151,60 @@ export function WorldMapView() {
                             </div>
                         )}
 
-                        <svg ref={svgRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
+                        {compareMode && diffData?.diff?.type === "kg_diff" && compareViewMode === "diff" ? (
+                            <div className="absolute inset-0 overflow-auto p-4 bg-background z-10">
+                                <KgDiffDiagramView payload={diffData.diff} isLoading={false} />
+                            </div>
+                        ) : (
+                            <svg ref={svgRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
+                        )}
 
-                        <div className="absolute bottom-6 left-6 z-20">
+                        <div className="absolute bottom-6 left-6 z-20 flex flex-col gap-2">
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
                                 <Globe className="w-3.5 h-3.5 text-muted-foreground" />
                                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Graph Mode</span>
                             </div>
+                            {diffData?.diff?.type === "kg_diff" && (
+                                <div className="flex flex-col gap-2">
+                                    <div className="flex items-center gap-2 px-2">
+                                        <button
+                                            type="button"
+                                            className={cn(
+                                                "text-[10px] font-medium px-2 py-1 rounded",
+                                                compareViewMode === 'graph' ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"
+                                            )}
+                                            onClick={() => setCompareViewMode('graph')}
+                                        >
+                                            Graph
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={cn(
+                                                "text-[10px] font-medium px-2 py-1 rounded",
+                                                compareViewMode === 'diff' ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"
+                                            )}
+                                            onClick={() => setCompareViewMode('diff')}
+                                        >
+                                            Diff list
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center gap-4 px-3 py-2 bg-background/90 backdrop-blur-md border border-border rounded-lg shadow-lg text-[10px] font-medium">
+                                        <span className="text-muted-foreground uppercase tracking-wider">Diff:</span>
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: KG_DIFF_COLORS.added }} title="Added" />
+                                            Added
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: KG_DIFF_COLORS.modified }} title="Modified" />
+                                            Modified
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: KG_DIFF_COLORS.removed }} title="Removed" />
+                                            Removed
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </>
                 )}
@@ -1131,76 +1235,7 @@ export function WorldMapView() {
                 </div>
             ) : (
                 <div ref={containerRef} className="flex-1 relative overflow-hidden" onClick={() => setSelectedNode(null)}>
-                    {viewMode === 'workflow' ? (
-                        <div className="absolute inset-0 flex flex-col bg-background">
-                            {loadingWorkflow ? (
-                                <div className="flex-1 flex items-center justify-center">
-                                    <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                                </div>
-                            ) : workflowDiagram?.nodes?.length ? (
-                                <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-                                    <div className="flex flex-wrap items-center justify-center gap-2">
-                                        {workflowDiagram.nodes.map((node, i) => (
-                                            <React.Fragment key={node.id}>
-                                                <div
-                                                    className={cn(
-                                                        'px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
-                                                        workflowDiagram.active_node === node.id
-                                                            ? 'bg-primary text-primary-foreground border-primary'
-                                                            : 'bg-muted/50 text-muted-foreground border-border'
-                                                    )}
-                                                >
-                                                    {node.label}
-                                                </div>
-                                                {i < workflowDiagram.nodes.length - 1 && (
-                                                    <span className="text-muted-foreground">→</span>
-                                                )}
-                                            </React.Fragment>
-                                        ))}
-                                    </div>
-                                </div>
-                            ) : !visualizationHtml ? (
-                                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
-                                    <Activity className="w-12 h-12 opacity-20" />
-                                    <div className="text-center">
-                                        <h3 className="text-sm font-medium text-foreground">No active orientation</h3>
-                                        <p className="text-xs text-muted-foreground mt-1 max-w-[200px]">Ask the agent to "show orientation" or switch phase to see the workflow here.</p>
-                                    </div>
-                                    <UIButton
-                                        variant="outline"
-                                        size="sm"
-                                        className="mt-4 border-border text-xs"
-                                        onClick={() => setViewMode('map')}
-                                    >
-                                        Switch to Map View
-                                    </UIButton>
-                                </div>
-                            ) : (
-                                <iframe
-                                    srcDoc={`
-                                        <html>
-                                            <head>
-                                                <style>
-                                                    body { margin: 0; background: transparent; color: inherit; font-family: sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-                                                </style>
-                                            </head>
-                                            <body>
-                                                ${visualizationHtml}
-                                            </body>
-                                        </html>
-                                    `}
-                                    className="w-full h-full border-none"
-                                    title="Workflow Orientation"
-                                />
-                            )}
-                            <div className="absolute bottom-6 left-6 z-20">
-                                <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
-                                    <GitGraph className="w-3.5 h-3.5 text-muted-foreground" />
-                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Workflow State Mode</span>
-                                </div>
-                            </div>
-                        </div>
-                    ) : viewMode === 'artifacts' ? (
+                    {viewMode === 'artifacts' ? (
                         <ArtifactsView />
                     ) : (
                         <>

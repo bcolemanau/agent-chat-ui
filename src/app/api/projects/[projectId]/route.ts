@@ -43,11 +43,15 @@ export async function PATCH(
         if (!resp.ok) {
             const errorText = await resp.text();
             console.error(`[PROXY] Backend error (patch project): ${resp.status} - ${errorText}`);
-            const status = resp.status === 404 ? 404 : resp.status === 403 ? 403 : 502;
-            return NextResponse.json(
-                { error: resp.status === 404 ? "Project not found" : "Backend error" },
-                { status }
-            );
+            let body: { error?: string; detail?: string };
+            try {
+                body = JSON.parse(errorText);
+            } catch {
+                body = {};
+            }
+            const status = resp.status === 404 ? 404 : resp.status === 403 ? 403 : resp.status === 409 ? 409 : 502;
+            const message = resp.status === 404 ? "Project not found" : (body.detail || body.error || "Backend error");
+            return NextResponse.json({ error: message, detail: body.detail }, { status });
         }
 
         const data = await resp.json();

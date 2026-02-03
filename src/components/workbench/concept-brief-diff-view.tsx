@@ -14,8 +14,19 @@ import { CheckCircle2, AlertCircle, Star, FileText, Loader2 } from "lucide-react
 import { cn } from "@/lib/utils";
 import { MarkdownText } from "@/components/thread/markdown-text";
 
+const TEMPLATE_ID_LABELS: Record<string, string> = {
+  "T-CONCEPT": "Concept Brief",
+  "T-FEATDEF": "Feature Definition",
+  "T-REQPKG": "Requirements Package",
+  "T-UX": "UX Brief",
+  "T-ARCH": "Architecture",
+  "T-DESIGN": "Design",
+};
+
 interface ConceptBriefDiffViewProps {
   diffData?: ConceptBriefDiffViewType;
+  /** Issue #63: impact_forecast / coverage_analysis for traceability UI */
+  previewData?: Record<string, unknown>;
   onApprove?: (selectedOptionIndex: number) => void;
   onReject?: () => void;
   isLoading?: boolean;
@@ -25,6 +36,7 @@ interface ConceptBriefDiffViewProps {
 
 export function ConceptBriefDiffView({
   diffData,
+  previewData,
   onApprove,
   onReject,
   isLoading = false,
@@ -122,6 +134,11 @@ export function ConceptBriefDiffView({
 
   const { options, recommended_index, metadata } = diffData;
   const effectiveSelected = selectedIndex ?? recommended_index;
+  const title: string = String(metadata?.title ?? "");
+  const description: string = String(metadata?.description ?? "");
+  const numOptions: number = Number(metadata?.num_options ?? 0);
+  const recommendedOneBased: number = Number(recommended_index ?? 0) + 1;
+  const effectiveSelectedOneBased: number = Number(effectiveSelected ?? 0) + 1;
 
   return (
     <div className="flex flex-col min-h-0">
@@ -129,14 +146,29 @@ export function ConceptBriefDiffView({
       <div className="border-b p-4 shrink-0">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold">{metadata.title}</h2>
-            <p className="text-sm text-muted-foreground mt-1">{metadata.description}</p>
+            <h2 className="text-xl font-semibold">{title}</h2>
+            <p className="text-sm text-muted-foreground mt-1">{description}</p>
           </div>
           <div className="text-sm text-muted-foreground">
-            {metadata.num_options} option{metadata.num_options !== 1 ? "s" : ""} · recommended option {recommended_index + 1}
+            {numOptions} option{numOptions !== 1 ? "s" : ""} · recommended option {recommendedOneBased}
           </div>
         </div>
       </div>
+
+      {/* Issue #63: Impact forecast (downstream templates that may need re-validation) */}
+      {previewData && typeof previewData.impact_forecast === "object" ? (
+        <div className="border-b px-4 py-3 shrink-0 rounded-none border-border bg-muted/30 text-sm">
+          <p className="font-medium text-foreground">Impact forecast</p>
+          <p className="text-muted-foreground text-xs mt-0.5">{String((previewData.impact_forecast as { message?: string }).message ?? "")}</p>
+          {((previewData.impact_forecast as { downstream_template_ids?: string[] }).downstream_template_ids?.length ?? 0) > 0 ? (
+            <ul className="list-disc list-inside text-xs text-muted-foreground mt-1">
+              {((previewData.impact_forecast as { downstream_template_ids: string[] }).downstream_template_ids).map((id: string) => (
+                <li key={id}>{TEMPLATE_ID_LABELS[id] ?? id}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Option cards — scrollable list with visible scrollbar; "View full draft" in header so it's always visible */}
       <div className="p-4 flex flex-col min-h-0">
@@ -262,7 +294,7 @@ export function ConceptBriefDiffView({
                 disabled={isLoading}
               >
                 <CheckCircle2 className="h-4 w-4 mr-2" />
-                Approve option {effectiveSelected + 1}
+                Approve option {effectiveSelectedOneBased}
               </Button>
             )}
           </div>

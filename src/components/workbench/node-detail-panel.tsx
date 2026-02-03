@@ -212,9 +212,12 @@ export function NodeDetailPanel({
           </div>
         ) : content ? (
           <>
-            {/* Render content using appropriate renderer */}
+            {/* Render content using appropriate renderer (pass node name as filename fallback for binary) */}
             <div className="content-renderer-wrapper min-h-0">
-              {renderer?.render(content.content, content.metadata)}
+              {renderer?.render(content.content, {
+                ...content.metadata,
+                filename: content.metadata?.filename || (node as { name?: string }).name,
+              })}
             </div>
 
             {/* Properties */}

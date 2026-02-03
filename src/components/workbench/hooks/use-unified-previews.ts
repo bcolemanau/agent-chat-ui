@@ -58,11 +58,11 @@ export function useUnifiedPreviews(): UnifiedPreviewItem[] {
           const diff = preview_data.diff ?? parsed.diff;
 
           // Filter out already-applied proposals
-          // classify_intent: if active_agent is "hydrator" and current_trigger_id matches, it's already applied
+          // classify_intent: if active_agent is "project_configurator" and current_trigger_id matches, it's already applied
           if (toolName === "classify_intent") {
             const proposalTriggerId = args.trigger_id;
             if (
-              activeAgent === "hydrator" &&
+              activeAgent === "project_configurator" &&
               currentTriggerId &&
               proposalTriggerId &&
               currentTriggerId === proposalTriggerId

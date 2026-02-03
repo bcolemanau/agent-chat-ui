@@ -288,9 +288,9 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     };
 
     // Do NOT send active_agent/active_mode with message submit. The graph must use the checkpoint state
-    // so that after "Begin Enriching" the approval run can set active_mode to hydrator; if we sent
+    // so that after "Begin Enriching" the approval run can set active_mode to project_configurator; if we sent
     // the current overlay (still "supervisor" from Apply response until refetch), we would overwrite
-    // the checkpoint and the next run would route to supervisor instead of hydrator.
+    // the checkpoint and the next run would route to supervisor instead of project_configurator.
     console.log("[Thread] Submitting new human message:", {
       content: newHumanMessage.content,
       context,

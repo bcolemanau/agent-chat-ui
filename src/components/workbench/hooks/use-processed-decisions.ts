@@ -15,6 +15,8 @@ export interface ProcessedDecision {
   title: string;
   status: "approved" | "rejected";
   timestamp: number;
+  /** KG version (commit sha) produced by this decision; enables KG diff view and history navigation */
+  kg_version_sha?: string;
 }
 
 /** Backend DecisionRecord shape (GET /decisions response item). */
@@ -30,6 +32,7 @@ interface DecisionRecord {
   option_index?: number;
   artifact_id?: string;
   args?: Record<string, unknown>;
+  kg_version_sha?: string;
 }
 
 interface ProjectListItem {
@@ -83,6 +86,7 @@ function mapRecordToProcessed(r: DecisionRecord): ProcessedDecision {
     title: r.title,
     status: r.status === "approved" || r.status === "rejected" ? r.status : "rejected",
     timestamp,
+    ...(r.kg_version_sha != null ? { kg_version_sha: r.kg_version_sha } : {}),
   };
 }
 

@@ -17,9 +17,7 @@ export async function GET(req: Request) {
         let backendUrl = process.env.LANGGRAPH_API_URL || "https://reflexion-staging.up.railway.app";
         if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
 
-        const focus = searchParams.get("focus");
-        let targetUrl = `${backendUrl}/kg/data?thread_id=${threadId}`;
-        if (focus) targetUrl += `&focus=${focus}`;
+        const targetUrl = `${backendUrl}/kg/data?thread_id=${threadId}`;
 
         // Extract organization context from headers sent by the client
         // The client-side fetch should include the X-Organization-Context header

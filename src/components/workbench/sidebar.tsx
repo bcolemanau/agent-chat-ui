@@ -119,8 +119,12 @@ export function Sidebar() {
                 cancelEditing();
                 fetchProjects();
             } else {
-                const err = await res.json();
-                toast.error(err?.error || "Failed to rename project");
+                const err = await res.json().catch(() => ({}));
+                if (res.status === 409) {
+                    toast.warning(err?.error || err?.detail || "Project is busy. Try again in a moment.");
+                } else {
+                    toast.error(err?.error || "Failed to rename project");
+                }
             }
         } catch (error) {
             console.error("Error renaming project:", error);

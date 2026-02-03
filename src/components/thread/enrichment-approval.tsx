@@ -12,10 +12,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Check, X, LoaderCircle, FileText, AlertCircle } from "lucide-react";
+import { Check, X, LoaderCircle, FileText, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
+import { contentRendererRegistry } from "@/components/workbench/content-renderers";
 
 // Available KG Artifact types (from backend)
 const ARTIFACT_TYPES = [
@@ -41,6 +42,18 @@ export interface EnrichmentProposal {
   };
   status: "pending" | "approved" | "rejected";
   filename?: string;
+}
+
+/** Approve-enrichment API response; may include KG diff for visualization. */
+interface ApproveEnrichmentResult {
+  status?: string;
+  cycle_id?: string;
+  graph_node_id?: string;
+  artifact_types?: string[];
+  is_active?: boolean;
+  superseded_cycles?: number;
+  kg_delta?: Record<string, unknown>;
+  diff?: { type: string; [key: string]: unknown };
 }
 
 interface EnrichmentApprovalProps {
@@ -70,6 +83,8 @@ export function EnrichmentApproval({
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
+  const [lastApprovalResult, setLastApprovalResult] = useState<{ result: ApproveEnrichmentResult } | null>(null);
+  const [showKgDiff, setShowKgDiff] = useState(true);
 
   // Helper function to get the direct backend URL, bypassing Next.js proxy
   function getDirectBackendUrl(apiUrl: string): string {
@@ -277,6 +292,9 @@ export function EnrichmentApproval({
 
       const result = await response.json();
       toast.success(`Approved enrichment for ${proposal.filename || artifactId}`);
+      if (result?.diff?.type === "kg_diff") {
+        setLastApprovalResult({ result });
+      }
 
       // Update proposal status
       setProposals((prev) => {
@@ -392,8 +410,13 @@ export function EnrichmentApproval({
 
   const proposalList = Array.from(proposals.values());
 
+  const handleOpenChange = (next: boolean) => {
+    if (!next) setLastApprovalResult(null);
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Review Artifact Enrichments</DialogTitle>
@@ -565,6 +588,28 @@ export function EnrichmentApproval({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {lastApprovalResult?.result?.diff?.type === "kg_diff" && (
+          <div className="border rounded-lg overflow-hidden mt-4">
+            <button
+              type="button"
+              className="w-full flex items-center justify-between p-3 bg-muted/50 hover:bg-muted/70 text-left font-medium"
+              onClick={() => setShowKgDiff((v) => !v)}
+            >
+              <span>KG changes from this approval</span>
+              {showKgDiff ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+            {showKgDiff && (
+              <div className="p-4 max-h-[400px] overflow-y-auto">
+                {contentRendererRegistry.get("diff")?.render("", {
+                  diff: lastApprovalResult.result.diff,
+                  threadId: threadId ?? undefined,
+                  proposalType: "approve_enrichment",
+                })}
+              </div>
+            )}
           </div>
         )}
 

@@ -9,7 +9,7 @@ import { Breadcrumbs } from "./breadcrumbs";
 import { OrgSwitcher } from "./org-switcher";
 import { useStreamContext } from "@/providers/Stream";
 import { Thread } from "@/components/thread";
-import { MessageSquare, Map as MapIcon, Workflow, Activity, X, PanelRight, Sparkles, Circle, Download, Minus, Maximize2, Settings } from "lucide-react";
+import { MessageSquare, Map as MapIcon, Activity, X, PanelRight, Sparkles, Circle, Download, Minus, Maximize2, Settings } from "lucide-react";
 import { useRecording } from "@/providers/RecordingProvider";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -36,17 +36,17 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     // Robust Mode Derivation (active_mode and active_agent are synced from graph/overlay)
     const values = (stream as any)?.values;
     const rawAgent = values?.active_mode ?? values?.active_agent;
-    type AgentMode = "supervisor" | "hydrator" | "concept" | "architecture" | "administration";
+    type AgentMode = "supervisor" | "project_configurator" | "concept" | "architecture" | "administration";
     const activeAgent: AgentMode =
-        rawAgent === "hydrator" || rawAgent === "concept" || rawAgent === "architecture" || rawAgent === "administration"
+        rawAgent === "project_configurator" || rawAgent === "concept" || rawAgent === "architecture" || rawAgent === "administration"
             ? rawAgent
-            : (values?.visualization_html?.includes("active_node='hydrator'") || values?.visualization_html?.includes("Hydrator")
-                ? "hydrator"
+            : (values?.visualization_html?.includes("project_configurator")
+                ? "project_configurator"
                 : "supervisor");
 
     const MODE_OPTIONS: { value: AgentMode; label: string }[] = [
         { value: "supervisor", label: "Supervisor" },
-        { value: "hydrator", label: "Hydrator" },
+        { value: "project_configurator", label: "Project Configurator" },
         { value: "concept", label: "Concept" },
         { value: "architecture", label: "Architecture" },
         ...(isAdmin ? [{ value: "administration" as const, label: "Administration" }] : []),
@@ -189,9 +189,16 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         lastApprovalCount.current = approvalCount;
     }, [approvalCount, router]);
 
+    // Normalize legacy workflow view to map (workflow tab removed)
+    useEffect(() => {
+        if (viewMode === "workflow") {
+            setViewMode("map");
+        }
+    }, [viewMode, setViewMode]);
+
     // User-Driven View Synchronization (UI -> Backend)
     useEffect(() => {
-        if (!viewMode) return;
+        if (!viewMode || viewMode === "workflow") return;
 
         // Detect manual user-initiated view changes (including URL updates)
         if (viewMode !== lastSyncedView.current) {
@@ -206,7 +213,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     // Fix: If on /workbench/decisions but viewMode is a map sub-view, navigate to /workbench/map
     // BUT only if we're not explicitly intending to stay on decisions (e.g. via tab selection)
     useEffect(() => {
-        if (pathname?.includes("/workbench/decisions") && ["map", "workflow", "artifacts"].includes(viewMode)) {
+        if (pathname?.includes("/workbench/decisions") && ["map", "artifacts"].includes(viewMode)) {
             // Check if this was a recent manual navigation to decisions
             const isManualDecisions = lastSyncedView.current === "decisions";
             if (!isManualDecisions) {
@@ -527,24 +534,6 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     >
                                         <MapIcon className="w-3.5 h-3.5" />
                                         Map
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className={cn(
-                                            "h-8 px-3 gap-2 text-xs font-medium transition-all",
-                                            pathname?.includes("/workbench/map") && viewMode === "workflow" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                                        )}
-                                        onClick={() => {
-                                            setViewMode("workflow");
-                                            closeArtifact();
-                                            stream.setWorkbenchView("workflow");
-                                            const mapHref = workbenchHref("/workbench/map");
-                                            router.push(`${mapHref}${mapHref.includes("?") ? "&" : "?"}view=workflow`);
-                                        }}
-                                    >
-                                        <Workflow className="w-3.5 h-3.5" />
-                                        Workflow
                                     </Button>
                                     <Button
                                         variant="ghost"

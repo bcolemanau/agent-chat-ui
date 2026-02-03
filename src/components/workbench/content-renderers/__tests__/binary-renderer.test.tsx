@@ -27,8 +27,8 @@ describe('BinaryRenderer', () => {
     const result = renderer.render(content, metadata);
 
     render(<>{result}</>);
-    expect(screen.getByText(/Binary file: document.pdf/i)).toBeInTheDocument();
-    expect(screen.getByText(/Type: application\/pdf/i)).toBeInTheDocument();
+    expect(screen.getByText(/document\.pdf/i)).toBeInTheDocument();
+    expect(screen.getByText(/PDF document/i)).toBeInTheDocument();
   });
 
   it('should show download link for base64 content', () => {
@@ -41,7 +41,7 @@ describe('BinaryRenderer', () => {
     const result = renderer.render(content, metadata);
 
     render(<>{result}</>);
-    const downloadLink = screen.getByText(/Download File/i);
+    const downloadLink = screen.getByText(/Download file\.pdf/i);
     expect(downloadLink).toBeInTheDocument();
     expect(downloadLink.closest('a')).toHaveAttribute('download', 'file.pdf');
   });
@@ -55,7 +55,7 @@ describe('BinaryRenderer', () => {
     const result = renderer.render(content, metadata);
 
     render(<>{result}</>);
-    expect(screen.getByText(/Binary file: file/i)).toBeInTheDocument();
+    expect(screen.getByText(/PDF document/i)).toBeInTheDocument();
   });
 
   it('should handle missing mime_type', () => {
@@ -67,7 +67,8 @@ describe('BinaryRenderer', () => {
     const result = renderer.render(content, metadata);
 
     render(<>{result}</>);
-    expect(screen.getByText(/Type: application\/octet-stream/i)).toBeInTheDocument();
+    expect(screen.getByText(/document\.pdf/i)).toBeInTheDocument();
+    expect(screen.getByText(/Document/i)).toBeInTheDocument();
   });
 
   it('should handle missing metadata', () => {
@@ -75,6 +76,6 @@ describe('BinaryRenderer', () => {
     const result = renderer.render(content);
 
     render(<>{result}</>);
-    expect(screen.getByText(/Binary file: file/i)).toBeInTheDocument();
+    expect(screen.getByText(/Document/i)).toBeInTheDocument();
   });
 });

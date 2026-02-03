@@ -17,7 +17,11 @@ interface ApprovalCardProps {
   item: UnifiedPreviewItem;
   stream: any;
   /** Called when user approves or rejects; used to persist in Decisions history (e.g. localStorage). */
-  onDecisionProcessed?: (item: UnifiedPreviewItem, status: "approved" | "rejected") => void;
+  onDecisionProcessed?: (
+    item: UnifiedPreviewItem,
+    status: "approved" | "rejected",
+    extra?: { kg_version_sha?: string }
+  ) => void;
 }
 
 /** Resolve threadId to project id so decisions GET/POST use id, not name. */
@@ -39,12 +43,30 @@ async function resolveThreadIdToProjectId(threadId: string | undefined): Promise
   }
 }
 
+/** Fetch latest KG version (commit sha) for a thread so we can link the decision to the version it produced. */
+async function fetchLatestKgVersionSha(threadId: string | undefined): Promise<string | undefined> {
+  if (!threadId) return undefined;
+  try {
+    const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+    const headers: Record<string, string> = {};
+    if (orgContext) headers["X-Organization-Context"] = orgContext;
+    const res = await fetch(`/api/project/history?thread_id=${encodeURIComponent(threadId)}`, { headers });
+    if (!res.ok) return undefined;
+    const data = await res.json();
+    const versions = data?.versions;
+    if (Array.isArray(versions) && versions.length > 0 && versions[0]?.id) return versions[0].id;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Persist decision record to backend for lineage / audit (survives refresh, enables revisit and retries). */
 async function persistDecision(
   item: UnifiedPreviewItem,
   status: "approved" | "rejected",
   threadId: string | undefined,
-  extra: { option_index?: number; artifact_id?: string } = {}
+  extra: { option_index?: number; artifact_id?: string; kg_version_sha?: string } = {}
 ): Promise<void> {
   try {
     const projectId = await resolveThreadIdToProjectId(threadId) ?? threadId ?? "default";
@@ -76,6 +98,7 @@ async function persistDecision(
           option_index: extra.option_index ?? args.option_index ?? args.selected_option_index ?? undefined,
           artifact_id: extra.artifact_id,
           args: { cache_key: args.cache_key, trigger_id: args.trigger_id },
+          ...(extra.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
         },
       }),
     });
@@ -127,8 +150,10 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           }
           const data = await res.json();
           setStatus("approved");
-          onDecisionProcessed?.(item, "approved");
-          await persistDecision(item, "approved", threadId);
+          // Link decision to KG version so Decisions panel can show KG diff and Map can navigate by decision
+          const kg_version_sha = await fetchLatestKgVersionSha(threadId);
+          onDecisionProcessed?.(item, "approved", { kg_version_sha });
+          await persistDecision(item, "approved", threadId, { kg_version_sha });
           toast.success("Begin Enriching", {
             description: "Classification applied. You can now work with the Enrichment agent.",
           });
