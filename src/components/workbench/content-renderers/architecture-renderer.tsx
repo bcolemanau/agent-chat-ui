@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- file exports component + registry */
 "use client";
 
 import React, { useState } from "react";

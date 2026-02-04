@@ -40,6 +40,14 @@ interface ProjectListItem {
   name: string;
 }
 
+const FETCH_TIMEOUT_MS = 20_000;
+
+function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+  const ac = new AbortController();
+  const timeoutId = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
+  return fetch(url, { ...options, signal: ac.signal }).finally(() => clearTimeout(timeoutId));
+}
+
 /** Resolve threadId to project id: if it's a project name (matches name but not id), return that project's id. */
 async function resolveThreadIdToProjectId(threadId: string | undefined): Promise<string | undefined> {
   if (typeof window === "undefined" || !threadId?.trim()) return threadId;
@@ -47,7 +55,7 @@ async function resolveThreadIdToProjectId(threadId: string | undefined): Promise
     const orgContext = localStorage.getItem("reflexion_org_context");
     const headers: Record<string, string> = {};
     if (orgContext) headers["X-Organization-Context"] = orgContext;
-    const res = await fetch("/api/projects", { headers });
+    const res = await fetchWithTimeout("/api/projects", { headers });
     if (!res.ok) return threadId;
     const projects = (await res.json()) as ProjectListItem[];
     if (!Array.isArray(projects)) return threadId;
@@ -97,13 +105,22 @@ async function loadFromApi(projectId: string | undefined): Promise<ProcessedDeci
     const headers: Record<string, string> = {};
     const orgContext = localStorage.getItem("reflexion_org_context");
     if (orgContext) headers["X-Organization-Context"] = orgContext;
-    const res = await fetch(`/api/decisions?${params}`, { headers });
+    const res = await fetchWithTimeout(`/api/decisions?${params}`, { headers });
     if (!res.ok) return null;
     const data = await res.json();
     const list = Array.isArray(data) ? data : [];
-    return list.filter((r): r is DecisionRecord => r && typeof r.id === "string").map(mapRecordToProcessed);
+    // Only include approved/rejected; pending decisions belong in the pending list, not processed (they were wrongly shown as "rejected" before)
+    const processedOnly = list.filter(
+      (r): r is DecisionRecord =>
+        r && typeof r.id === "string" && (r.status === "approved" || r.status === "rejected")
+    );
+    return processedOnly.map(mapRecordToProcessed);
   } catch (e) {
-    console.warn("[useProcessedDecisions] Load from API failed", e);
+    if ((e as Error)?.name === "AbortError") {
+      console.warn("[useProcessedDecisions] Decisions request timed out");
+    } else {
+      console.warn("[useProcessedDecisions] Load from API failed", e);
+    }
     return null;
   }
 }

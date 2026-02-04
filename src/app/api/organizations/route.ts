@@ -52,7 +52,7 @@ export async function GET(req: Request) {
                 // If JSON parsing fails, try text
                 try {
                     errorText = await resp.text();
-                } catch (textError) {
+                } catch {
                     errorText = `Backend returned ${resp.status} ${resp.statusText}`;
                 }
             }

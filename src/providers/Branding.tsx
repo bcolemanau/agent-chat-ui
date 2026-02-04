@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- file exports provider + useBranding */
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
@@ -17,7 +18,7 @@ export function BrandingProvider({
     children: React.ReactNode;
     client?: string;
 }) {
-    const [branding, setBranding] = useState<ClientBranding>(getBranding(client));
+    const [branding, _setBranding] = useState<ClientBranding>(getBranding(client));
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {

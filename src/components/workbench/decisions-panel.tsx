@@ -3,11 +3,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryState } from "nuqs";
 import { useUnifiedPreviews, UnifiedPreviewItem } from "./hooks/use-unified-previews";
+import { usePendingDecisions } from "./hooks/use-pending-decisions";
 import { useProcessedDecisions, ProcessedDecision } from "./hooks/use-processed-decisions";
 import { ApprovalCard } from "./approval-card";
 import { KgDiffDiagramView } from "./kg-diff-diagram-view";
+import { FullProposalContent } from "./full-proposal-modal";
 import { useStreamContext } from "@/providers/Stream";
-import { AlertCircle, LayoutGrid, Table2, Rows3, PanelRight } from "lucide-react";
+import { AlertCircle, LayoutGrid, Table2, Rows3, PanelRight, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -60,13 +62,25 @@ export function DecisionsPanel() {
   const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
 
   const allPreviews = useUnifiedPreviews();
+  const { pending: pendingFromApi, isLoading: pendingApiLoading, refetch: refetchPending } = usePendingDecisions(threadId);
   const { processed, addProcessed, isLoading } = useProcessedDecisions(threadId);
 
+  // When thread/upload triggers a workbench refresh, refetch persisted pending so we see new decisions from GET /decisions
+  const workbenchRefreshKey = (stream as any)?.workbenchRefreshKey ?? 0;
+  useEffect(() => {
+    if (threadId && workbenchRefreshKey > 0) refetchPending();
+  }, [threadId, workbenchRefreshKey, refetchPending]);
+
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
-  const pending = useMemo(
-    () => allPreviews.filter((p) => !processedIds.has(p.id)),
-    [allPreviews, processedIds]
-  );
+  // Merge persisted pending (GET /decisions) with stream-based pending; dedupe by id so we don't rely on refetch timing
+  const pending = useMemo(() => {
+    const byId = new Map<string, UnifiedPreviewItem>();
+    pendingFromApi.forEach((p) => byId.set(p.id, p));
+    allPreviews.forEach((p) => {
+      if (!byId.has(p.id)) byId.set(p.id, p);
+    });
+    return Array.from(byId.values()).filter((p) => !processedIds.has(p.id));
+  }, [pendingFromApi, allPreviews, processedIds]);
 
   const [viewMode, setViewModeState] = useState<ViewMode>("cards");
   const setViewMode = useCallback((mode: ViewMode) => {
@@ -80,6 +94,7 @@ export function DecisionsPanel() {
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [proposalViewActive, setProposalViewActive] = useState(false);
 
   const onDecisionProcessed = useCallback(
     (
@@ -95,8 +110,9 @@ export function DecisionsPanel() {
         timestamp: Date.now(),
         ...(extra?.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
       });
+      refetchPending();
     },
-    [addProcessed]
+    [addProcessed, refetchPending]
   );
 
   const allRows = useMemo(() => {
@@ -124,8 +140,8 @@ export function DecisionsPanel() {
     [processed, selectedId]
   );
 
-  const hasAny = pending.length > 0 || processed.length > 0;
-  const emptyMessage = !isLoading && pending.length === 0 && processed.length === 0;
+  const _hasAny = pending.length > 0 || processed.length > 0;
+  const emptyMessage = !isLoading && !pendingApiLoading && pending.length === 0 && processed.length === 0;
 
   return (
     <div className="flex flex-col h-full min-h-0 p-6">
@@ -172,7 +188,7 @@ export function DecisionsPanel() {
         </div>
       </div>
 
-      {isLoading ? (
+      {isLoading || pendingApiLoading ? (
         <div className="flex flex-1 items-center justify-center min-h-[200px]">
           <div className="text-center max-w-md text-muted-foreground text-sm">
             Loading decisions…
@@ -226,7 +242,10 @@ export function DecisionsPanel() {
                           )}
                           onClick={() => {
                             if (viewMode === "hybrid") setExpandedId((id) => (id === row.id ? null : row.id));
-                            if (viewMode === "split") setSelectedId((id) => (id === row.id ? null : row.id));
+                            if (viewMode === "split") {
+                              setSelectedId((id) => (id === row.id ? null : row.id));
+                              setProposalViewActive(false);
+                            }
                             if (viewMode === "table" && row.status === "pending" && "item" in row) {
                               setSelectedId(row.id);
                               setViewMode("split");
@@ -336,17 +355,44 @@ export function DecisionsPanel() {
                   )}
                 </div>
               ) : (
-                <div className="flex-1 min-h-0 overflow-y-auto border rounded-lg bg-card p-4">
-                  {selectedItem ? (
-                    <ApprovalCard
-                      item={selectedItem}
-                      stream={stream}
-                      onDecisionProcessed={onDecisionProcessed}
-                    />
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden border rounded-lg bg-card">
+                  {proposalViewActive && selectedItem ? (
+                    <>
+                      <div className="shrink-0 flex items-center gap-2 border-b px-4 py-2 bg-muted/30">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => setProposalViewActive(false)}
+                        >
+                          <ArrowLeft className="h-3.5 w-3.5" />
+                          Back to decision
+                        </Button>
+                        <span className="text-sm font-medium truncate">{selectedItem.title}</span>
+                      </div>
+                      <div className="flex-1 min-h-0 p-4 overflow-hidden">
+                        <FullProposalContent
+                          title={selectedItem.title}
+                          proposalType={selectedItem.type}
+                          previewData={selectedItem.data?.preview_data as Record<string, unknown> | undefined}
+                        />
+                      </div>
+                    </>
+                  ) : selectedItem ? (
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                      <ApprovalCard
+                        item={selectedItem}
+                        stream={stream}
+                        onDecisionProcessed={onDecisionProcessed}
+                        onViewFullProposal={() => setProposalViewActive(true)}
+                      />
+                    </div>
                   ) : selectedProcessed ? (
-                    <ProcessedRow decision={selectedProcessed} threadId={threadId} />
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                      <ProcessedRow decision={selectedProcessed} threadId={threadId} />
+                    </div>
                   ) : (
-                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
                       Select a row to see details
                     </div>
                   )}

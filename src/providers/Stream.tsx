@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- file exports provider + useStreamContext */
 "use client";
 
 import React, {
@@ -86,6 +87,10 @@ type StreamContextType = UseStream<StateType, {
   workbenchRefreshKey?: number;
   triggerWorkbenchRefresh?: () => void;
   apiUrl: string;
+  /** Proposals from upload when proposals_injected=false (not in thread state); show in Decisions panel. */
+  orphanProposals: Array<{ id: string; raw: Record<string, unknown> }>;
+  setOrphanProposalsFromUpload: (response: { proposals?: unknown[]; proposals_injected?: boolean }) => void;
+  removeOrphanProposal: (id: string) => void;
 };
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
@@ -393,6 +398,24 @@ const StreamSession = ({
     setWorkbenchRefreshKey((k) => k + 1);
   }, []);
 
+  // Orphan proposals: from upload when proposals_injected=false; show in Decisions panel until approved/rejected.
+  const [orphanProposals, setOrphanProposals] = useState<Array<{ id: string; raw: Record<string, unknown> }>>([]);
+  const setOrphanProposalsFromUpload = useCallback(
+    (response: { proposals?: unknown[]; proposals_injected?: boolean }) => {
+      if (response.proposals_injected === false && Array.isArray(response.proposals) && response.proposals.length > 0) {
+        const withIds = response.proposals.map((p: any, i: number) => ({
+          id: `orphan-${p?.tool_call_id ?? `upload-${i}`}`,
+          raw: p as Record<string, unknown>,
+        }));
+        setOrphanProposals((prev) => [...prev, ...withIds]);
+      }
+    },
+    []
+  );
+  const removeOrphanProposal = useCallback((id: string) => {
+    setOrphanProposals((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
   // Dynamic Proxy Wrapper
   // This ensure ANY access to the context always gets the latest hook state 
   // but with forced null-safety for problematic fields.
@@ -408,6 +431,9 @@ const StreamSession = ({
         if (prop === "setActiveAgentDebug") return setActiveAgentDebug;
         if (prop === "workbenchRefreshKey") return workbenchRefreshKey;
         if (prop === "triggerWorkbenchRefresh") return triggerWorkbenchRefresh;
+        if (prop === "orphanProposals") return orphanProposals;
+        if (prop === "setOrphanProposalsFromUpload") return setOrphanProposalsFromUpload;
+        if (prop === "removeOrphanProposal") return removeOrphanProposal;
         if (prop === "threadId") return threadId ?? (rawStream as any)?.[prop];
 
         // Safety check: if rawStream itself is null, provide safe defaults
@@ -460,7 +486,8 @@ const StreamSession = ({
         return value;
       }
     });
-  }, [rawStream, apiKey, apiUrl, threadId, orgContext, valuesOverlay, workbenchRefreshKey, triggerWorkbenchRefresh, refetchThreadState]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- setters/updateState stable, omitting avoids re-create
+  }, [rawStream, apiKey, apiUrl, threadId, orgContext, valuesOverlay, workbenchRefreshKey, triggerWorkbenchRefresh, refetchThreadState, orphanProposals, setOrphanProposalsFromUpload, removeOrphanProposal]);
 
   useEffect(() => {
     // For relative paths (like /api), check via /api/info endpoint

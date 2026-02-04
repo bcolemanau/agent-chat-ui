@@ -1,7 +1,7 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef, useState, FormEvent } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState, FormEvent } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
@@ -24,25 +24,16 @@ import {
   PanelRightClose,
   XIcon,
   Plus,
-  Sparkles,
   SquarePen,
-  Fingerprint,
   LayoutDashboard,
 } from "lucide-react";
-import { useQueryState, parseAsBoolean, useQueryStates } from "nuqs";
+import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
-import { GitHubSVG } from "../icons/github";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import {
@@ -126,9 +117,11 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   const {
     messages = [],
     isLoading,
-    setApiKey,
+    setApiKey: _setApiKey,
     apiUrl = "http://localhost:8080",
   } = stream;
+  // Use stream's threadId when URL hasn't updated yet so upload sends thread_id and backend can inject proposals.
+  const effectiveThreadIdForUpload = (stream as { threadId?: string | null })?.threadId ?? threadId ?? undefined;
   const {
     contentBlocks,
     setContentBlocks,
@@ -140,22 +133,24 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     uploadFolder,
     dropRef,
     removeBlock,
-    removeDocument,
+    removeDocument: _removeDocument,
     resetBlocks: _resetBlocks,
     dragOver,
     handlePaste,
-  } = useFileUpload({ apiUrl, threadId });
+  } = useFileUpload({ apiUrl, threadId: effectiveThreadIdForUpload });
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const [processedArtifactIds, setProcessedArtifactIds] = useState<Set<string>>(new Set());
   
   // Use URL query params for pending artifacts (shared with workbench)
-  const [pendingArtifactIds, setPendingArtifactIds] = useQueryState<string[]>("pendingArtifacts", {
+  const [_pendingArtifactIds, _setPendingArtifactIds] = useQueryState<string[]>("pendingArtifacts", {
     parse: (value) => value ? value.split(",").filter(Boolean) : [],
     serialize: (value) => value && value.length > 0 ? value.join(",") : "",
     defaultValue: []
   });
 
   // Trigger enrichment approval when new documents are uploaded (Issue #12)
+  // Backend injects proposals into thread state; refetch so Decisions panel sees them without a full page refresh.
+  // When new uploads are detected, also submit a message so the project configurator is signaled that the file(s) are there.
   useEffect(() => {
     if (uploadedDocuments.length === 0) return;
 
@@ -164,6 +159,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
       .filter((id): id is string => !!id && !processedArtifactIds.has(id));
 
     if (newArtifactIds.length > 0) {
+      console.log("[Thread] ENTER effect: post-upload submit", { newArtifactIdsCount: newArtifactIds.length, effectiveThreadId: effectiveThreadIdForUpload });
       // Mark as processed
       setProcessedArtifactIds((prev) => {
         const updated = new Set(prev);
@@ -171,14 +167,53 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
         return updated;
       });
 
-      // Switch to decisions view in workbench
-      // The proposals will appear automatically via the stream injection from the backend
+      // Switch to decisions view so user sees new proposals after refetch
       stream.setWorkbenchView("decisions").catch(console.error);
+
+      // Signal to project configurator that documents are there: submit a minimal message with pending_document_ids
+      const n = uploadedDocuments.length;
+      const uploadMessage: Message = {
+        id: uuidv4(),
+        type: "human",
+        content: [
+          {
+            type: "text",
+            text: n === 1
+              ? "I've uploaded a document."
+              : `I've uploaded ${n} documents.`,
+          },
+        ],
+      };
+      const orgContext = typeof window !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+      const context: Record<string, unknown> = {
+        ...(orgContext ? { user_id: orgContext } : {}),
+        pending_document_ids: uploadedDocuments.map((d) => d.document_id),
+      };
+      (stream as any).submit(
+        { messages: [uploadMessage], context },
+        {
+          streamMode: ["values"],
+          streamSubgraphs: true,
+          streamResumable: true,
+        }
+      );
+      console.log("[Thread] EXIT effect: post-upload submit SUCCESS", { pending_document_ids: context.pending_document_ids });
+
+      // Refetch thread state so stream messages include backend-injected proposals (enrichment, link)
+      const refetch = (stream as any).refetchThreadState;
+      const triggerRefresh = (stream as any).triggerWorkbenchRefresh;
+      if (typeof refetch === "function") {
+        const t = setTimeout(() => {
+          refetch().catch((e: unknown) => console.warn("[Thread] refetch after upload failed:", e));
+          if (typeof triggerRefresh === "function") triggerRefresh();
+        }, 600);
+        return () => clearTimeout(t);
+      }
     }
-  }, [uploadedDocuments, processedArtifactIds]);
+  }, [uploadedDocuments, processedArtifactIds, stream]);
 
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-  const safeMessages = messages ?? [];
+  const safeMessages = useMemo(() => messages ?? [], [messages]);
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -219,6 +254,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   }, [stream.error]);
 
   const prevMessageLength = useRef(0);
+  // safeMessages is stable via useMemo; exhaustive-deps prefers listing it
   useEffect(() => {
     if (
       safeMessages.length !== prevMessageLength.current &&
@@ -252,8 +288,12 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     console.log("[Thread] uploadFolder result:", result);
 
     if (result && result.successful > 0) {
-      // Switch to decisions view in workbench
-      // The proposals will appear automatically via the stream injection from the backend
+      // Refetch thread state so Decisions panel sees backend-injected proposals without full page refresh
+      const refetch = (stream as any).refetchThreadState;
+      if (typeof refetch === "function") {
+        setTimeout(() => refetch().catch((e: unknown) => console.warn("[Thread] refetch after folder upload failed:", e)), 600);
+      }
+      (stream as any).triggerWorkbenchRefresh?.();
       stream.setWorkbenchView("decisions").catch(console.error);
     }
 

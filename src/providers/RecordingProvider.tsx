@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- file exports provider + useRecording */
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useRef } from "react";

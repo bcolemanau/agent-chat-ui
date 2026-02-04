@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { FileText, Upload, CheckCircle2, Circle, Search, Filter, ArrowUpDown, ArrowUp, ArrowDown, PanelRightClose, PanelRightOpen, ChevronRight, ChevronLeft } from "lucide-react";
+import { FileText, CheckCircle2, Circle, Search, Filter, ArrowUp, ArrowDown, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,7 @@ interface ArtifactsListViewProps {
   selectedNode?: Node | null;
 }
 
-type ArtifactStatus = "base" | "enriched" | "uploaded";
+type ArtifactStatus = "base" | "draft" | "enriched" | "uploaded";
 type SortField = "name" | "section" | "type" | "status";
 type SortDirection = "asc" | "desc";
 
@@ -43,17 +43,23 @@ function determineArtifactStatus(node: Node): { status: ArtifactStatus; hasDetai
   const nodeId = node.id;
   const metadata = node.metadata || {};
   const artifactId = metadata.artifact_id;
-  
+  const isDraft = !!metadata.draft;
+
+  // Pending proposal (from Decisions): not yet applied
+  if (isDraft || nodeId.startsWith("draft-")) {
+    return { status: "draft", hasDetails: false };
+  }
+
+  // Has details if artifact_id exists (linked to saved content)
+  const hasDetails = !!artifactId;
+
   // Check if it's a base artifact (ART-{number})
   const isBaseArtifact = /^ART-\d+$/.test(nodeId);
-  
+
   // Check if it's a custom uploaded artifact (ART-{non-numeric} or UUID)
   const isCustomArtifact = nodeId.startsWith("ART-") && !/^ART-\d+$/.test(nodeId);
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nodeId);
-  
-  // Has details if artifact_id exists (linked to uploaded content)
-  const hasDetails = !!artifactId;
-  
+
   if (isBaseArtifact) {
     return {
       status: hasDetails ? "enriched" : "base",
@@ -65,12 +71,8 @@ function determineArtifactStatus(node: Node): { status: ArtifactStatus; hasDetai
       hasDetails: true
     };
   }
-  
-  // Default to base if we can't determine
-  return {
-    status: "base",
-    hasDetails: false
-  };
+
+  return { status: "base", hasDetails: false };
 }
 
 /**
@@ -101,7 +103,7 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
   });
   
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ArtifactStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<ArtifactStatus | "accepted" | "all">("all");
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   
@@ -186,9 +188,13 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
       );
     }
 
-    // Status filter
+    // Status filter (accepted = enriched or uploaded)
     if (statusFilter !== "all") {
-      filtered = filtered.filter(artifact => artifact.status === statusFilter);
+      if (statusFilter === "accepted") {
+        filtered = filtered.filter(artifact => artifact.status === "enriched" || artifact.status === "uploaded");
+      } else {
+        filtered = filtered.filter(artifact => artifact.status === statusFilter);
+      }
     }
 
     // Sort
@@ -236,8 +242,15 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
 
   const getStatusBadge = (artifact: ArtifactWithStatus) => {
     const baseClass = "text-[10px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1";
-    
+
     switch (artifact.status) {
+      case "draft":
+        return (
+          <span className={cn(baseClass, "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20")}>
+            <Circle className="w-2.5 h-2.5" />
+            Draft
+          </span>
+        );
       case "base":
         return (
           <span className={cn(baseClass, "bg-blue-500/10 text-blue-500 border border-blue-500/20")}>
@@ -246,17 +259,11 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
           </span>
         );
       case "enriched":
+      case "uploaded":
         return (
           <span className={cn(baseClass, "bg-green-500/10 text-green-500 border border-green-500/20")}>
             <CheckCircle2 className="w-2.5 h-2.5" />
-            Enriched
-          </span>
-        );
-      case "uploaded":
-        return (
-          <span className={cn(baseClass, "bg-purple-500/10 text-purple-500 border border-purple-500/20")}>
-            <Upload className="w-2.5 h-2.5" />
-            Uploaded
+            Accepted
           </span>
         );
     }
@@ -326,6 +333,23 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
                   onClick={() => setStatusFilter("uploaded")}
                 >
                   Uploaded
+                </Button>
+                <Button
+                  variant={statusFilter === "draft" ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setStatusFilter("draft")}
+                >
+                  Draft
+                </Button>
+                <Button
+                  variant={statusFilter === "accepted" ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setStatusFilter("accepted")}
+                  title="Saved from proposal (enriched or uploaded)"
+                >
+                  Accepted
                 </Button>
               </div>
             </div>

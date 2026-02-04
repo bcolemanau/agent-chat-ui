@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- file exports ArtifactProvider + hooks */
 "use client";
 
 import {

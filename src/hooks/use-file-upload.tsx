@@ -39,10 +39,18 @@ export interface FolderUploadResult {
   failed: number;
 }
 
+/** Response from upload when backend returns proposals but did not inject (e.g. thread_id missing). */
+export interface UploadProposalsResponse {
+  proposals?: unknown[];
+  proposals_injected?: boolean;
+}
+
 interface UseFileUploadOptions {
   initialBlocks?: ContentBlock.Multimodal.Data[];
   apiUrl?: string;
   threadId?: string | null;
+  /** Called when an upload completes with proposals; if proposals_injected is false, frontend can show orphans in Decisions panel. */
+  onDocumentUploadComplete?: (response: UploadProposalsResponse) => void;
 }
 
 /**
@@ -129,6 +137,7 @@ export function useFileUpload({
   initialBlocks = [],
   apiUrl = "http://localhost:8080",
   threadId = null,
+  onDocumentUploadComplete,
 }: UseFileUploadOptions = {}) {
   const { data: session } = useSession();
   // Separate images (content blocks) from PDFs (documents)
@@ -164,8 +173,12 @@ export function useFileUpload({
       
       const formData = new FormData();
       formData.append("file", file);
+      // Send thread_id when available so backend can inject enrichment/link proposals into thread state.
       if (threadId) {
         formData.append("thread_id", threadId);
+        console.log("[FileUpload] Sending thread_id for proposal injection:", threadId);
+      } else {
+        console.warn("[FileUpload] No thread_id — backend will not inject proposals; decisions will only show if frontend surfaces orphan proposals from response.");
       }
 
       // Build authentication headers
@@ -235,16 +248,24 @@ export function useFileUpload({
         throw new Error(errorData.error || errorData.detail || `Upload failed: ${response.statusText}`);
       }
 
-      const result: DocumentUploadResult = await response.json();
+      const result = (await response.json()) as DocumentUploadResult & UploadProposalsResponse;
       // Support both document_id and artifact_id (Issue #12)
       if (result.artifact_id && !result.document_id) {
         result.document_id = result.artifact_id;
       }
-      
+      // When proposals_injected is false, frontend can show proposals from response in Decisions panel
+      if (onDocumentUploadComplete && (result.proposals != null || result.proposals_injected != null)) {
+        onDocumentUploadComplete({
+          proposals: result.proposals,
+          proposals_injected: result.proposals_injected,
+        });
+      }
       console.log("[FileUpload] ✅ Upload successful:", {
         document_id: result.document_id,
         artifact_id: result.artifact_id,
-        filename: result.filename
+        filename: result.filename,
+        proposals_injected: result.proposals_injected,
+        proposals_count: Array.isArray(result.proposals) ? result.proposals.length : 0,
       });
       console.log("[FileUpload] ===== uploadDocument END =====");
       
@@ -601,6 +622,7 @@ export function useFileUpload({
       window.removeEventListener("dragover", handleWindowDragOver);
       dragCounter.current = 0;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- isDuplicate/uploadDocument intentionally omitted to avoid re-binding
   }, [contentBlocks]);
 
   const removeBlock = (idx: number) => {

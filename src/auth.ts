@@ -124,7 +124,7 @@ export const authOptions: NextAuthOptions = {
                         } else {
                             shouldRefresh = true;
                         }
-                    } catch (e) {
+                    } catch {
                         shouldRefresh = true;
                     }
                 }

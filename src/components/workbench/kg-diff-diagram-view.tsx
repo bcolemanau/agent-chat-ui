@@ -3,9 +3,7 @@
 import React from "react";
 import {
   KgDiffPayload,
-  KgDiffNode,
   KgDiffEdge,
-  KgDiffSummary,
   KgDiffChangeType,
 } from "@/lib/diff-types";
 import { cn } from "@/lib/utils";

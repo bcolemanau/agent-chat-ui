@@ -30,6 +30,8 @@ export interface EnrichmentProposal {
     extracted_category: string;
     extracted_title: string;
     artifact_types: string[];
+    /** Base artifact types from upload inference (links to base artifacts in enrichment cycle) */
+    base_artifact_types?: string[];
     key_concepts: string[];
     relationships: string[];
     summary: string;
@@ -66,7 +68,7 @@ export function EnrichmentView() {
   const [selectedTypes, setSelectedTypes] = useState<
     Map<string, string[]>
   >(new Map());
-  const [loading, setLoading] = useState(false);
+  const [_loading, _setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
   const [threadId] = useQueryState("threadId");
@@ -120,6 +122,7 @@ export function EnrichmentView() {
     if (pendingArtifactIds.length === 0) return;
 
     const fetchProposals = async () => {
+      console.log("[EnrichmentView] ENTER fetchProposals", { pendingArtifactIds, threadId });
       setFetching(true);
       const newProposals = new Map<string, EnrichmentProposal>();
       const newSelectedTypes = new Map<string, string[]>();
@@ -194,8 +197,9 @@ export function EnrichmentView() {
 
         setProposals(newProposals);
         setSelectedTypes(newSelectedTypes);
+        console.log("[EnrichmentView] EXIT fetchProposals: SUCCESS", { proposalsCount: newProposals.size });
       } catch (error) {
-        console.error("[Enrichment] Failed to fetch proposals:", error);
+        console.error("[EnrichmentView] EXIT fetchProposals: ERROR", error);
         toast.error("Failed to load enrichment proposals");
       } finally {
         setFetching(false);
@@ -203,6 +207,7 @@ export function EnrichmentView() {
     };
 
     fetchProposals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- apiUrl derived from rawApiUrl, stable
   }, [pendingArtifactIds, session, rawApiUrl, threadId]);
 
   const handleTypeToggle = (artifactId: string, type: string) => {
@@ -671,6 +676,11 @@ function renderEnrichmentDiff(diff: any): React.ReactNode {
           <div className="font-medium mb-2">{metadata.rightLabel || "Proposed Enrichment"}</div>
           {diff.right && (
             <div className="space-y-1">
+              {(diff.right.base_artifact_types?.length ?? 0) > 0 && (
+                <div className="text-muted-foreground text-xs">
+                  Links to base artifacts: {diff.right.base_artifact_types.join(", ")}
+                </div>
+              )}
               {diff.right.artifact_types?.length > 0 && (
                 <div className="text-green-600 dark:text-green-400 font-medium">
                   Types: {diff.right.artifact_types.join(", ")}

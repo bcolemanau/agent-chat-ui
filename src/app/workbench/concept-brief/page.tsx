@@ -8,7 +8,7 @@ import type { ConceptBriefDiffView as ConceptBriefDiffViewType } from "@/lib/dif
 export default function ConceptBriefPage() {
   const stream = useStreamContext();
   const [diffData, setDiffData] = useState<ConceptBriefDiffViewType | undefined>();
-  const [previewData, setPreviewData] = useState<Record<string, unknown> | undefined>();
+  const [previewData, _setPreviewData] = useState<Record<string, unknown> | undefined>();
 
   useEffect(() => {
     let interrupts: unknown = null;

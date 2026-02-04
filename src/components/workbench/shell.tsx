@@ -6,10 +6,9 @@ import { useRouter, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { UserMenu } from "@/components/thread/user-menu";
 import { Breadcrumbs } from "./breadcrumbs";
-import { OrgSwitcher } from "./org-switcher";
 import { useStreamContext } from "@/providers/Stream";
 import { Thread } from "@/components/thread";
-import { MessageSquare, Map as MapIcon, Activity, X, PanelRight, Sparkles, Circle, Download, Minus, Maximize2, Settings } from "lucide-react";
+import { MessageSquare, Map as MapIcon, Activity, X, Sparkles, Circle, Download, Minus, Maximize2, Settings } from "lucide-react";
 import { useRecording } from "@/providers/RecordingProvider";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -17,10 +16,9 @@ import { useQueryState } from "nuqs";
 import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "@/components/thread/artifact";
-import { PanelLeft, FileText, Layout, GitGraph, CheckSquare } from "lucide-react";
+import { PanelLeft, FileText, Layout, CheckSquare } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductPanel } from "@/components/product-panel/ProductPanel";
-import { useUnifiedPreviews } from "./hooks/use-unified-previews";
 import { useApprovalCount } from "./hooks/use-approval-count";
 import { DecisionsPanel } from "./decisions-panel";
 
@@ -142,6 +140,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 router.push(workbenchHref("/workbench/hydration"));
             }
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workbenchHref stable per threadId
     }, [stream, router]);
 
     useEffect(() => {
@@ -174,6 +173,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 router.push(workbenchHref("/workbench/hydration"));
             }
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workbenchHref stable per threadId
     }, [workbenchView, setViewMode, closeArtifact, router]);
     
     // Issue #14: Auto-routing to Decisions view when new approvals arrive
@@ -190,6 +190,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         }
         
         lastApprovalCount.current = approvalCount;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workbenchHref stable per threadId
     }, [approvalCount, router]);
 
     // Normalize legacy workflow view to map (workflow tab removed)
@@ -224,6 +225,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 router.push(workbenchHref(`/workbench/map?view=${viewMode}`));
             }
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workbenchHref stable per threadId
     }, [pathname, viewMode, router]);
 
     // Fix: If on /workbench/hydration but user selected Decisions, navigate to /workbench/decisions
@@ -232,6 +234,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             console.log(`[WorkbenchShell] On hydration route but viewMode is decisions, navigating to /workbench/decisions`);
             router.push(workbenchHref("/workbench/decisions"));
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workbenchHref stable per threadId
     }, [pathname, viewMode, router]);
 
     // Handle panel resizing (now horizontal for right panel)

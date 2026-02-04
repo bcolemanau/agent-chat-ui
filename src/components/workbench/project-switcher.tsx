@@ -28,10 +28,10 @@ function formatProjectLabel(project: Project): string {
 }
 
 export function ProjectSwitcher() {
-    const { data: session } = useSession();
+    const { data: _session } = useSession();
     const [projects, setProjects] = React.useState<Project[]>([]);
     const [threadId, setThreadId] = useQueryState("threadId");
-    const [loading, setLoading] = React.useState(false);
+    const [_loading, setLoading] = React.useState(false);
 
     const fetchProjects = React.useCallback(async () => {
         try {

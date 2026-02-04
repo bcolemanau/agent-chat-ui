@@ -2,7 +2,7 @@
 
 import { SemanticDiff, HydrationDiffData, ContextFile } from "@/lib/diff-types";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle2, Circle, AlertCircle } from "lucide-react";
+import { CheckCircle2, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ProgressionDiffRendererProps {

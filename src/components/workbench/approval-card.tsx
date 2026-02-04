@@ -6,11 +6,12 @@ import { useQueryState } from "nuqs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, XCircle, Edit, LoaderCircle } from "lucide-react";
+import { CheckCircle2, XCircle, Edit, LoaderCircle, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UnifiedPreviewItem } from "./hooks/use-unified-previews";
 import { toast } from "sonner";
 import { contentRendererRegistry } from "./content-renderers";
+import { FullProposalModal } from "./full-proposal-modal";
 import "./content-renderers/diff-renderer";
 
 interface ApprovalCardProps {
@@ -22,6 +23,8 @@ interface ApprovalCardProps {
     status: "approved" | "rejected",
     extra?: { kg_version_sha?: string }
   ) => void;
+  /** When provided, "View full proposal" opens the proposal in the parent's detail pane instead of a modal. */
+  onViewFullProposal?: () => void;
 }
 
 /** Resolve threadId to project id so decisions GET/POST use id, not name. */
@@ -66,7 +69,8 @@ async function persistDecision(
   item: UnifiedPreviewItem,
   status: "approved" | "rejected",
   threadId: string | undefined,
-  extra: { option_index?: number; artifact_id?: string; kg_version_sha?: string } = {}
+  extra: { option_index?: number; artifact_id?: string; kg_version_sha?: string } = {},
+  stream?: { values?: { workflow_run_id?: string } }
 ): Promise<void> {
   try {
     const projectId = await resolveThreadIdToProjectId(threadId) ?? threadId ?? "default";
@@ -80,6 +84,7 @@ async function persistDecision(
             kg_version: (args as any).kg_version,
           }
         : undefined;
+    const workflow_run_id = (stream as any)?.values?.workflow_run_id ?? undefined;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
     if (orgContext) headers["X-Organization-Context"] = orgContext;
@@ -99,6 +104,7 @@ async function persistDecision(
           artifact_id: extra.artifact_id,
           args: { cache_key: args.cache_key, trigger_id: args.trigger_id },
           ...(extra.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
+          ...(workflow_run_id != null && workflow_run_id !== "" ? { workflow_run_id } : {}),
         },
       }),
     });
@@ -107,11 +113,27 @@ async function persistDecision(
   }
 }
 
-export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCardProps) {
+const ARTIFACT_PROPOSAL_TYPES_WITH_FULL_CONTENT = [
+  "generate_requirements_proposal",
+  "generate_architecture_proposal",
+  "generate_design_proposal",
+] as const;
+
+function hasFullProposalContent(item: UnifiedPreviewItem): boolean {
+  const pd = item.data?.preview_data as Record<string, unknown> | undefined;
+  if (!pd) return false;
+  return (
+    ARTIFACT_PROPOSAL_TYPES_WITH_FULL_CONTENT.includes(item.type as (typeof ARTIFACT_PROPOSAL_TYPES_WITH_FULL_CONTENT)[number]) &&
+    (pd.requirements_data != null || pd.architecture_data != null || pd.design_data != null)
+  );
+}
+
+export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProposal }: ApprovalCardProps) {
   const router = useRouter();
   const [threadIdFromUrl] = useQueryState("threadId");
   const [status, setStatus] = useState<"pending" | "processing" | "approved" | "rejected">(item.status);
   const [isLoading, setIsLoading] = useState(false);
+  const [showFullProposal, setShowFullProposal] = useState(false);
 
   const handleDecision = async (decisionType: "approve" | "reject" | "edit") => {
     setIsLoading(true);
@@ -122,7 +144,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
-        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined);
+        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined, {}, stream);
         toast.info("Classification not applied");
         setIsLoading(false);
         return;
@@ -142,6 +164,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
               thread_id: threadId,
               reasoning: item.data?.args?.reasoning,
               confidence: item.data?.args?.confidence,
+              decision_id: item.id,
             }),
           });
           if (!res.ok) {
@@ -153,9 +176,9 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           // Link decision to KG version so Decisions panel can show KG diff and Map can navigate by decision
           const kg_version_sha = await fetchLatestKgVersionSha(threadId);
           onDecisionProcessed?.(item, "approved", { kg_version_sha });
-          await persistDecision(item, "approved", threadId, { kg_version_sha });
-          toast.success("Begin Enriching", {
-            description: "Classification applied. You can now work with the Enrichment agent.",
+          await persistDecision(item, "approved", threadId, { kg_version_sha }, stream);
+          toast.success("Approved", {
+            description: "Classification applied.",
           });
           if (typeof (stream as any).updateState === "function") {
             const values: Record<string, unknown> = {};
@@ -193,7 +216,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
-        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined);
+        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined, {}, stream);
         toast.info("Hydration completion not applied");
         setIsLoading(false);
         return;
@@ -222,7 +245,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           const data = await res.json();
           setStatus("approved");
           onDecisionProcessed?.(item, "approved");
-          await persistDecision(item, "approved", threadId);
+          await persistDecision(item, "approved", threadId, {}, stream);
           toast.success("Hydration Complete", {
             description: "Transitioning to Concept phase. The Concept agent will now help generate Concept Briefs.",
           });
@@ -262,7 +285,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
-        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined);
+        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined, {}, stream);
         toast.info("Artifact link not applied");
         setIsLoading(false);
         return;
@@ -281,6 +304,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
               artifact_type: item.data?.args?.artifact_type ?? item.data?.preview_data?.artifact_type,
               thread_id: threadId,
               trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
+              decision_id: item.id,
             }),
           });
           if (!res.ok) {
@@ -289,8 +313,9 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           }
           const data = await res.json();
           setStatus("approved");
-          onDecisionProcessed?.(item, "approved");
-          await persistDecision(item, "approved", threadId);
+          const kg_version_sha = (data as any).kg_version_sha;
+          onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
+          await persistDecision(item, "approved", threadId, { ...(kg_version_sha != null ? { kg_version_sha } : {}) }, stream);
           toast.success("Artifact Linked", {
             description: `Successfully linked ${data.filename || "artifact"} to ${data.artifact_type || "KG"}`,
           });
@@ -335,7 +360,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           }
           setStatus("rejected");
           onDecisionProcessed?.(item, "rejected");
-          await persistDecision(item, "rejected", threadId);
+          await persistDecision(item, "rejected", threadId, {}, stream);
           toast.info("Enrichment rejected");
         } catch (error: any) {
           console.error("[ApprovalCard] Error rejecting enrichment:", error);
@@ -360,6 +385,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
               body: JSON.stringify({
                 artifact_types: Array.isArray(artifactTypes) ? artifactTypes : [artifactTypes],
                 thread_id: threadId,
+                decision_id: item.id,
               }),
             }
           );
@@ -367,9 +393,11 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
             const err = await res.json().catch(() => ({ detail: res.statusText }));
             throw new Error((err as any).detail || "Failed to apply enrichment");
           }
+          const data = await res.json();
           setStatus("approved");
-          onDecisionProcessed?.(item, "approved");
-          await persistDecision(item, "approved", threadId);
+          const kg_version_sha = (data as any).kg_version_sha;
+          onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
+          await persistDecision(item, "approved", threadId, { ...(kg_version_sha != null ? { kg_version_sha } : {}) }, stream);
           toast.success("Enrichment applied", {
             description: "Metadata and artifact types have been saved.",
           });
@@ -406,7 +434,9 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
         await persistDecision(
           item,
           "rejected",
-          item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined
+          item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined,
+          {},
+          stream
         );
         toast.info("Proposal rejected");
         setIsLoading(false);
@@ -431,15 +461,30 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
+          // Send proposal_data from preview so backend can add Architecture/Requirements/Design entity nodes
+          // when cache is missed (e.g. proxy process, Redis down) — fixes history compare showing 0 entity nodes.
+          const pd = item.data?.preview_data as Record<string, unknown> | undefined;
+          const proposalPayload: Record<string, unknown> = {
+            cache_key: cacheKey,
+            option_index: typeof optionIndex === "number" ? optionIndex : -1,
+            thread_id: threadId,
+            artifact_type: artifactType,
+            decision_id: item.id,
+          };
+          if (pd?.architecture_data != null) {
+            proposalPayload.proposal_data = { architecture_data: pd.architecture_data };
+            if (pd.kg_updates != null) proposalPayload.proposal_kg_updates = pd.kg_updates as Record<string, unknown>;
+          } else if (pd?.requirements_data != null) {
+            proposalPayload.proposal_data = { requirements_data: pd.requirements_data };
+            if (pd.kg_updates != null) proposalPayload.proposal_kg_updates = pd.kg_updates as Record<string, unknown>;
+          } else if (pd?.design_data != null) {
+            proposalPayload.proposal_data = { design_data: pd.design_data };
+            if (pd.kg_updates != null) proposalPayload.proposal_kg_updates = pd.kg_updates as Record<string, unknown>;
+          }
           const res = await fetch("/api/artifact/apply", {
             method: "POST",
             headers,
-            body: JSON.stringify({
-              cache_key: cacheKey,
-              option_index: typeof optionIndex === "number" ? optionIndex : -1,
-              thread_id: threadId,
-              artifact_type: artifactType,
-            }),
+            body: JSON.stringify(proposalPayload),
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -447,12 +492,14 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
           }
           const data = await res.json();
           setStatus("approved");
-          onDecisionProcessed?.(item, "approved");
+          const kg_version_sha = (data as any).kg_version_sha;
+          onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
           const effectiveOptionIndex = typeof optionIndex === "number" ? optionIndex : -1;
           await persistDecision(item, "approved", threadId, {
             option_index: effectiveOptionIndex >= 0 ? effectiveOptionIndex : undefined,
             artifact_id: (data as any).artifact_id,
-          });
+            ...(kg_version_sha != null ? { kg_version_sha } : {}),
+          }, stream);
           toast.success("Artifact applied", {
             description: `Saved ${artifactType.replace(/_/g, " ")}.`,
           });
@@ -540,6 +587,30 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
       </CardHeader>
       
       <CardContent className="space-y-4">
+        {/* View full proposal — for requirements/architecture/design (concept has "View full draft" per option in diff view) */}
+        {hasFullProposalContent(item) && (
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => (onViewFullProposal ? onViewFullProposal() : setShowFullProposal(true))}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              View full proposal
+            </Button>
+          </div>
+        )}
+        {!onViewFullProposal && (
+          <FullProposalModal
+            open={showFullProposal}
+            onOpenChange={setShowFullProposal}
+            title={item.title}
+            proposalType={item.type}
+            previewData={item.data?.preview_data as Record<string, unknown> | undefined}
+          />
+        )}
         {/* Diff Preview — Concept Brief / UX Brief: no inner scroll so Decisions panel scroll shows all options */}
         {(item.data.diff || item.data.preview_data?.diff) && (
           <div
@@ -568,7 +639,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed }: ApprovalCard
               className="flex-1"
             >
               <CheckCircle2 className="h-4 w-4 mr-2" />
-              {item.type === "classify_intent" ? "Begin Enriching" : "Approve"}
+              Approve
             </Button>
             <Button
               onClick={() => handleDecision("reject")}

@@ -25,7 +25,7 @@ export function ProjectConfigurationDiffView({
   isLoading = false,
 }: ProjectConfigurationDiffViewProps) {
   const [activeTab, setActiveTab] = useState<"progress" | "remaining">("progress");
-  const stream = useStreamContext();
+  const _stream = useStreamContext();
   const [threadId] = useQueryState("threadId");
 
   // If no diffData provided, show empty state; when threadId is present offer links so context helps

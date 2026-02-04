@@ -115,6 +115,7 @@ export function ConceptBriefDiffView({
     setDraftLoading(false);
     setDraftContent(summaryFallback != null ? { content: summaryFallback, content_type: "text" } : null);
     return () => {};
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- draftViewState intentionally partial to avoid re-run loops
   }, [draftViewState.artifactId, draftViewState.optionIndex, draftViewState.summaryFallback, draftViewState.cacheKey, threadId]);
 
   if (!diffData) {

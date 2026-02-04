@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     let session = null;
     try {
       session = await getServerSession(authOptions);
-    } catch (authError) {
+    } catch {
       // Auth is optional for /info endpoint
       console.debug("[API] /info - No session available (this is OK for health checks)");
     }
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
           // Truncate HTML responses to avoid log spam
           errorText = text.length > 200 ? text.substring(0, 200) + "..." : text;
         }
-      } catch (parseError) {
+      } catch {
         errorText = `Backend returned ${resp.status} ${resp.statusText}`;
       }
       console.error(`[API] /info backend error: ${resp.status} - ${typeof errorText === 'string' ? errorText : JSON.stringify(errorText)}`);

@@ -80,7 +80,7 @@ export function EnrichmentApproval({
   const [selectedTypes, setSelectedTypes] = useState<
     Map<string, string[]>
   >(new Map());
-  const [loading, setLoading] = useState(false);
+  const [_loading, _setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
   const [lastApprovalResult, setLastApprovalResult] = useState<{ result: ApproveEnrichmentResult } | null>(null);
@@ -193,6 +193,8 @@ export function EnrichmentApproval({
     };
 
     fetchProposals();
+    // triggerEnrichment is stable; including it can cause unnecessary re-fetches
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, artifactIds, threadId, apiUrl, session]);
 
   const triggerEnrichment = async (

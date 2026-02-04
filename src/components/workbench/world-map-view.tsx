@@ -2,14 +2,16 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitGraph, FileText, GitCompare } from 'lucide-react';
+import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitCompare, Filter } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
 import { useQueryState } from 'nuqs';
+import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { KG_DIFF_COLORS } from '@/lib/diff-types';
 import { NodeDetailPanel } from './node-detail-panel';
 import { ArtifactsListView } from './artifacts-list-view';
+import { useUnifiedPreviews } from './hooks/use-unified-previews';
 import { KgDiffDiagramView } from './kg-diff-diagram-view';
 
 interface Node extends d3.SimulationNodeDatum {
@@ -49,6 +51,50 @@ const typeConfig: Record<string, { color: string; label: string }> = {
     CRIT: { color: '#f43f5e', label: 'Risk' },
 };
 
+/** Color legend for nodes and edges; optionally includes diff colors when in compare mode. */
+function MapColorLegend({ showDiffColors = false }: { showDiffColors?: boolean }) {
+    return (
+        <div className="px-3 py-2 bg-background/90 backdrop-blur-md border border-border rounded-lg shadow-lg min-w-[160px]">
+            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Legend</div>
+            <div className="space-y-1.5 text-[10px]">
+                <div className="font-medium text-foreground/80 mb-1">Nodes</div>
+                {Object.entries(typeConfig).map(([type, { color, label }]) => (
+                    <div key={type} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} title={label} />
+                        <span className="text-muted-foreground">{label}</span>
+                    </div>
+                ))}
+                {showDiffColors && (
+                    <>
+                        <div className="font-medium text-foreground/80 mt-2 mb-1">Diff</div>
+                        <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: KG_DIFF_COLORS.added }} />
+                            <span className="text-muted-foreground">Added</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: KG_DIFF_COLORS.modified }} />
+                            <span className="text-muted-foreground">Modified</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: KG_DIFF_COLORS.removed }} />
+                            <span className="text-muted-foreground">Removed</span>
+                        </div>
+                    </>
+                )}
+                <div className="font-medium text-foreground/80 mt-2 mb-1">Edges</div>
+                <div className="flex items-center gap-2">
+                    <span className="w-4 h-0.5 rounded shrink-0 bg-[#888]" />
+                    <span className="text-muted-foreground">Link</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className="w-4 h-0.5 rounded shrink-0 border-t-2 border-dashed border-[#94a3b8]" />
+                    <span className="text-muted-foreground">Anchor</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export function WorldMapView() {
     const stream = useStreamContext();
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
@@ -65,8 +111,8 @@ export function WorldMapView() {
     const [threadId] = useQueryState("threadId");
 
     const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
-    const [kgDecisions, setKgDecisions] = useState<{ id: string; type: string; title: string; kg_version_sha?: string }[]>([]);
-    const [historyOpen, setHistoryOpen] = useState(false);
+    const [kgDecisions, setKgDecisions] = useState<{ id: string; type: string; title: string; status?: string; kg_version_sha?: string }[]>([]);
+    const [_historyOpen, _setHistoryOpen] = useState(false);
 
     const [showHistory, setShowHistory] = useState(false);
     const [activeVersion, setActiveVersion] = useState<string | null>(null);
@@ -78,6 +124,33 @@ export function WorldMapView() {
     const [loadingDiff, setLoadingDiff] = useState(false);
     /** When in compare mode: 'graph' = force-directed map with diff colors; 'diff' = KgDiffDiagramView (list by change type). Harmonized with KG_DIFF_CONTRACT. */
     const [compareViewMode, setCompareViewMode] = useState<'graph' | 'diff'>('graph');
+    /** "Agent View" filter: show risks covered/uncovered (from traceability engine); filter map to CRIT nodes when on. */
+    const [agentContextFilter, setAgentContextFilter] = useState(false);
+    const [threadSummary, setThreadSummary] = useState<{
+        summary: string;
+        covered_crit_ids: string[];
+        uncovered_crit_ids: string[];
+        crit_labels: Record<string, string>;
+    } | null>(null);
+    const [loadingThreadSummary, setLoadingThreadSummary] = useState(false);
+
+    const unifiedPreviews = useUnifiedPreviews();
+    const draftArtifactNodes = useMemo(() => {
+        const artifactTypes = new Set([
+            'generate_concept_brief',
+            'generate_requirements_proposal',
+            'generate_architecture_proposal',
+            'generate_design_proposal',
+        ]);
+        return unifiedPreviews
+            .filter((p) => p.status === 'pending' && artifactTypes.has(p.type))
+            .map((p) => ({
+                id: `draft-${p.id}`,
+                name: p.title,
+                type: 'ARTIFACT',
+                metadata: { draft: true, artifact_types: [p.type.replace('generate_', '').replace('_proposal', '').replace('_brief', '')], artifact_id: undefined },
+            })) as Node[];
+    }, [unifiedPreviews]);
 
     // Note: Workflow workbench view removed; version/orientation is in global header. Artifact history and content fetching is handled by NodeDetailPanel.
 
@@ -221,21 +294,62 @@ export function WorldMapView() {
             return;
         }
         fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchData/fetchKgHistory intentionally omitted to avoid re-run loops
     }, [threadId, workbenchRefreshKey, activeVersion, filteredKg, compareMode, diffData]);
 
     // After "Begin Enriching" we update thread state with current_trigger_id; refetch version list so the new commit shows.
     const currentTriggerId = (stream as any)?.values?.current_trigger_id;
     useEffect(() => {
         if (threadId && currentTriggerId) fetchKgHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgHistory stable
     }, [threadId, currentTriggerId]);
 
     // Load decisions when we have history so we can show which decision produced each version
     useEffect(() => {
         if (threadId && kgHistory) fetchKgDecisions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgDecisions stable
     }, [threadId, kgHistory]);
+
+    // Fetch thread summary when "Agent context" filter is on (for World Map filter)
+    useEffect(() => {
+        if (!agentContextFilter || !threadId) {
+            if (!agentContextFilter) setThreadSummary(null);
+            return;
+        }
+        let cancelled = false;
+        setLoadingThreadSummary(true);
+        const headers: Record<string, string> = {};
+        const orgContext = typeof localStorage !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+        if (orgContext) headers['X-Organization-Context'] = orgContext;
+        fetch(`/api/thread-summary?thread_id=${encodeURIComponent(threadId)}`, { headers })
+            .then((res) => (res.ok ? res.json() : { summary: '', covered_crit_ids: [], uncovered_crit_ids: [], crit_labels: {} }))
+            .then((payload) => {
+                if (!cancelled) setThreadSummary({
+                    summary: payload.summary ?? '',
+                    covered_crit_ids: payload.covered_crit_ids ?? [],
+                    uncovered_crit_ids: payload.uncovered_crit_ids ?? [],
+                    crit_labels: payload.crit_labels ?? {},
+                });
+            })
+            .catch(() => {
+                if (!cancelled) setThreadSummary({ summary: '', covered_crit_ids: [], uncovered_crit_ids: [], crit_labels: {} });
+            })
+            .finally(() => {
+                if (!cancelled) setLoadingThreadSummary(false);
+            });
+        return () => { cancelled = true; };
+    }, [agentContextFilter, threadId]);
+
+    // After workbench refresh (e.g. after applying a proposal), refetch decisions so artifact list can hide applied drafts
+    useEffect(() => {
+        if (threadId && workbenchRefreshKey > 0) fetchKgDecisions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgDecisions stable
+    }, [threadId, workbenchRefreshKey]);
 
     useEffect(() => {
         if (!data || !svgRef.current || !containerRef.current) return;
+
+        const svgElForCleanup = svgRef.current;
 
         // Single prominent log so you can filter console by "WorldMapView" and ignore 404/Stream noise
         const hasDiff = !!(diffData?.diff?.nodes?.length && (diffData?.diff?.links?.length ?? diffData?.diff?.edges?.length));
@@ -301,6 +415,24 @@ export function WorldMapView() {
         } else {
             nodes = data.nodes.map(d => ({ ...d }));
             links = data.links.map((d: Link) => ({ ...d }));
+        }
+
+        // "Agent View" filter: show only CRIT nodes (risks) — covered + uncovered from traceability engine
+        if (agentContextFilter && threadSummary) {
+            const critIds = new Set([
+                ...(threadSummary.covered_crit_ids ?? []),
+                ...(threadSummary.uncovered_crit_ids ?? []),
+            ]);
+            if (critIds.size > 0) {
+                nodes = nodes.filter((n: Node) => critIds.has(n.id));
+                links = links.filter((link: Link) => {
+                    const rawSource = typeof link.source === 'string' ? link.source : (link.source as Node)?.id;
+                    const rawTarget = typeof link.target === 'string' ? link.target : (link.target as Node)?.id;
+                    const src = rawSource != null ? String(rawSource) : '';
+                    const tgt = rawTarget != null ? String(rawTarget) : '';
+                    return critIds.has(src) && critIds.has(tgt);
+                });
+            }
         }
 
         // If we have diff data but didn't use diff payload (e.g. no edges), merge diff_status into nodes for coloring.
@@ -551,7 +683,7 @@ export function WorldMapView() {
         if (diffData) {
             const added = nodes.filter((n: Node) => (n as any).diff_status === 'added');
             const summaryFromApi = diffData.summary ?? (diffData.diff as any)?.summary ?? {};
-            const allEndpointIds = allEndpointIdsFromResolved;
+            const _allEndpointIds = allEndpointIdsFromResolved;
             const orphans = orphanNodeIds;
             const linkSample = links.slice(0, 8).map((l: Link) => ({
                 source: typeof l.source === 'string' ? l.source : (l.source as Node)?.id,
@@ -756,18 +888,17 @@ export function WorldMapView() {
         return () => {
             simulationRef.current?.stop();
             simulationRef.current = null;
-            const el = svgRef.current;
-            if (el && el.parentNode) {
+            if (svgElForCleanup && svgElForCleanup.parentNode) {
                 try {
                     // Clear SVG with a single DOM write to avoid removeChild errors when
                     // React and D3 disagree (e.g. on project switch / unmount).
-                    el.innerHTML = '';
-                } catch (_) {
+                    svgElForCleanup.innerHTML = '';
+                } catch {
                     // Ignore if already detached or other DOM errors
                 }
             }
         };
-    }, [data, viewMode, inactiveOpacity, diffData, selectedNode, compareViewMode]);
+    }, [data, viewMode, inactiveOpacity, diffData, selectedNode, compareViewMode, agentContextFilter, threadSummary]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -818,23 +949,31 @@ export function WorldMapView() {
         return () => clearTimeout(timeoutId);
     }, [selectedNode, data]);
 
-    // Artifacts View Component
+    // Approved decision ids: hide draft nodes for proposals that were already applied
+    const approvedDecisionIds = useMemo(
+        () => new Set((kgDecisions || []).filter((d) => d.status === 'approved').map((d) => d.id)),
+        [kgDecisions]
+    );
+    const draftsToShow = useMemo(
+        () => draftArtifactNodes.filter((n: Node) => !approvedDecisionIds.has(n.id.replace(/^draft-/, ''))),
+        [draftArtifactNodes, approvedDecisionIds]
+    );
+
+    // Artifacts View Component: KG artifacts (accepted) + pending proposals (draft) — exclude drafts that were applied
     const ArtifactsView = () => {
-        const artifacts = data?.nodes.filter(n => n.type === 'ARTIFACT') || [];
-        
-        // Enrich artifacts with metadata from KG nodes
-        const enrichedArtifacts = artifacts.map(artifact => {
-            // Find the node in data to get full metadata
+        const kgArtifacts = data?.nodes.filter(n => n.type === 'ARTIFACT') || [];
+        const enrichedKg = kgArtifacts.map(artifact => {
             const fullNode = data?.nodes.find(n => n.id === artifact.id);
             return {
                 ...artifact,
                 metadata: fullNode?.metadata || artifact.metadata || {}
             };
         });
+        const artifacts = [...draftsToShow, ...enrichedKg];
 
         return (
             <ArtifactsListView
-                artifacts={enrichedArtifacts}
+                artifacts={artifacts}
                 threadId={threadId}
                 onNodeSelect={setSelectedNode}
                 selectedNode={selectedNode}
@@ -884,6 +1023,24 @@ export function WorldMapView() {
                         </>
                     )}
                     <div className="h-4 w-px bg-border ml-2" />
+                    {threadId && (
+                        <UIButton
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                                "flex items-center gap-2 px-2.5 py-1 border rounded-md transition-colors",
+                                agentContextFilter ? "bg-amber-500/20 border-amber-500/40" : "bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/20"
+                            )}
+                            onClick={() => setAgentContextFilter(!agentContextFilter)}
+                            disabled={loadingThreadSummary}
+                            title="Show risks: covered by upstream artifacts vs uncovered (from traceability engine)"
+                        >
+                            <Filter className="h-3 w-3 text-amber-500" />
+                            <span className="text-[10px] font-bold text-amber-500 tracking-wider">
+                                {loadingThreadSummary ? "…" : agentContextFilter ? "Agent context on" : "Agent context"}
+                            </span>
+                        </UIButton>
+                    )}
                     <div className="flex items-center gap-2 px-2">
                         <label className="text-[10px] text-muted-foreground whitespace-nowrap">Inactive Opacity:</label>
                         <input
@@ -1164,6 +1321,26 @@ export function WorldMapView() {
                                 <Globe className="w-3.5 h-3.5 text-muted-foreground" />
                                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Graph Mode</span>
                             </div>
+                            {agentContextFilter && threadSummary && (
+                                <div className="px-3 py-2 bg-background/90 backdrop-blur-md border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto min-w-[200px]">
+                                    <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1.5">Agent View — Risks</div>
+                                    <div className="text-[10px] text-green-600 dark:text-green-400 font-medium">Covered ({threadSummary.covered_crit_ids?.length ?? 0})</div>
+                                    <ul className="text-[10px] text-muted-foreground list-disc pl-4 mb-2">
+                                        {(threadSummary.covered_crit_ids ?? []).slice(0, 8).map((id) => (
+                                            <li key={id}>{threadSummary.crit_labels?.[id] ?? id}</li>
+                                        ))}
+                                        {(threadSummary.covered_crit_ids?.length ?? 0) > 8 && <li>… and {(threadSummary.covered_crit_ids?.length ?? 0) - 8} more</li>}
+                                    </ul>
+                                    <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">Uncovered ({threadSummary.uncovered_crit_ids?.length ?? 0})</div>
+                                    <ul className="text-[10px] text-muted-foreground list-disc pl-4">
+                                        {(threadSummary.uncovered_crit_ids ?? []).slice(0, 8).map((id) => (
+                                            <li key={id}>{threadSummary.crit_labels?.[id] ?? id}</li>
+                                        ))}
+                                            {(threadSummary.uncovered_crit_ids?.length ?? 0) > 8 && <li>… and {(threadSummary.uncovered_crit_ids?.length ?? 0) - 8} more</li>}
+                                        </ul>
+                                    </div>
+                                )}
+                            <MapColorLegend showDiffColors={!!(compareMode && diffData?.diff?.type === 'kg_diff')} />
                             {diffData?.diff?.type === "kg_diff" && (
                                 <div className="flex flex-col gap-2">
                                     <div className="flex items-center gap-2 px-2">
@@ -1259,11 +1436,31 @@ export function WorldMapView() {
 
                             <svg ref={svgRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
 
-                            <div className="absolute bottom-6 left-6 z-20">
+                            <div className="absolute bottom-6 left-6 z-20 flex flex-col gap-2">
                                 <div className="flex items-center gap-2 px-3 py-1.5 bg-background/80 backdrop-blur-md border border-border rounded-full shadow-lg">
                                     <Globe className="w-3.5 h-3.5 text-muted-foreground" />
                                     <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Graph Mode</span>
                                 </div>
+                                {agentContextFilter && threadSummary && (
+                                    <div className="px-3 py-2 bg-background/90 backdrop-blur-md border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto min-w-[200px]">
+                                        <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1.5">Agent View — Risks</div>
+                                        <div className="text-[10px] text-green-600 dark:text-green-400 font-medium">Covered ({threadSummary.covered_crit_ids?.length ?? 0})</div>
+                                        <ul className="text-[10px] text-muted-foreground list-disc pl-4 mb-2">
+                                            {(threadSummary.covered_crit_ids ?? []).slice(0, 8).map((id) => (
+                                                <li key={id}>{threadSummary.crit_labels?.[id] ?? id}</li>
+                                            ))}
+                                            {(threadSummary.covered_crit_ids?.length ?? 0) > 8 && <li>… and {(threadSummary.covered_crit_ids?.length ?? 0) - 8} more</li>}
+                                        </ul>
+                                        <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">Uncovered ({threadSummary.uncovered_crit_ids?.length ?? 0})</div>
+                                        <ul className="text-[10px] text-muted-foreground list-disc pl-4">
+                                            {(threadSummary.uncovered_crit_ids ?? []).slice(0, 8).map((id) => (
+                                                <li key={id}>{threadSummary.crit_labels?.[id] ?? id}</li>
+                                            ))}
+                                            {(threadSummary.uncovered_crit_ids?.length ?? 0) > 8 && <li>… and {(threadSummary.uncovered_crit_ids?.length ?? 0) - 8} more</li>}
+                                        </ul>
+                                    </div>
+                                )}
+                                <MapColorLegend />
                             </div>
                         </>
                     )}

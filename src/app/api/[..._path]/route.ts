@@ -42,7 +42,7 @@ async function proxyRequest(req: NextRequest, method: string) {
           sessionToken = session.user.idToken;
           console.log("[PROXY] Middleware: Injected Google auth token from session");
         }
-      } catch (authError) {
+      } catch {
         // Auth is optional for some endpoints
         console.debug("[PROXY] Middleware: No session available");
       }

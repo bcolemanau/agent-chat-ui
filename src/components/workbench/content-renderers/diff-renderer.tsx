@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- file exports component + metadata */
 "use client";
 
 import { ReactNode } from "react";
@@ -94,6 +95,7 @@ export class DiffRenderer implements ContentRenderer {
     if (!diff) return null;
 
     const type = diff.type as "progression" | "similarity" | "subset" | "kg_diff" | undefined;
+    console.log("[DiffRenderer] ENTER render", { type, proposalType, hasBaseArtifactTypes: !!(diff as any).right?.base_artifact_types?.length });
     const traceabilityBlock =
       previewData?.impact_forecast || previewData?.coverage_analysis ? (
         <TraceabilityPreviewBlock previewData={previewData} />
@@ -145,6 +147,14 @@ export class DiffRenderer implements ContentRenderer {
                   <div className="font-medium mb-1">{meta.rightLabel || "Proposed"}</div>
                   {diff.right && (
                     <div className="space-y-1">
+                      {(() => {
+                        const baseTypes = (diff.right as { base_artifact_types?: string[] }).base_artifact_types;
+                        return baseTypes && baseTypes.length > 0 ? (
+                          <div className="text-muted-foreground text-xs">
+                            Links to base artifacts: {baseTypes.join(", ")}
+                          </div>
+                        ) : null;
+                      })()}
                       {diff.right.artifact_types?.length > 0 && (
                         <div className="text-green-600 dark:text-green-400">
                           Types: {diff.right.artifact_types.join(", ")}
@@ -281,6 +291,7 @@ export class DiffRenderer implements ContentRenderer {
         </div>
       );
     }
+    console.log("[DiffRenderer] EXIT render: SUCCESS", { type, proposalType });
     return (
       <>
         {traceabilityBlock}

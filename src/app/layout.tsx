@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- layout exports metadata + component */
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";

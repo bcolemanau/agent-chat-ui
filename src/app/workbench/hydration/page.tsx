@@ -8,7 +8,7 @@ import { ProjectConfigurationDiffView as ProjectConfigurationDiffViewType } from
 
 export default function HydrationPage() {
   const stream = useStreamContext();
-  const [threadId] = useQueryState("threadId");
+  const [_threadId] = useQueryState("threadId");
   const [diffData, setDiffData] = useState<ProjectConfigurationDiffViewType | undefined>();
 
   // Try to get diff data from stream context (from HITL proposal)
@@ -33,8 +33,8 @@ export default function HydrationPage() {
       try {
         interrupts = (stream as any).getInterrupt();
         console.log("[HydrationPage] Found interrupt via getInterrupt()");
-      } catch (e) {
-        console.log("[HydrationPage] getInterrupt() failed:", e);
+      } catch {
+        console.log("[HydrationPage] getInterrupt() failed");
       }
     }
     // Method 3: In values
@@ -105,11 +105,13 @@ export default function HydrationPage() {
             setDiffData(parsed);
           }
         }
-      } catch (e) {
+      } catch {
         // Ignore
       }
     }
-  }, [stream]); // Remove diffData from dependencies to avoid infinite loop
+  // diffData intentionally omitted to avoid infinite loop when setDiffData runs
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream]);
 
   const handleApprove = async () => {
     // Submit approval to resolve interrupt

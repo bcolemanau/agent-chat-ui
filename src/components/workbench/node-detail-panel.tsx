@@ -43,7 +43,7 @@ export function NodeDetailPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [artifactHistory, setArtifactHistory] = useState<any[] | null>(null);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [_loadingHistory, setLoadingHistory] = useState(false);
   const [historicalContent, setHistoricalContent] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
 
