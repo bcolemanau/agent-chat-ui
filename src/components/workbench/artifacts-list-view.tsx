@@ -177,14 +177,14 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
   const filteredAndSorted = useMemo(() => {
     let filtered = enrichedArtifacts;
 
-    // Search filter
+    // Search filter (guard against undefined name/artifactTypes/section)
     if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+      const query = (searchQuery ?? "").toLowerCase();
       filtered = filtered.filter(artifact =>
-        artifact.name.toLowerCase().includes(query) ||
-        artifact.description?.toLowerCase().includes(query) ||
-        artifact.artifactTypes?.some(t => t.toLowerCase().includes(query)) ||
-        artifact.section?.toLowerCase().includes(query)
+        (artifact.name ?? "").toLowerCase().includes(query) ||
+        (artifact.description ?? "").toLowerCase().includes(query) ||
+        (artifact.artifactTypes ?? []).some(t => (t ?? "").toLowerCase().includes(query)) ||
+        (artifact.section ?? "").toLowerCase().includes(query)
       );
     }
 

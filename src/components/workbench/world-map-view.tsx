@@ -982,7 +982,10 @@ export function WorldMapView() {
             <ArtifactsListView
                 artifacts={artifacts}
                 threadId={threadId}
-                onNodeSelect={setSelectedNode}
+                onNodeSelect={(node) => {
+                    setSelectedNode(node);
+                    if (node) setSearchQuery(''); // Clear search when selecting from list; selection stays
+                }}
                 selectedNode={selectedNode}
             />
         );

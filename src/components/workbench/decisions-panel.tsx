@@ -41,6 +41,8 @@ function getTypeLabel(type: string): string {
     generate_requirements_proposal: "Requirements",
     generate_architecture_proposal: "Architecture",
     generate_design_proposal: "Design",
+    generate_manufacturing_ops_proposal: "Manufacturing Ops (Hardware)",
+    generate_software_ops_proposal: "Software Ops (Digital)",
     approve_enrichment: "Enrichment",
     enrichment: "Enrichment",
     link_uploaded_document: "Link Artifact",

@@ -51,7 +51,7 @@ export function filterGraphBySearch<N extends GraphNodeLike, L extends GraphLink
   links: L[],
   searchQuery: string
 ): { nodes: N[]; links: L[] } {
-  const query = searchQuery.trim().toLowerCase();
+  const query = (searchQuery ?? "").trim().toLowerCase();
   if (!query) {
     return { nodes: [...nodes], links: [...links] };
   }

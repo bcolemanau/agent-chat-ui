@@ -12,6 +12,7 @@ import {
   KgDiffPayload,
 } from "@/lib/diff-types";
 import { AlertCircle, ArrowRight, ShieldCheck, ShieldAlert } from "lucide-react";
+import { MarkdownText } from "@/components/thread/markdown-text";
 
 export interface DiffRendererMetadata {
   diff: any;
@@ -93,6 +94,15 @@ export class DiffRenderer implements ContentRenderer {
   render(content: string, metadata?: Record<string, any>): ReactNode {
     const { diff, previewData, threadId, proposalType } = (metadata || {}) as DiffRendererMetadata;
     if (!diff) return null;
+
+    // Operations (manufacturing_ops, software_ops) and other tools may return diff as markdown string
+    if (typeof diff === "string") {
+      return (
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          <MarkdownText>{diff}</MarkdownText>
+        </div>
+      );
+    }
 
     const type = diff.type as "progression" | "similarity" | "subset" | "kg_diff" | undefined;
     console.log("[DiffRenderer] ENTER render", { type, proposalType, hasBaseArtifactTypes: !!(diff as any).right?.base_artifact_types?.length });

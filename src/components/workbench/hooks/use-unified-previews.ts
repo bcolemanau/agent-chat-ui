@@ -123,6 +123,10 @@ function getPreviewTitle(toolName: string, request: any): string {
       return `Update user: ${request.args?.user_email || request.preview_data?.user_email || "Unknown"} in ${request.args?.org_id || request.preview_data?.org_id || "org"}`;
     case "propose_user_remove":
       return `Remove user: ${request.args?.user_email || request.preview_data?.user_email || "Unknown"} from ${request.args?.org_id || request.preview_data?.org_id || "org"}`;
+    case "generate_manufacturing_ops_proposal":
+      return `Manufacturing Ops: ${request.args?.artifact_type || request.preview_data?.artifact_type || "runbook"}`;
+    case "generate_software_ops_proposal":
+      return `Software Ops: ${request.args?.artifact_type || request.preview_data?.artifact_type || "ops"}`;
     default:
       return request.summary || request.description || `${toolName} Approval`;
   }
