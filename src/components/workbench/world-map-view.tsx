@@ -13,6 +13,7 @@ import { NodeDetailPanel } from './node-detail-panel';
 import { ArtifactsListView } from './artifacts-list-view';
 import { useUnifiedPreviews } from './hooks/use-unified-previews';
 import { KgDiffDiagramView } from './kg-diff-diagram-view';
+import { filterGraphBySearch } from '@/lib/graph-search-filter';
 
 interface Node extends d3.SimulationNodeDatum {
     id: string;
@@ -124,6 +125,7 @@ export function WorldMapView() {
     const [loadingDiff, setLoadingDiff] = useState(false);
     /** When in compare mode: 'graph' = force-directed map with diff colors; 'diff' = KgDiffDiagramView (list by change type). Harmonized with KG_DIFF_CONTRACT. */
     const [compareViewMode, setCompareViewMode] = useState<'graph' | 'diff'>('graph');
+    const [searchQuery, setSearchQuery] = useState('');
     /** "Agent View" filter: show risks covered/uncovered (from traceability engine); filter map to CRIT nodes when on. */
     const [agentContextFilter, setAgentContextFilter] = useState(false);
     const [threadSummary, setThreadSummary] = useState<{
@@ -434,6 +436,11 @@ export function WorldMapView() {
                 });
             }
         }
+
+        // Search filter: show only nodes matching query (and links between them)
+        const searchResult = filterGraphBySearch(nodes, links, searchQuery);
+        nodes = searchResult.nodes;
+        links = searchResult.links;
 
         // If we have diff data but didn't use diff payload (e.g. no edges), merge diff_status into nodes for coloring.
         if (diffData && diffData.diff && diffData.diff.nodes && !useDiffPayload) {
@@ -898,7 +905,7 @@ export function WorldMapView() {
                 }
             }
         };
-    }, [data, viewMode, inactiveOpacity, diffData, selectedNode, compareViewMode, agentContextFilter, threadSummary]);
+    }, [data, viewMode, inactiveOpacity, diffData, selectedNode, compareViewMode, searchQuery, agentContextFilter, threadSummary]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -1076,9 +1083,11 @@ export function WorldMapView() {
                         </div>
                     )}
                     <div className="relative">
-                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                         <input
                             placeholder="Search nodes..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                             className="bg-muted border border-border rounded-md py-1 pl-8 pr-3 text-xs focus:outline-none focus:border-primary/50 transition-all w-48 text-foreground"
                         />
                     </div>
