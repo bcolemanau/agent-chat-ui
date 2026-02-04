@@ -20,6 +20,12 @@ import { toast } from "sonner";
 interface Organization {
     id: string;
     name: string;
+    workflow_id?: string;
+}
+
+interface WorkflowOption {
+    id: string;
+    name: string;
 }
 
 interface Role {
@@ -56,7 +62,8 @@ export function OrganizationManagement() {
     const [isBrandingDialogOpen, setIsBrandingDialogOpen] = useState(false);
     const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
     const [editingBranding, setEditingBranding] = useState<{ orgId: string; branding: Branding | null } | null>(null);
-    const [formData, setFormData] = useState({ id: "", name: "" });
+    const [formData, setFormData] = useState({ id: "", name: "", workflow_id: "default" });
+    const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
     const [brandingFormData, setBrandingFormData] = useState<Branding>({
         name: "",
         brand_title: "",
@@ -78,6 +85,18 @@ export function OrganizationManagement() {
     useEffect(() => {
         loadData();
     }, []);
+
+    const loadWorkflows = async () => {
+        try {
+            const resp = await fetch("/api/auth/workflows");
+            if (resp.ok) {
+                const data = await resp.json();
+                setWorkflows(Array.isArray(data) ? data : []);
+            }
+        } catch (e) {
+            console.warn("[ORG_MGMT] Failed to load workflows:", e);
+        }
+    };
 
     const loadRoles = async () => {
         try {
@@ -261,7 +280,7 @@ export function OrganizationManagement() {
             if (resp.ok) {
                 toast.success("Organization created successfully");
                 setIsCreateDialogOpen(false);
-                setFormData({ id: "", name: "" });
+                setFormData({ id: "", name: "", workflow_id: "default" });
                 await loadData();
                 // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
@@ -289,14 +308,14 @@ export function OrganizationManagement() {
             const resp = await fetch(`/api/organizations/${editingOrg.id}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: formData.name }),
+                body: JSON.stringify({ name: formData.name, workflow_id: formData.workflow_id || "default" }),
             });
 
             if (resp.ok) {
                 toast.success("Organization updated successfully");
                 setIsEditDialogOpen(false);
                 setEditingOrg(null);
-                setFormData({ id: "", name: "" });
+                setFormData({ id: "", name: "", workflow_id: "default" });
                 await loadData();
                 // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
@@ -341,7 +360,8 @@ export function OrganizationManagement() {
 
     const handleOpenEdit = (org: Organization) => {
         setEditingOrg(org);
-        setFormData({ id: org.id, name: org.name });
+        setFormData({ id: org.id, name: org.name, workflow_id: org.workflow_id || "default" });
+        if (workflows.length === 0) loadWorkflows();
         setIsEditDialogOpen(true);
     };
 
@@ -429,7 +449,11 @@ export function OrganizationManagement() {
                                     <Building2 className="h-5 w-5 text-muted-foreground" />
                                     <div>
                                         <CardTitle>{org.name}</CardTitle>
-                                        <CardDescription>ID: {org.id}</CardDescription>
+                                        <CardDescription>
+                                            ID: {org.id}
+                                            {" · "}
+                                            Default workflow: {org.workflow_id || "default"}
+                                        </CardDescription>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -582,6 +606,28 @@ export function OrganizationManagement() {
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             />
                         </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="create-org-workflow">Default workflow</Label>
+                            <select
+                                id="create-org-workflow"
+                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                value={formData.workflow_id}
+                                onChange={(e) => setFormData({ ...formData, workflow_id: e.target.value })}
+                            >
+                                {workflows.length === 0 ? (
+                                    <option value="default">default</option>
+                                ) : (
+                                    workflows.map((w) => (
+                                        <option key={w.id} value={w.id}>
+                                            {w.name ?? w.id}
+                                        </option>
+                                    ))
+                                )}
+                            </select>
+                            <p className="text-xs text-muted-foreground">
+                                New chat threads and projects in this org will use this workflow (e.g. digital_primary_npd for Reflexion).
+                            </p>
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -615,6 +661,34 @@ export function OrganizationManagement() {
                                 value={formData.name}
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="edit-org-workflow">Default workflow</Label>
+                            <select
+                                id="edit-org-workflow"
+                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                value={formData.workflow_id}
+                                onChange={(e) => setFormData({ ...formData, workflow_id: e.target.value })}
+                            >
+                                {workflows.length === 0 ? (
+                                    <option value="default">default</option>
+                                ) : (
+                                    <>
+                                        {workflows.map((w) => (
+                                            <option key={w.id} value={w.id}>
+                                                {w.name ?? w.id}
+                                            </option>
+                                        ))}
+                                        {formData.workflow_id &&
+                                            !workflows.some((w) => w.id === formData.workflow_id) && (
+                                                <option value={formData.workflow_id}>{formData.workflow_id}</option>
+                                            )}
+                                    </>
+                                )}
+                            </select>
+                            <p className="text-xs text-muted-foreground">
+                                New chat threads and projects in this org will use this workflow (graph).
+                            </p>
                         </div>
                     </div>
                     <DialogFooter>

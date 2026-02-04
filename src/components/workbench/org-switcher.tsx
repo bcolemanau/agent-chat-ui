@@ -22,9 +22,9 @@ export function OrgSwitcher() {
     const [selectedOrgId, setSelectedOrgId] = React.useState<string>('');
     const [loading, setLoading] = React.useState(false);
 
-    // Check if user is NewCo Admin (matching sidebar logic)
-    const userRole = session?.user?.role;
-    const isAdmin = userRole === 'reflexion_admin' || userRole === 'admin';
+    // Check if user is NewCo/Reflexion Admin (match backend: admin, newco_admin, NewCo Administrator, reflexion_admin)
+    const userRole = (session?.user?.role ?? '') as string;
+    const isAdmin = ['reflexion_admin', 'admin', 'newco_admin', 'Newco_admin', 'NewCo Administrator'].includes(userRole);
 
     const fetchOrganizations = React.useCallback(async () => {
         if (!isAdmin) return;
@@ -38,13 +38,22 @@ export function OrgSwitcher() {
 
                 // Load from local storage or fallback to current session customerId
                 const savedContext = localStorage.getItem('reflexion_org_context');
+                let effectiveOrgId = '';
                 if (savedContext && data.some((org: Organization) => org.id === savedContext)) {
-                    setSelectedOrgId(savedContext);
+                    effectiveOrgId = savedContext;
                 } else if (session?.user?.customerId && data.some((org: Organization) => org.id === session.user.customerId)) {
-                    setSelectedOrgId(session.user.customerId);
+                    effectiveOrgId = session.user.customerId;
                 } else if (data.length > 0) {
-                    // Fallback to first organization if saved context doesn't exist
-                    setSelectedOrgId(data[0].id);
+                    effectiveOrgId = data[0].id;
+                }
+                setSelectedOrgId(effectiveOrgId);
+                // Sync to localStorage so sidebar/project list use the same org on first load
+                if (effectiveOrgId && typeof window !== 'undefined') {
+                    const current = localStorage.getItem('reflexion_org_context');
+                    if (current !== effectiveOrgId) {
+                        localStorage.setItem('reflexion_org_context', effectiveOrgId);
+                        window.dispatchEvent(new CustomEvent('reflexion_org_context_changed', { detail: { orgId: effectiveOrgId } }));
+                    }
                 }
             }
         } catch (e) {
@@ -57,6 +66,18 @@ export function OrgSwitcher() {
     React.useEffect(() => {
         fetchOrganizations();
     }, [fetchOrganizations]);
+
+    // Non-admin: sync session org to localStorage on first load so project list is scoped correctly
+    React.useEffect(() => {
+        if (isAdmin || typeof session === 'undefined') return;
+        const customerId = (session?.user as { customerId?: string })?.customerId;
+        if (!customerId || typeof window === 'undefined') return;
+        const current = localStorage.getItem('reflexion_org_context');
+        if (current !== customerId) {
+            localStorage.setItem('reflexion_org_context', customerId);
+            window.dispatchEvent(new CustomEvent('reflexion_org_context_changed', { detail: { orgId: customerId } }));
+        }
+    }, [isAdmin, session?.user]);
 
     // Listen for storage events to refresh when organizations are updated in another tab
     React.useEffect(() => {
@@ -85,7 +106,29 @@ export function OrgSwitcher() {
         window.location.reload();
     };
 
-    if (!isAdmin) return null;
+    // Session still loading: show placeholder so breadcrumb slot is always visible on startup
+    if (typeof session === 'undefined' || session === null) {
+        return (
+            <div className="flex items-center gap-2 w-[180px] h-7">
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm text-muted-foreground truncate">Organization…</span>
+            </div>
+        );
+    }
+
+    // Non-admin: show current org as read-only so breadcrumb always shows organization context
+    if (!isAdmin) {
+        const currentOrgId = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+        const displayId = currentOrgId || (session?.user as { customerId?: string })?.customerId || 'default';
+        return (
+            <div className="flex items-center gap-2 min-w-0 max-w-[200px]" title={`Organization: ${displayId}`}>
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium text-foreground truncate">
+                    {displayId === 'default' ? 'Default (default)' : displayId}
+                </span>
+            </div>
+        );
+    }
 
     if (loading && organizations.length === 0) {
         return (

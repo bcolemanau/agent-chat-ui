@@ -28,7 +28,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const { data: session, status } = useSession();
     const userRole = session?.user?.role;
-    const isAdmin = Boolean(userRole && ["reflexion_admin", "admin", "newco_admin"].includes(userRole as string));
+    const isAdmin = Boolean(userRole && ["reflexion_admin", "admin", "newco_admin", "Newco_admin", "NewCo Administrator"].includes(userRole as string));
     const { isRecording, startRecording, stopRecording, downloadRecording } = useRecording();
 
     // Robust Mode Derivation (active_mode and active_agent are synced from graph/overlay)
@@ -71,7 +71,16 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const approvalCount = useApprovalCount();
     const lastApprovalCount = useRef<number>(0);
 
+    // Org context version: bump when org switcher changes so workflow strip refetches for the selected org.
+    const [orgContextVersion, setOrgContextVersion] = useState(0);
+    useEffect(() => {
+        const onOrgContextChanged = () => setOrgContextVersion((v) => v + 1);
+        window.addEventListener("reflexion_org_context_changed", onOrgContextChanged);
+        return () => window.removeEventListener("reflexion_org_context_changed", onOrgContextChanged);
+    }, []);
+
     // Fetch workflow diagram for mini strip (header + workbench pane). Run when on workbench so strip is ready.
+    // Sends X-Organization-Context so backend returns the org's default workflow; refetches when org changes.
     useEffect(() => {
         const onWorkbench = pathname?.includes("/workbench");
         if (!onWorkbench) return;
@@ -79,7 +88,10 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         setWorkflowStripLoading(true);
         const params = new URLSearchParams();
         if (activeAgent) params.set("active_node", activeAgent);
-        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`)
+        const headers: Record<string, string> = {};
+        const orgContext = typeof window !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+        if (orgContext) headers["X-Organization-Context"] = orgContext;
+        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`, { headers })
             .then((r) => (r.ok ? r.json() : null))
             .then((data: WorkflowDiagramStrip | null) => {
                 if (!cancelled && data?.nodes) {
@@ -97,7 +109,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             .catch(() => { if (!cancelled) setWorkflowStrip(null); })
             .finally(() => { if (!cancelled) setWorkflowStripLoading(false); });
         return () => { cancelled = true; };
-    }, [pathname, activeAgent]);
+    }, [pathname, activeAgent, orgContextVersion]);
 
     // Nodes to show in strip and dropdown (from API); hide Administration for non-admins
     const displayNodes = useMemo(
