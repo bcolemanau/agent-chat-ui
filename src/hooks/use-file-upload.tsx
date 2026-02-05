@@ -26,6 +26,21 @@ export interface DocumentUploadResult {
   created_at: string;
 }
 
+/** Infer artifact/document type from filename for upload (so backend can create link decision with correct type). */
+function inferDocumentTypeFromFilename(filename: string): string | null {
+  const name = (filename || "").replace(/\s+/g, " ");
+  if (/ux[\s_-]?brief|ux\s*brief/i.test(name)) return "UX Brief";
+  if (/requirements?(\s+package)?|req[\s_.-]/i.test(name)) return "Requirements";
+  if (/concept[\s_-]?brief|concept\s*brief/i.test(name)) return "Concept Brief";
+  if (/\bprd\b|product\s*requirements?\s*document/i.test(name)) return "PRD";
+  if (/architecture|arch[\s_-]/i.test(name)) return "Architecture";
+  if (/\bdesign\b/i.test(name)) return "Design";
+  if (/\bsop\b|procedure|standard\s*operating/i.test(name)) return "SOP";
+  if (/test[\s_-]?plan|testplan/i.test(name)) return "Test Plan";
+  if (/user[\s_-]?guide|userguide|user_guide|manual/i.test(name)) return "User Guide";
+  return null;
+}
+
 // Folder upload result from backend (Issue #12)
 export interface FolderUploadResult {
   artifacts: Array<{
@@ -166,6 +181,11 @@ export function useFileUpload({
       formData.append("file", file);
       if (threadId) {
         formData.append("thread_id", threadId);
+      }
+      // Pass document type as text so backend can create link decision with correct artifact_type
+      const documentType = inferDocumentTypeFromFilename(file.name);
+      if (documentType) {
+        formData.append("artifact_type", documentType);
       }
 
       // Build authentication headers

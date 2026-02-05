@@ -109,6 +109,10 @@ function getPreviewTitle(toolName: string, request: any): string {
       return "Project Configuration - Ready for Concept Phase";
     case "generate_concept_brief":
       return "Concept Brief Options";
+    case "generate_ux_brief":
+      return "UX Brief Options";
+    case "generate_requirements_proposal":
+      return "Requirements Proposal";
     case "propose_enrichment":
     case "approve_enrichment":
     case "enrichment":

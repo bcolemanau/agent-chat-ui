@@ -85,6 +85,7 @@ export function WorldMapView() {
     const draftArtifactNodes = useMemo(() => {
         const artifactTypes = new Set([
             'generate_concept_brief',
+            'generate_ux_brief',
             'generate_requirements_proposal',
             'generate_architecture_proposal',
             'generate_design_proposal',

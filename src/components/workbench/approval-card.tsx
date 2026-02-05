@@ -516,7 +516,10 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       case "propose_hydration_complete":
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
       case "generate_concept_brief":
+      case "generate_ux_brief":
         return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
+      case "generate_requirements_proposal":
+        return "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200";
       case "propose_enrichment":
       case "approve_enrichment":
       case "enrichment":

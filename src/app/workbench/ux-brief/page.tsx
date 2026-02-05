@@ -2,11 +2,11 @@
 
 import { OptionsApprovalPage } from "@/components/workbench/options-approval-page";
 
-export default function ConceptBriefPage() {
+export default function UxBriefPage() {
   return (
     <OptionsApprovalPage
-      toolName="generate_concept_brief"
-      rejectMessage="Concept brief options rejected"
+      toolName="generate_ux_brief"
+      rejectMessage="UX brief options rejected"
     />
   );
 }
