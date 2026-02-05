@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
 import { useUnifiedPreviews, UnifiedPreviewItem } from "./hooks/use-unified-previews";
 import { usePendingDecisions } from "./hooks/use-pending-decisions";
@@ -8,18 +9,19 @@ import { useProcessedDecisions, ProcessedDecision } from "./hooks/use-processed-
 import { ApprovalCard } from "./approval-card";
 import { KgDiffDiagramView } from "./kg-diff-diagram-view";
 import { FullProposalContent } from "./full-proposal-modal";
+import { WorldMapView } from "./world-map-view";
 import { useStreamContext } from "@/providers/Stream";
-import { AlertCircle, LayoutGrid, Table2, Rows3, PanelRight, ArrowLeft } from "lucide-react";
+import { AlertCircle, LayoutGrid, Table2, Rows3, PanelRight, ArrowLeft, GitCompare, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const VIEW_STORAGE_KEY = "reflexion_decisions_view";
-type ViewMode = "cards" | "table" | "hybrid" | "split";
+type ViewMode = "cards" | "table" | "hybrid" | "split" | "map";
 
 function getStoredView(): ViewMode {
   if (typeof window === "undefined") return "cards";
   const v = localStorage.getItem(VIEW_STORAGE_KEY);
-  if (v === "table" || v === "hybrid" || v === "split") return v;
+  if (v === "table" || v === "hybrid" || v === "split" || v === "map") return v;
   return "cards";
 }
 
@@ -60,8 +62,14 @@ function relativeTime(ts: number): string {
 
 export function DecisionsPanel() {
   const stream = useStreamContext();
+  const router = useRouter();
   const [threadIdFromUrl] = useQueryState("threadId");
   const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+  const [versionParam, setVersionParam] = useQueryState("version"); // In map layout: selected decision's KG version → map shows that version + diff
+
+  const mapCompareHref = threadId
+    ? `/workbench/map?threadId=${encodeURIComponent(threadId)}&compare=1`
+    : "/workbench/map?compare=1";
 
   const allPreviews = useUnifiedPreviews();
   const { pending: pendingFromApi, isLoading: pendingApiLoading, refetch: refetchPending } = usePendingDecisions(threadId);
@@ -118,7 +126,7 @@ export function DecisionsPanel() {
   );
 
   const allRows = useMemo(() => {
-    const pendingRows: { id: string; type: string; title: string; status: "pending"; time: number; item?: UnifiedPreviewItem }[] = pending.map((item) => ({
+    const pendingRows: { id: string; type: string; title: string; status: "pending"; time: number; item?: UnifiedPreviewItem; kg_version_sha?: string }[] = pending.map((item) => ({
       id: item.id,
       type: item.type,
       title: item.title,
@@ -126,15 +134,26 @@ export function DecisionsPanel() {
       time: Date.now(),
       item,
     }));
-    const processedRows: { id: string; type: string; title: string; status: "approved" | "rejected"; time: number }[] = processed.map((p) => ({
+    const processedRows: { id: string; type: string; title: string; status: "approved" | "rejected"; time: number; kg_version_sha?: string }[] = processed.map((p) => ({
       id: p.id,
       type: p.type,
       title: p.title,
       status: p.status,
       time: p.timestamp,
+      kg_version_sha: p.kg_version_sha,
     }));
     return [...pendingRows, ...processedRows];
   }, [pending, processed]);
+
+  // In map layout, sync selected row from URL version (e.g. opened via "Compare on map" from a decision)
+  const prevVersionParam = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (viewMode !== "map" || !versionParam) return;
+    if (prevVersionParam.current === versionParam) return;
+    prevVersionParam.current = versionParam;
+    const row = allRows.find((r) => "kg_version_sha" in r && (r as { kg_version_sha?: string }).kg_version_sha === versionParam);
+    if (row) setSelectedId(row.id);
+  }, [viewMode, versionParam, allRows]);
 
   const selectedItem = useMemo(() => pending.find((p) => p.id === selectedId) ?? null, [pending, selectedId]);
   const selectedProcessed = useMemo(
@@ -154,39 +173,59 @@ export function DecisionsPanel() {
             Review and approve pending actions; view processed decisions below.
           </p>
         </div>
-        <div className="flex items-center gap-1 rounded-lg border bg-muted/30 p-1">
+        <div className="flex items-center gap-2">
           <Button
-            variant={viewMode === "cards" ? "secondary" : "ghost"}
+            variant="outline"
             size="sm"
-            onClick={() => setViewMode("cards")}
-            title="Cards"
+            onClick={() => router.push(mapCompareHref)}
+            title="Open map with Compare versions preselected"
+            className="gap-1.5"
           >
-            <LayoutGrid className="h-4 w-4" />
+            <GitCompare className="h-4 w-4" />
+            Compare on map
           </Button>
-          <Button
-            variant={viewMode === "table" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setViewMode("table")}
-            title="Table"
-          >
-            <Table2 className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === "hybrid" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setViewMode("hybrid")}
-            title="Hybrid (table + expand)"
-          >
-            <Rows3 className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === "split" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setViewMode("split")}
-            title="Split (table + detail)"
-          >
-            <PanelRight className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1 rounded-lg border bg-muted/30 p-1">
+            <Button
+              variant={viewMode === "cards" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("cards")}
+              title="Cards"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === "table" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("table")}
+              title="Table"
+            >
+              <Table2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === "hybrid" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("hybrid")}
+              title="Hybrid (table + expand)"
+            >
+              <Rows3 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === "split" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("split")}
+              title="Split (table + detail)"
+            >
+              <PanelRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === "map" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("map")}
+              title="Map (decisions + world map)"
+            >
+              <Globe className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -210,15 +249,15 @@ export function DecisionsPanel() {
         <div
           className={cn(
             "flex min-h-0 flex-1 gap-4",
-            viewMode === "split" && "flex-row"
+            (viewMode === "split" || viewMode === "map") && "flex-row"
           )}
         >
-          {/* Table (for table / hybrid / split) */}
-          {(viewMode === "table" || viewMode === "hybrid" || viewMode === "split") && (
+          {/* Table (for table / hybrid / split / map) */}
+          {(viewMode === "table" || viewMode === "hybrid" || viewMode === "split" || viewMode === "map") && (
             <div
               className={cn(
                 "min-h-0 flex flex-col border rounded-lg bg-card overflow-hidden",
-                viewMode === "split" ? "w-1/2 min-w-[320px] shrink-0" : "flex-1"
+                (viewMode === "split" || viewMode === "map") ? "w-1/2 min-w-[320px] shrink-0" : "flex-1"
               )}
             >
               <div className="overflow-auto flex-1 min-h-0">
@@ -239,14 +278,23 @@ export function DecisionsPanel() {
                         <tr
                           className={cn(
                             "border-b border-border/50 hover:bg-muted/30",
-                            (viewMode === "hybrid" || viewMode === "split") && "cursor-pointer",
+                            (viewMode === "hybrid" || viewMode === "split" || viewMode === "map") && "cursor-pointer",
                             (expandedId === row.id || selectedId === row.id) && "bg-muted/50"
                           )}
                           onClick={() => {
                             if (viewMode === "hybrid") setExpandedId((id) => (id === row.id ? null : row.id));
-                            if (viewMode === "split") {
+                            if (viewMode === "split" || viewMode === "map") {
+                              const isDeselecting = selectedId === row.id;
                               setSelectedId((id) => (id === row.id ? null : row.id));
                               setProposalViewActive(false);
+                              // In map layout, decision table is the timeline: set URL version so map shows that KG version + diff
+                              if (viewMode === "map") {
+                                if (isDeselecting) setVersionParam(null);
+                                else {
+                                  const sha = "kg_version_sha" in row ? (row as { kg_version_sha?: string }).kg_version_sha : undefined;
+                                  setVersionParam(sha ?? null);
+                                }
+                              }
                             }
                             if (viewMode === "table" && row.status === "pending" && "item" in row) {
                               setSelectedId(row.id);
@@ -277,7 +325,7 @@ export function DecisionsPanel() {
                           <td className="py-2 px-3 text-muted-foreground text-xs">
                             {relativeTime(row.time)}
                           </td>
-                          {(viewMode === "hybrid" || viewMode === "split") && (
+                          {(viewMode === "hybrid" || viewMode === "split" || viewMode === "map") && (
                             <td className="py-2 px-1">
                               {(expandedId === row.id || selectedId === row.id) && (
                                 <span className="text-muted-foreground text-xs">▼</span>
@@ -317,6 +365,13 @@ export function DecisionsPanel() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Map layout: decision table on the left is the timeline; map on the right shows selected version + diff */}
+          {viewMode === "map" && (
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden border rounded-lg bg-card">
+              <WorldMapView key={threadId ?? "no-thread"} embeddedInDecisions />
             </div>
           )}
 
@@ -477,6 +532,17 @@ function DecisionKgDiffView({
 }
 
 function ProcessedRow({ decision, threadId }: { decision: ProcessedDecision; threadId: string | undefined }) {
+  const router = useRouter();
+
+  const openCompareOnMap = useCallback(() => {
+    if (!threadId || !decision.kg_version_sha) return;
+    const params = new URLSearchParams({
+      threadId,
+      version: decision.kg_version_sha,
+    });
+    router.push(`/workbench/map?${params.toString()}`);
+  }, [threadId, decision.kg_version_sha, router]);
+
   return (
     <div className="rounded-lg border bg-muted/20 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 text-sm">
@@ -500,7 +566,19 @@ function ProcessedRow({ decision, threadId }: { decision: ProcessedDecision; thr
         </div>
       </div>
       {decision.kg_version_sha && threadId && (
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={openCompareOnMap}
+              title="Open map timeline with this decision selected and its diff shown"
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              Compare on map
+            </Button>
+          </div>
           <DecisionKgDiffView threadId={threadId} kgVersionSha={decision.kg_version_sha} />
         </div>
       )}

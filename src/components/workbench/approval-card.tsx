@@ -158,11 +158,12 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             method: "POST",
             headers,
             body: JSON.stringify({
+              decision_id: item.id,
               trigger_id: item.data?.args?.trigger_id,
+              project_id: threadId,
               thread_id: threadId,
               reasoning: item.data?.args?.reasoning,
               confidence: item.data?.args?.confidence,
-              decision_id: item.id,
             }),
           });
           if (!res.ok) {
@@ -171,10 +172,10 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           }
           const data = await res.json();
           setStatus("approved");
-          // Link decision to KG version so Decisions panel can show KG diff and Map can navigate by decision
-          const kg_version_sha = await fetchLatestKgVersionSha(threadId);
+          // Backend returns kg_version_sha (every decision ↔ KG update)
+          const kg_version_sha = (data as any).kg_version_sha ?? (await fetchLatestKgVersionSha(threadId));
           onDecisionProcessed?.(item, "approved", { kg_version_sha });
-          await persistDecision(item, "approved", threadId, { kg_version_sha });
+          await persistDecision(item, "approved", threadId, { ...(kg_version_sha != null ? { kg_version_sha } : {}) });
           toast.success("Approved", {
             description: "Classification applied.",
           });
@@ -229,6 +230,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             method: "POST",
             headers,
             body: JSON.stringify({
+              decision_id: item.id,
               trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
               thread_id: threadId,
               readiness_assessment: item.data?.args?.readiness_assessment ?? item.data?.preview_data?.readiness_assessment,
@@ -242,8 +244,9 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           }
           const data = await res.json();
           setStatus("approved");
-          onDecisionProcessed?.(item, "approved");
-          await persistDecision(item, "approved", threadId);
+          const kg_version_sha = (data as any).kg_version_sha;
+          onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
+          await persistDecision(item, "approved", threadId, { ...(kg_version_sha != null ? { kg_version_sha } : {}) });
           toast.success("Hydration Complete", {
             description: "Transitioning to Concept phase. The Concept agent will now help generate Concept Briefs.",
           });
@@ -298,11 +301,11 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             method: "POST",
             headers,
             body: JSON.stringify({
+              decision_id: item.id,
               artifact_id: item.data?.args?.document_id ?? item.data?.preview_data?.artifact_id,
               artifact_type: item.data?.args?.artifact_type ?? item.data?.preview_data?.artifact_type,
               thread_id: threadId,
               trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
-              decision_id: item.id,
             }),
           });
           if (!res.ok) {
@@ -461,11 +464,11 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             method: "POST",
             headers,
             body: JSON.stringify({
+              decision_id: item.id,
               cache_key: cacheKey,
               option_index: typeof optionIndex === "number" ? optionIndex : -1,
               thread_id: threadId,
               artifact_type: artifactType,
-              decision_id: item.id,
             }),
           });
           if (!res.ok) {

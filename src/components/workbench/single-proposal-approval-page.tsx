@@ -136,11 +136,11 @@ export function SingleProposalApprovalPage({
         method: "POST",
         headers,
         body: JSON.stringify({
+          decision_id: item.id,
           cache_key: cacheKey,
           option_index: -1,
           thread_id: threadId,
           artifact_type: artifactType,
-          decision_id: item.id,
         }),
       });
       if (!res.ok) {
@@ -148,6 +148,27 @@ export function SingleProposalApprovalPage({
         throw new Error((err as { detail?: string }).detail ?? "Failed to apply");
       }
       const data = (await res.json()) as Record<string, unknown>;
+      const kg_version_sha = data.kg_version_sha as string | undefined;
+      if (threadId) {
+        const postHeaders: Record<string, string> = { "Content-Type": "application/json" };
+        const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+        if (orgContext) postHeaders["X-Organization-Context"] = orgContext;
+        await fetch("/api/decisions", {
+          method: "POST",
+          headers: postHeaders,
+          body: JSON.stringify({
+            thread_id: threadId,
+            decision: {
+              id: item.id,
+              type: item.type,
+              title: item.title,
+              status: "approved",
+              args: item.args,
+              kg_version_sha: kg_version_sha ?? undefined,
+            },
+          }),
+        });
+      }
       toast.success("Proposal applied", {
         description: `Saved ${artifactType.replace(/_/g, " ")}.`,
       });

@@ -26,6 +26,7 @@ import {
   Plus,
   SquarePen,
   LayoutDashboard,
+  GitCompare,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -46,6 +47,7 @@ import { ThemeToggle } from "../theme-toggle";
 import { FolderOpen } from "lucide-react";
 
 import { UserMenu } from "./user-menu";
+import { RunComparisonModal } from "./run-comparison-modal";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -140,6 +142,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   } = useFileUpload({ apiUrl, threadId: effectiveThreadIdForUpload });
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const [processedArtifactIds, setProcessedArtifactIds] = useState<Set<string>>(new Set());
+  const [compareModalOpen, setCompareModalOpen] = useState(false);
   
   // Use URL query params for pending artifacts (shared with workbench)
   const [_pendingArtifactIds, _setPendingArtifactIds] = useQueryState<string[]>("pendingArtifacts", {
@@ -547,6 +550,17 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                     >
                       <LayoutDashboard className="size-5" />
                     </TooltipIconButton>
+                    {threadId && (
+                      <TooltipIconButton
+                        size="lg"
+                        className="p-4"
+                        tooltip="Compare runs"
+                        variant="ghost"
+                        onClick={() => setCompareModalOpen(true)}
+                      >
+                        <GitCompare className="size-5" />
+                      </TooltipIconButton>
+                    )}
                   </div>
                 )}
 
@@ -560,6 +574,11 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                   <SquarePen className="size-5" />
                 </TooltipIconButton>
               </div>
+              <RunComparisonModal
+                open={compareModalOpen}
+                onOpenChange={setCompareModalOpen}
+                threadId={threadId ?? null}
+              />
 
               <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
             </div>
