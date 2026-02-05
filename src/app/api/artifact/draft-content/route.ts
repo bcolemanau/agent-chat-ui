@@ -30,8 +30,7 @@ export async function GET(req: Request) {
 
         const threadId = searchParams.get("thread_id");
 
-        let backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
-        if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
+        const backendUrl = getBackendBaseUrl();
 
         const params = new URLSearchParams({
             cache_key: cacheKey,

@@ -1,15 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
-
-function getBackendUrl(): string {
-    const backendUrl = process.env.LANGGRAPH_API_URL;
-    if (!backendUrl) {
-        console.warn("[PROXY] LANGGRAPH_API_URL not set, using staging URL as fallback");
-        return "https://reflexion-staging.up.railway.app".replace(/\/$/, "");
-    }
-    return backendUrl.endsWith("/") ? backendUrl.slice(0, -1) : backendUrl;
-}
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(
     _req: Request,
@@ -25,7 +17,7 @@ export async function GET(
         }
 
         const { orgId } = await context.params;
-        const targetUrl = `${getBackendUrl()}/auth/organizations/${encodeURIComponent(orgId)}/users`;
+        const targetUrl = `${getBackendBaseUrl()}/auth/organizations/${encodeURIComponent(orgId)}/users`;
         const resp = await fetch(targetUrl, {
             headers: {
                 "Content-Type": "application/json",
@@ -72,7 +64,7 @@ export async function POST(
 
         const { orgId } = await context.params;
         const body = await req.json();
-        const targetUrl = `${getBackendUrl()}/auth/organizations/${encodeURIComponent(orgId)}/users`;
+        const targetUrl = `${getBackendBaseUrl()}/auth/organizations/${encodeURIComponent(orgId)}/users`;
         const resp = await fetch(targetUrl, {
             method: "POST",
             headers: {

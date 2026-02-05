@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
-
-function getBackendUrl(): string {
-    let backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
-    if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
-    return backendUrl;
-}
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(req: Request) {
     try {
@@ -17,7 +12,7 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const targetUrl = `${getBackendUrl()}/auth/branding`;
+        const targetUrl = `${getBackendBaseUrl()}/auth/branding`;
 
         const headers: Record<string, string> = {
             "Content-Type": "application/json",

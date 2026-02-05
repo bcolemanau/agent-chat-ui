@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(req: Request) {
     try {
@@ -22,10 +23,7 @@ export async function GET(req: Request) {
             );
         }
 
-        // Build the backend URL
-        let backendUrl = process.env.LANGGRAPH_API_URL || "https://reflexion-staging.up.railway.app";
-        if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
-
+        const backendUrl = getBackendBaseUrl();
         const targetUrl = `${backendUrl}/project/diff?thread_id=${threadId}&version1=${version1}&version2=${version2}`;
 
         // Extract organization context from headers

@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
-
-function getBackendUrl(): string {
-    let backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
-    if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
-    return backendUrl;
-}
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(
     req: Request,
@@ -20,7 +15,7 @@ export async function GET(
         }
 
         const { orgId } = await params;
-        const targetUrl = `${getBackendUrl()}/auth/branding/${orgId}`;
+        const targetUrl = `${getBackendBaseUrl()}/auth/branding/${orgId}`;
 
         const resp = await fetch(targetUrl, {
             headers: {
@@ -57,7 +52,7 @@ export async function POST(
 
         const { orgId } = await params;
         const body = await req.json();
-        const targetUrl = `${getBackendUrl()}/auth/branding/${orgId}`;
+        const targetUrl = `${getBackendBaseUrl()}/auth/branding/${orgId}`;
 
         const resp = await fetch(targetUrl, {
             method: "POST",
@@ -96,7 +91,7 @@ export async function PUT(
 
         const { orgId } = await params;
         const body = await req.json();
-        const targetUrl = `${getBackendUrl()}/auth/branding/${orgId}`;
+        const targetUrl = `${getBackendBaseUrl()}/auth/branding/${orgId}`;
 
         const resp = await fetch(targetUrl, {
             method: "PUT",
@@ -134,7 +129,7 @@ export async function DELETE(
         }
 
         const { orgId } = await params;
-        const targetUrl = `${getBackendUrl()}/auth/branding/${orgId}`;
+        const targetUrl = `${getBackendBaseUrl()}/auth/branding/${orgId}`;
 
         const resp = await fetch(targetUrl, {
             method: "DELETE",

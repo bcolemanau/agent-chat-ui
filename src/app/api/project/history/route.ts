@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(req: Request) {
     try {
@@ -13,8 +14,7 @@ export async function GET(req: Request) {
         const { searchParams } = new URL(req.url);
         const threadId = searchParams.get("thread_id");
 
-        let backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
-        if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
+        const backendUrl = getBackendBaseUrl();
 
         const targetUrl = threadId
             ? `${backendUrl}/project/history?thread_id=${threadId}`

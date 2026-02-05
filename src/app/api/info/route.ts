@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 /**
  * API route to proxy /info requests to the backend.
@@ -18,14 +19,7 @@ export async function GET(req: NextRequest) {
       console.debug("[API] /info - No session available (this is OK for health checks)");
     }
 
-    // In production/staging, LANGGRAPH_API_URL should be set
-    // Fallback to staging URL if not set (better than localhost)
-    let backendUrl = process.env.LANGGRAPH_API_URL;
-    if (!backendUrl) {
-        console.warn("[API] /info - LANGGRAPH_API_URL not set, using staging URL as fallback");
-        backendUrl = "https://reflexion-staging.up.railway.app";
-    }
-    const cleanUrl = backendUrl.replace(/\/+$/, "");
+    const cleanUrl = getBackendBaseUrl();
     const targetUrl = `${cleanUrl}/info`;
 
     const headers: Record<string, string> = {
