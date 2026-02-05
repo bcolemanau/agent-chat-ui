@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 
 // This file acts as a proxy for requests to your LangGraph server.
 // We use a custom implementation to ensure the client's JWT token is forwarded correctly.
@@ -42,18 +41,13 @@ async function proxyRequest(req: NextRequest, method: string) {
       publicPrefixes.some(prefix => path.startsWith(prefix)) ||
       method === "OPTIONS"; // OPTIONS preflight requests
     
-    // Middleware: Get Google auth token from NextAuth session (skip for public endpoints)
+    // Middleware: Get backend JWT from NextAuth session (skip for public endpoints)
     let sessionToken: string | null = null;
     if (!isPublicEndpoint) {
-      try {
-        const session = await getServerSession(authOptions);
-        if (session?.user?.idToken) {
-          sessionToken = session.user.idToken;
-          console.log("[PROXY] Middleware: Injected Google auth token from session");
-        }
-      } catch {
-        // Auth is optional for some endpoints
-        console.debug("[PROXY] Middleware: No session available");
+      const session = await getSessionSafe();
+      if (session?.user?.idToken) {
+        sessionToken = session.user.idToken;
+        console.log("[PROXY] Middleware: Injected JWT from session");
       }
     } else {
       console.debug(`[PROXY] Middleware: Skipping auth for public endpoint: ${path}`);

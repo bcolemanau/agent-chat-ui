@@ -1,3 +1,5 @@
+import { getServerSession } from "next-auth";
+import type { Session } from "next-auth";
 import { NextAuthOptions, DefaultSession } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import { getUserConfig, UserConfig } from "./config/users";
@@ -170,3 +172,24 @@ export const authOptions: NextAuthOptions = {
         signIn: "/",
     }
 };
+
+/**
+ * Get session without throwing on JWT decryption failure.
+ * When NEXTAUTH_SECRET (or auth secret) changes after a user has signed in, NextAuth throws
+ * JWT_SESSION_ERROR "decryption operation failed". This wrapper returns null in that case
+ * so API routes can return 401 instead of 500. User should sign in again.
+ * In deployment (e.g. Railway): set NEXTAUTH_SECRET and REFLEXION_JWT_SECRET to the same
+ * value and do not change it; if you do, existing session cookies become invalid.
+ */
+export async function getSessionSafe(): Promise<Session | null> {
+    try {
+        return await getServerSession(authOptions);
+    } catch (e) {
+        const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "";
+        if (msg.includes("decryption") || msg.includes("JWT_SESSION_ERROR") || msg.includes("JWEDecryptionFailed")) {
+            console.warn("[AUTH] Session cookie invalid (wrong or changed NEXTAUTH_SECRET). User should sign in again.");
+            return null;
+        }
+        throw e;
+    }
+}

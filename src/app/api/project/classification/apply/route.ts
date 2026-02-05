@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 /**
@@ -11,7 +10,7 @@ import { getBackendBaseUrl } from "@/lib/backend-proxy";
  */
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getSessionSafe();
 
     if (!session || !session.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

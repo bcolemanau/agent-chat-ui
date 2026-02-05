@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(req: Request) {
     try {
-        // In Next.js 15, getServerSession needs headers from the request
-        const session = await getServerSession(authOptions);
+        // getSessionSafe() avoids throwing on invalid session cookie (e.g. after NEXTAUTH_SECRET change)
+        const session = await getSessionSafe();
 
         if (!session || !session.user) {
             console.error("[PROXY] No session found for organizations request");
@@ -58,7 +57,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionSafe();
 
         if (!session || !session.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

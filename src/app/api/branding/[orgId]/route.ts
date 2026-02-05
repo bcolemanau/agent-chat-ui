@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(
@@ -8,7 +7,7 @@ export async function GET(
     { params }: { params: Promise<{ orgId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionSafe();
 
         if (!session || !session.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -44,7 +43,7 @@ export async function POST(
     { params }: { params: Promise<{ orgId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionSafe();
 
         if (!session || !session.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -83,7 +82,7 @@ export async function PUT(
     { params }: { params: Promise<{ orgId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionSafe();
 
         if (!session || !session.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -122,7 +121,7 @@ export async function DELETE(
     { params }: { params: Promise<{ orgId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionSafe();
 
         if (!session || !session.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

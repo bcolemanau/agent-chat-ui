@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 import { proxyBackendGet } from "@/lib/backend-proxy";
 
 /**
@@ -9,6 +8,6 @@ import { proxyBackendGet } from "@/lib/backend-proxy";
  * Staging: set LANGGRAPH_API_URL to the Reflexion backend URL (the proxy), not a LangGraph-only port.
  */
 export async function GET(req: Request) {
-    const session = await getServerSession(authOptions);
+    const session = await getSessionSafe();
     return proxyBackendGet(req, "/workflow", { session, logLabel: "Workflow diagram" });
 }

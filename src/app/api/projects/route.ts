@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 import { proxyBackendGet, getBackendBaseUrl, getProxyHeaders } from "@/lib/backend-proxy";
 
 export async function GET(req: Request) {
-    const session = await getServerSession(authOptions);
+    const session = await getSessionSafe();
     return proxyBackendGet(req, "/kg/projects", { session, logLabel: "Projects", forwardSearchParams: false });
 }
 
 export async function DELETE(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionSafe();
         if (!session?.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }

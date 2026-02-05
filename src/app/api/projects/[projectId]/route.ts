@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function PATCH(
@@ -8,7 +7,7 @@ export async function PATCH(
     { params }: { params: Promise<{ projectId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionSafe();
         if (!session?.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }

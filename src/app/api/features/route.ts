@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { Octokit } from "octokit";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 
 export async function POST(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionSafe();
 
         // Ensure user is authenticated
         if (!session || !session.user) {
