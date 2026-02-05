@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 /**
  * Issue 37 Phase 1: Apply classification (Begin Enriching).
@@ -27,8 +28,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "trigger_id is required" }, { status: 400 });
     }
 
-    const backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
-    const baseUrl = backendUrl.endsWith("/") ? backendUrl.slice(0, -1) : backendUrl;
+    const baseUrl = getBackendBaseUrl();
     const targetUrl = `${baseUrl}/project/classification/apply`;
 
     const orgContext = req.headers.get("X-Organization-Context");

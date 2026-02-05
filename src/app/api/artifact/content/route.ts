@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(req: Request) {
     try {
@@ -19,8 +20,7 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: "Missing node_id" }, { status: 400 });
         }
 
-        let backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
-        if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
+        const backendUrl = getBackendBaseUrl();
 
         let targetUrl = `${backendUrl}/artifact/content?node_id=${nodeId}&thread_id=${threadId}`;
         if (version) targetUrl += `&version=${version}`;

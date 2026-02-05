@@ -18,8 +18,7 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: "Missing node_id" }, { status: 400 });
         }
 
-        let backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
-        if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
+        const backendUrl = getBackendBaseUrl();
 
         const targetUrl = `${backendUrl}/artifact/history?node_id=${nodeId}&thread_id=${threadId}`;
 

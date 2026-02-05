@@ -16,6 +16,7 @@ import { Check, X, LoaderCircle, FileText, AlertCircle, ChevronDown, ChevronUp }
 import { cn } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
+import { getDefaultClientApiUrl } from "@/lib/backend-proxy";
 import { contentRendererRegistry } from "@/components/workbench/content-renderers";
 
 // Available KG Artifact types (from backend)
@@ -70,7 +71,7 @@ export function EnrichmentApproval({
   onOpenChange,
   artifactIds,
   threadId,
-  apiUrl: rawApiUrl = "http://localhost:8080",
+  apiUrl: rawApiUrl = getDefaultClientApiUrl(),
   onComplete,
 }: EnrichmentApprovalProps) {
   const { data: session } = useSession();

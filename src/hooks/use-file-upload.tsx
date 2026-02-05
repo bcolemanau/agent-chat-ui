@@ -4,6 +4,7 @@ import { ContentBlock } from "@langchain/core/messages";
 import { fileToContentBlock } from "@/lib/multimodal-utils";
 import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
+import { getDefaultClientApiUrl } from "@/lib/backend-proxy";
 
 // Image types that are processed as content blocks (inline in messages)
 export const SUPPORTED_IMAGE_TYPES = [
@@ -135,7 +136,7 @@ function getDirectBackendUrl(apiUrl: string): string {
 
 export function useFileUpload({
   initialBlocks = [],
-  apiUrl = "http://localhost:8080",
+  apiUrl = getDefaultClientApiUrl(),
   threadId = null,
   onDocumentUploadComplete,
 }: UseFileUploadOptions = {}) {

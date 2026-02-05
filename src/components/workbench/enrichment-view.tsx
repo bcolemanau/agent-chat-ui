@@ -10,6 +10,7 @@ import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
 import { useQueryState } from "nuqs";
 import { useStreamContext } from "@/providers/Stream";
+import { getDefaultClientApiUrl } from "@/lib/backend-proxy";
 import { KgDiffDiagramView } from "@/components/workbench/kg-diff-diagram-view";
 
 // Available KG Artifact types (from backend)
@@ -72,7 +73,7 @@ export function EnrichmentView() {
   const [fetching, setFetching] = useState(false);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
   const [threadId] = useQueryState("threadId");
-  const rawApiUrl = (stream as any)?.apiUrl || "http://localhost:8080";
+  const rawApiUrl = (stream as any)?.apiUrl ?? getDefaultClientApiUrl();
   
   // Helper function to get the direct backend URL, bypassing Next.js proxy
   // This ensures enrichment requests go directly to the backend, not through the proxy

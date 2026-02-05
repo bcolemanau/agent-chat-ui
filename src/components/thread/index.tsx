@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState, FormEvent } from "reac
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
+import { getDefaultClientApiUrl } from "@/lib/backend-proxy";
 import { useBranding } from "@/providers/Branding";
 import { withThreadSpan } from "@/lib/otel-client";
 import { Button } from "../ui/button";
@@ -118,8 +119,9 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     messages = [],
     isLoading,
     setApiKey: _setApiKey,
-    apiUrl = "http://localhost:8080",
+    apiUrl: streamApiUrl,
   } = stream;
+  const apiUrl = streamApiUrl ?? getDefaultClientApiUrl();
   // Use stream's threadId when URL hasn't updated yet so upload sends thread_id and backend can inject proposals.
   const effectiveThreadIdForUpload = (stream as { threadId?: string | null })?.threadId ?? threadId ?? undefined;
   const {

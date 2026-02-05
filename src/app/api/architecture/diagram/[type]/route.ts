@@ -15,10 +15,7 @@ export async function GET(
 
         const { type: diagramType } = await params;
 
-        // Build the backend URL
-        let backendUrl = process.env.LANGGRAPH_API_URL || "http://localhost:8080";
-        if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
-
+        const backendUrl = getBackendBaseUrl();
         const targetUrl = `${backendUrl}/architecture/diagram/${diagramType}`;
 
         const headers: Record<string, string> = {

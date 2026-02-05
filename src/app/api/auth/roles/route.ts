@@ -1,15 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
-
-function getBackendUrl(): string {
-    const backendUrl = process.env.LANGGRAPH_API_URL;
-    if (!backendUrl) {
-        console.warn("[PROXY] LANGGRAPH_API_URL not set, using staging URL as fallback");
-        return "https://reflexion-staging.up.railway.app".replace(/\/$/, "");
-    }
-    return backendUrl.endsWith("/") ? backendUrl.slice(0, -1) : backendUrl;
-}
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET() {
     try {
@@ -21,7 +13,7 @@ export async function GET() {
             return NextResponse.json({ error: "Missing authentication token" }, { status: 401 });
         }
 
-        const targetUrl = `${getBackendUrl()}/auth/roles`;
+        const targetUrl = `${getBackendBaseUrl()}/auth/roles`;
         const resp = await fetch(targetUrl, {
             headers: {
                 "Content-Type": "application/json",

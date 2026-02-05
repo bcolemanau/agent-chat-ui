@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function PATCH(
     req: Request,
@@ -23,8 +24,7 @@ export async function PATCH(
             return NextResponse.json({ error: "name is required and cannot be empty" }, { status: 400 });
         }
 
-        const backendUrl = process.env.LANGGRAPH_API_URL || "https://reflexion-staging.up.railway.app";
-        const baseUrl = backendUrl.endsWith("/") ? backendUrl.slice(0, -1) : backendUrl;
+        const baseUrl = getBackendBaseUrl();
         const targetUrl = `${baseUrl}/kg/projects/${encodeURIComponent(projectId)}`;
 
         const orgContext = req.headers.get("X-Organization-Context");
