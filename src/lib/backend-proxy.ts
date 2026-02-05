@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 
 const DEFAULT_BACKEND = "https://reflexion-staging.up.railway.app";
 
+/** Unbuffered write so Docker/local logs show up (stdout can be buffered when not a TTY). */
+function debugLog(msg: string) {
+  const line = `[DEBUG] ${msg}\n`;
+  process.stdout.write(line);
+  process.stderr.write(line);
+}
+
 /**
  * Backend base URL (no trailing slash). Used by API routes that proxy to the Reflexion backend.
  * Server-only; for client default API URL use getDefaultClientApiUrl from @/lib/default-client-api-url.
@@ -18,12 +25,20 @@ export function getProxyHeaders(
     session: { user: { idToken?: string | null } },
     req: Request
 ): Record<string, string> {
+    // Debug: always log so we see output on every proxied request (Docker/local)
+    debugLog("getProxyHeaders called");
+    const token = session.user.idToken ?? "";
     const headers: Record<string, string> = {
-        Authorization: `Bearer ${session.user.idToken}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
     };
     const orgContext = req.headers.get("X-Organization-Context");
     if (orgContext) headers["X-Organization-Context"] = orgContext;
+    // Log token last4 when AUTH_DEBUG=true (or in dev) to verify header / compare with backend
+    const authDebug = process.env.NODE_ENV !== "production" || process.env.AUTH_DEBUG === "true";
+    if (authDebug && token && token.length >= 4) {
+        console.log("[PROXY] JWT token: len=%s, last4=%s (Authorization header set)", token.length, token.slice(-4));
+    }
     return headers;
 }
 
@@ -62,7 +77,8 @@ export async function proxyBackendGet(
         const data = await resp.json();
         return NextResponse.json(data);
     } catch (error: unknown) {
-        console.error(`[PROXY] ${logLabel} fetch failed:`, error);
+        const cause = error && typeof error === "object" && "cause" in error ? (error as { cause?: { code?: string } }).cause?.code : undefined;
+        console.error(`[PROXY] ${logLabel} fetch failed: url=${targetUrl} cause=${cause ?? "unknown"}`, error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }

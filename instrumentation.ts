@@ -13,6 +13,11 @@ export async function register() {
     return;
   }
 
+  // Debug: unbuffered write so Docker/local logs show (instrumentation may not run in standalone build)
+  const line = `[DEBUG] Instrumentation register() running ${new Date().toISOString()}\n`;
+  process.stdout.write(line);
+  process.stderr.write(line);
+
   try {
     // Import server-side OpenTelemetry setup
     await import('./src/lib/otel-server');

@@ -21,14 +21,16 @@ declare module "next-auth/jwt" {
 // Get the secret - prefer REFLEXION_JWT_SECRET, fallback to NEXTAUTH_SECRET for backward compatibility
 const authSecret = process.env.REFLEXION_JWT_SECRET || process.env.NEXTAUTH_SECRET;
 
-// Debug logging for environment variables (remove in production)
-if (process.env.NODE_ENV !== 'production') {
-    console.log('[AUTH DEBUG] NEXTAUTH_URL:', process.env.NEXTAUTH_URL || 'NOT SET');
-    console.log('[AUTH DEBUG] AUTH_GOOGLE_ID:', process.env.AUTH_GOOGLE_ID ? 'Set' : 'MISSING');
-    console.log('[AUTH DEBUG] AUTH_GOOGLE_SECRET:', process.env.AUTH_GOOGLE_SECRET ? 'Set' : 'MISSING');
-    console.log('[AUTH DEBUG] REFLEXION_JWT_SECRET:', process.env.REFLEXION_JWT_SECRET ? 'Set' : 'MISSING');
-    console.log('[AUTH DEBUG] NEXTAUTH_SECRET (fallback):', process.env.NEXTAUTH_SECRET ? 'Set' : 'MISSING');
-    console.log('[AUTH DEBUG] Using secret:', authSecret ? 'Set' : 'MISSING - AUTH WILL FAIL');
+// Debug logging: in dev always; in production only when AUTH_DEBUG=true (e.g. in container)
+const authDebug = process.env.NODE_ENV !== "production" || process.env.AUTH_DEBUG === "true";
+if (authDebug) {
+    console.log("[AUTH DEBUG] NEXTAUTH_URL:", process.env.NEXTAUTH_URL || "NOT SET");
+    console.log("[AUTH DEBUG] REFLEXION_JWT_SECRET:", process.env.REFLEXION_JWT_SECRET ? "Set" : "MISSING");
+    console.log("[AUTH DEBUG] NEXTAUTH_SECRET (fallback):", process.env.NEXTAUTH_SECRET ? "Set" : "MISSING");
+    console.log("[AUTH DEBUG] Using secret:", authSecret ? "Set" : "MISSING - AUTH WILL FAIL");
+    if (authSecret && authSecret.length >= 4) {
+        console.log("[AUTH DEBUG] JWT signing secret: len=%s, last4=%s (must match backend REFLEXION_JWT_SECRET)", authSecret.length, authSecret.slice(-4));
+    }
 }
 
 export const authOptions: NextAuthOptions = {

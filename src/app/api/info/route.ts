@@ -70,7 +70,9 @@ export async function GET(req: NextRequest) {
     const data = await resp.json();
     return NextResponse.json(data);
   } catch (error: any) {
-    console.error("[API] /info proxy failed:", error);
+    const targetUrl = `${getBackendBaseUrl()}/info`;
+    const cause = error?.cause?.code ?? error?.code ?? "unknown";
+    console.error("[API] /info proxy failed: url=" + targetUrl + " cause=" + cause, error);
     return NextResponse.json(
       { error: "Internal Server Error", details: error.message },
       { status: 500 }

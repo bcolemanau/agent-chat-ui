@@ -14,11 +14,19 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 
 interface Organization {
     id: string;
     name: string;
+    workflow_id?: string;
 }
 
 interface Branding {
@@ -45,7 +53,8 @@ export function OrganizationManagement() {
     const [isBrandingDialogOpen, setIsBrandingDialogOpen] = useState(false);
     const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
     const [editingBranding, setEditingBranding] = useState<{ orgId: string; branding: Branding | null } | null>(null);
-    const [formData, setFormData] = useState({ id: "", name: "" });
+    const [formData, setFormData] = useState({ id: "", name: "", workflow_id: "" });
+    const [workflows, setWorkflows] = useState<{ id: string; name: string }[]>([]);
     const [brandingFormData, setBrandingFormData] = useState<Branding>({
         name: "",
         brand_title: "",
@@ -56,6 +65,21 @@ export function OrganizationManagement() {
 
     useEffect(() => {
         loadData();
+    }, []);
+
+    useEffect(() => {
+        const loadWorkflows = async () => {
+            try {
+                const resp = await fetch("/api/auth/workflows");
+                if (resp.ok) {
+                    const data = await resp.json();
+                    setWorkflows(Array.isArray(data) ? data : []);
+                }
+            } catch {
+                // Workflows optional for org edit
+            }
+        };
+        loadWorkflows();
     }, []);
 
     const loadData = async () => {
@@ -107,7 +131,7 @@ export function OrganizationManagement() {
             if (resp.ok) {
                 toast.success("Organization created successfully");
                 setIsCreateDialogOpen(false);
-                setFormData({ id: "", name: "" });
+                setFormData({ id: "", name: "", workflow_id: "" });
                 await loadData();
                 // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
@@ -132,17 +156,21 @@ export function OrganizationManagement() {
 
         try {
             setSubmitting(true);
+            const body: { name: string; workflow_id: string } = {
+                name: formData.name,
+                workflow_id: formData.workflow_id || "default",
+            };
             const resp = await fetch(`/api/organizations/${editingOrg.id}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: formData.name }),
+                body: JSON.stringify(body),
             });
 
             if (resp.ok) {
                 toast.success("Organization updated successfully");
                 setIsEditDialogOpen(false);
                 setEditingOrg(null);
-                setFormData({ id: "", name: "" });
+                setFormData({ id: "", name: "", workflow_id: "" });
                 await loadData();
                 // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
@@ -187,7 +215,11 @@ export function OrganizationManagement() {
 
     const handleOpenEdit = (org: Organization) => {
         setEditingOrg(org);
-        setFormData({ id: org.id, name: org.name });
+        setFormData({
+            id: org.id,
+            name: org.name,
+            workflow_id: org.workflow_id ?? "",
+        });
         setIsEditDialogOpen(true);
     };
 
@@ -387,6 +419,28 @@ export function OrganizationManagement() {
                                 value={formData.name}
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="edit-org-workflow">Default workflow</Label>
+                            <Select
+                                value={formData.workflow_id || "default"}
+                                onValueChange={(v) => setFormData({ ...formData, workflow_id: v === "default" ? "" : v })}
+                            >
+                                <SelectTrigger id="edit-org-workflow">
+                                    <SelectValue placeholder="Default (system)" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="default">Default (system)</SelectItem>
+                                    {workflows.map((wf) => (
+                                        <SelectItem key={wf.id} value={wf.id}>
+                                            {wf.name ?? wf.id}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                                New chat threads and projects use this workflow for this organization.
+                            </p>
                         </div>
                     </div>
                     <DialogFooter>

@@ -8,11 +8,20 @@ import { authOptions } from "@/auth";
 
 const BACKEND_URL = process.env.LANGGRAPH_API_URL ?? "https://reflexion-staging.up.railway.app";
 
+/** Unbuffered write so Docker/local logs show up (stdout can be buffered when not a TTY). */
+function debugLog(msg: string) {
+  const line = `[DEBUG] ${msg}\n`;
+  process.stdout.write(line);
+  process.stderr.write(line);
+}
+
 async function proxyRequest(req: NextRequest, method: string) {
   try {
     // Get the path from the request (everything after /api/)
     const path = req.nextUrl.pathname.replace(/^\/api/, "");
-    
+    // Debug: always log so we see output on every catch-all request (Docker/local)
+    debugLog(`catch-all proxyRequest ${method} ${path}`);
+
     // Construct backend URL
     const backendUrl = `${BACKEND_URL}${path}${req.nextUrl.search}`;
     
@@ -69,6 +78,11 @@ async function proxyRequest(req: NextRequest, method: string) {
     if (sessionToken) {
       headers.set("Authorization", `Bearer ${sessionToken}`);
       headers.set("X-Api-Key", sessionToken); // Also set as X-Api-Key for compatibility
+      // Log token last4 when AUTH_DEBUG=true (or in dev) to verify header / compare with backend
+      const authDebug = process.env.NODE_ENV !== "production" || process.env.AUTH_DEBUG === "true";
+      if (authDebug && sessionToken.length >= 4) {
+        console.log("[PROXY] JWT token: len=%s, last4=%s (catch-all proxy)", sessionToken.length, sessionToken.slice(-4));
+      }
     } else {
       // Fallback to client's auth headers if no session token
       if (clientApiKey) {
