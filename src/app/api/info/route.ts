@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/auth";
+import { getSessionSafe } from "@/auth";
 import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 /**
@@ -10,14 +9,8 @@ import { getBackendBaseUrl } from "@/lib/backend-proxy";
 export async function GET(req: NextRequest) {
   try {
     // Note: /info endpoint doesn't require auth (it's a health check)
-    // But we'll try to get session for consistency
-    let session = null;
-    try {
-      session = await getServerSession(authOptions);
-    } catch {
-      // Auth is optional for /info endpoint
-      console.debug("[API] /info - No session available (this is OK for health checks)");
-    }
+    // getSessionSafe returns null when cookie is invalid (e.g. NEXTAUTH_SECRET changed) so we don't throw
+    const session = await getSessionSafe();
 
     const cleanUrl = getBackendBaseUrl();
     const targetUrl = `${cleanUrl}/info`;
