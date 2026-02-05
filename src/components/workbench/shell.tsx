@@ -28,7 +28,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const { data: session, status } = useSession();
     const userRole = session?.user?.role;
-    const isAdmin = Boolean(userRole && ["reflexion_admin", "admin", "newco_admin", "Newco_admin", "NewCo Administrator"].includes(userRole as string));
+    const isAdmin = Boolean(userRole && ["reflexion_admin", "admin", "newco_admin"].includes(userRole as string));
     const { isRecording, startRecording, stopRecording, downloadRecording } = useRecording();
 
     // Robust Mode Derivation (active_mode and active_agent are synced from graph/overlay)
@@ -71,16 +71,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const approvalCount = useApprovalCount();
     const lastApprovalCount = useRef<number>(0);
 
-    // Org context version: bump when org switcher changes so workflow strip refetches for the selected org.
-    const [orgContextVersion, setOrgContextVersion] = useState(0);
-    useEffect(() => {
-        const onOrgContextChanged = () => setOrgContextVersion((v) => v + 1);
-        window.addEventListener("reflexion_org_context_changed", onOrgContextChanged);
-        return () => window.removeEventListener("reflexion_org_context_changed", onOrgContextChanged);
-    }, []);
-
     // Fetch workflow diagram for mini strip (header + workbench pane). Run when on workbench so strip is ready.
-    // Sends X-Organization-Context so backend returns the org's default workflow; refetches when org changes.
     useEffect(() => {
         const onWorkbench = pathname?.includes("/workbench");
         if (!onWorkbench) return;
@@ -88,10 +79,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         setWorkflowStripLoading(true);
         const params = new URLSearchParams();
         if (activeAgent) params.set("active_node", activeAgent);
-        const headers: Record<string, string> = {};
-        const orgContext = typeof window !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-        if (orgContext) headers["X-Organization-Context"] = orgContext;
-        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`, { headers })
+        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: WorkflowDiagramStrip | null) => {
                 if (!cancelled && data?.nodes) {
@@ -109,7 +97,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             .catch(() => { if (!cancelled) setWorkflowStrip(null); })
             .finally(() => { if (!cancelled) setWorkflowStripLoading(false); });
         return () => { cancelled = true; };
-    }, [pathname, activeAgent, orgContextVersion]);
+    }, [pathname, activeAgent]);
 
     // Nodes to show in strip and dropdown (from API); hide Administration for non-admins
     const displayNodes = useMemo(
@@ -121,29 +109,6 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 : [],
         [workflowStrip?.nodes, isAdmin]
     );
-
-    // Group nodes into rows: parallel ops (manufacturing_ops, software_ops) share one row; others are one per row
-    const PARALLEL_OPS_IDS = new Set(["manufacturing_ops", "software_ops"]);
-    const workflowRows = useMemo(() => {
-        if (!displayNodes.length) return [];
-        const rows: { id: string; label: string }[][] = [];
-        let i = 0;
-        while (i < displayNodes.length) {
-            const node = displayNodes[i];
-            if (PARALLEL_OPS_IDS.has(node.id)) {
-                const parallel: { id: string; label: string }[] = [];
-                while (i < displayNodes.length && PARALLEL_OPS_IDS.has(displayNodes[i].id)) {
-                    parallel.push(displayNodes[i]);
-                    i++;
-                }
-                rows.push(parallel);
-            } else {
-                rows.push([node]);
-                i++;
-            }
-        }
-        return rows;
-    }, [displayNodes]);
 
     // Auth guard: redirect unauthenticated users to login
     useEffect(() => {
@@ -347,89 +312,76 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
-            {/* Level 1: Global header — full width, tall enough for two parallel workflow rows (e.g. main chain + ops) */}
-            <header className="min-h-[4.5rem] py-2 border-b flex items-center justify-between px-6 bg-background z-20 shrink-0" data-workbench-container>
-                    <div className="flex items-center gap-3 min-w-0 flex-1 flex-wrap">
+            {/* Level 1: Global header — full width, always left to right (above sidebar) */}
+            <header className="h-14 border-b flex items-center justify-between px-6 bg-background z-20 shrink-0" data-workbench-container>
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                         <Suspense fallback={<div className="h-4 w-32 bg-muted animate-pulse rounded" />}>
                             <Breadcrumbs />
                         </Suspense>
                         <span className="text-muted-foreground/50 shrink-0">/</span>
-                        {/* Workflow visualization (connects to breadcrumb); active node = agent selector; wraps to second row when many phases */}
+                        {/* Workflow visualization (connects to breadcrumb); active node = agent selector */}
                         {workflowStripLoading ? (
                             <div className="h-6 w-24 bg-muted animate-pulse rounded shrink-0" aria-hidden />
                         ) : workflowStrip && displayNodes.length > 0 ? (
-                            <div className="flex flex-wrap items-center gap-y-1.5 gap-x-1.5 min-w-0">
+                            <div className="flex items-center gap-1.5 shrink min-w-0 overflow-x-auto">
                                 <span className="text-sm text-foreground/90 shrink-0 whitespace-nowrap font-medium">
                                     {workflowStrip.name ?? workflowStrip.workflow_id}
                                     <span className="text-muted-foreground font-normal"> ({workflowStrip.version ?? workflowStrip.workflow_id})</span>
                                 </span>
-                                <div className="flex flex-wrap items-center gap-y-1 gap-x-0.5 shrink-0 border border-border/50 rounded-md px-1.5 py-0.5 bg-muted/30">
-                                    {workflowRows.map((row, rowIndex) => (
-                                        <span
-                                            key={row.map((n) => n.id).join("-")}
-                                            className={cn(
-                                                "flex items-center gap-0.5",
-                                                row.length > 1 ? "w-full basis-full" : "shrink-0"
-                                            )}
-                                        >
-                                            {row.map((node, nodeIndex) => {
-                                                const isActive = workflowStrip.active_node === node.id || activeAgent === node.id;
-                                                const showSelect = isActive && threadId;
-                                                return (
-                                                    <span key={node.id} className="flex items-center shrink-0 gap-0.5">
-                                                        {nodeIndex > 0 && (
-                                                            <span className="text-muted-foreground/50 text-xs font-medium px-0.5" title="Parallel">∥</span>
-                                                        )}
-                                                        {showSelect ? (
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <Select
-                                                                        value={activeAgent}
-                                                                        disabled={!threadId}
-                                                                        onValueChange={(value) => {
-                                                                            const fn = (stream as any).setActiveAgentDebug as ((a: string) => Promise<void>) | undefined;
-                                                                            if (fn) fn(value).catch((e) => console.warn("[WorkbenchShell] Failed to set active mode:", e));
-                                                                        }}
-                                                                    >
-                                                                        <SelectTrigger
-                                                                            className={cn(
-                                                                                "h-7 min-w-0 w-auto max-w-none overflow-visible px-2 py-0.5 text-sm font-medium border border-border rounded-md bg-muted/50 text-foreground hover:bg-muted shadow-none gap-1.5 ring-2 ring-primary/40 [&>span]:whitespace-nowrap [&>span]:overflow-visible [&>span]:text-inherit",
-                                                                                stream.isLoading && "opacity-80"
-                                                                            )}
-                                                                        >
-                                                                            <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                                                                            <SelectValue>{node.label}</SelectValue>
-                                                                        </SelectTrigger>
-                                                                        <SelectContent>
-                                                                            {displayNodes.map((opt) => (
-                                                                                <SelectItem key={opt.id} value={opt.id} className="text-sm capitalize">
-                                                                                    {opt.label}
-                                                                                </SelectItem>
-                                                                            ))}
-                                                                        </SelectContent>
-                                                                    </Select>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent>Switch agent (current: {node.label})</TooltipContent>
-                                                            </Tooltip>
-                                                        ) : (
-                                                            <span
-                                                                className={cn(
-                                                                    "inline-block px-2 py-0.5 rounded-md text-sm font-medium whitespace-nowrap",
-                                                                    isActive ? "bg-muted/50 text-foreground ring-2 ring-primary/40" : "bg-background/80 text-muted-foreground"
-                                                                )}
-                                                                title={node.label}
+                                <div className="flex items-center gap-0.5 shrink-0 border border-border/50 rounded-md px-1.5 py-0.5 bg-muted/30">
+                                    {displayNodes.map((node, i) => {
+                                        const isActive = workflowStrip.active_node === node.id || activeAgent === node.id;
+                                        const showSelect = isActive && threadId;
+                                        return (
+                                            <span key={node.id} className="flex items-center shrink-0 gap-0.5">
+                                                {showSelect ? (
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Select
+                                                                value={activeAgent}
+                                                                disabled={!threadId}
+                                                                onValueChange={(value) => {
+                                                                    const fn = (stream as any).setActiveAgentDebug as ((a: string) => Promise<void>) | undefined;
+                                                                    if (fn) fn(value).catch((e) => console.warn("[WorkbenchShell] Failed to set active mode:", e));
+                                                                }}
                                                             >
-                                                                {node.label}
-                                                            </span>
+                                                                <SelectTrigger
+                                                                    className={cn(
+                                                                        "h-7 min-w-0 w-auto max-w-none overflow-visible px-2 py-0.5 text-sm font-medium border border-border rounded-md bg-muted/50 text-foreground hover:bg-muted shadow-none gap-1.5 ring-2 ring-primary/40 [&>span]:whitespace-nowrap [&>span]:overflow-visible [&>span]:text-inherit",
+                                                                        stream.isLoading && "opacity-80"
+                                                                    )}
+                                                                >
+                                                                    <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                                                                    <SelectValue>{node.label}</SelectValue>
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {displayNodes.map((opt) => (
+                                                                        <SelectItem key={opt.id} value={opt.id} className="text-sm capitalize">
+                                                                            {opt.label}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>Switch agent (current: {node.label})</TooltipContent>
+                                                    </Tooltip>
+                                                ) : (
+                                                    <span
+                                                        className={cn(
+                                                            "inline-block px-2 py-0.5 rounded-md text-sm font-medium whitespace-nowrap",
+                                                            isActive ? "bg-muted/50 text-foreground ring-2 ring-primary/40" : "bg-background/80 text-muted-foreground"
                                                         )}
+                                                        title={node.label}
+                                                    >
+                                                        {node.label}
                                                     </span>
-                                                );
-                                            })}
-                                            {rowIndex < workflowRows.length - 1 && (
-                                                <span className="text-muted-foreground/60 text-sm shrink-0 ml-0.5">→</span>
-                                            )}
-                                        </span>
-                                    ))}
+                                                )}
+                                                {i < displayNodes.length - 1 && (
+                                                    <span className="text-muted-foreground/60 text-sm shrink-0">→</span>
+                                                )}
+                                            </span>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         ) : (

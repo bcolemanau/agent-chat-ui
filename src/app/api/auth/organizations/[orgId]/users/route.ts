@@ -44,56 +44,7 @@ export async function GET(
         const data = await resp.json();
         return NextResponse.json(data);
     } catch (error: unknown) {
-        console.error("[PROXY] Org users list failed:", error);
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-    }
-}
-
-export async function POST(
-    req: Request,
-    context: { params: Promise<{ orgId: string }> }
-) {
-    try {
-        const session = await getServerSession(authOptions);
-        if (!session?.user) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        }
-        if (!session.user.idToken) {
-            return NextResponse.json({ error: "Missing authentication token" }, { status: 401 });
-        }
-
-        const { orgId } = await context.params;
-        const body = await req.json();
-        const targetUrl = `${getBackendBaseUrl()}/auth/organizations/${encodeURIComponent(orgId)}/users`;
-        const resp = await fetch(targetUrl, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${session.user.idToken}`,
-            },
-            body: JSON.stringify(body),
-        });
-
-        if (!resp.ok) {
-            const cloned = resp.clone();
-            let errorText = "";
-            try {
-                const data = await cloned.json();
-                errorText = data.detail || data.error || JSON.stringify(data);
-            } catch {
-                try {
-                    errorText = await resp.text();
-                } catch {
-                    errorText = `Backend returned ${resp.status} ${resp.statusText}`;
-                }
-            }
-            return NextResponse.json({ error: errorText || "Backend error" }, { status: resp.status });
-        }
-
-        const data = await resp.json();
-        return NextResponse.json(data);
-    } catch (error: unknown) {
-        console.error("[PROXY] Org user add failed:", error);
+        console.error("[PROXY] Auth org users fetch failed:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }

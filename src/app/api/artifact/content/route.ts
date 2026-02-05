@@ -39,7 +39,7 @@ export async function GET(req: Request) {
         const resp = await fetch(targetUrl, { headers });
 
         if (!resp.ok) {
-            const _errorText = await resp.text();
+            const errorText = await resp.text();
             return NextResponse.json({ error: "Backend error" }, { status: resp.status });
         }
 

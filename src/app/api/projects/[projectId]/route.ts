@@ -43,21 +43,13 @@ export async function PATCH(
         if (!resp.ok) {
             const errorText = await resp.text();
             console.error(`[PROXY] Backend error (patch project): ${resp.status} - ${errorText}`);
-            let body: { error?: string; detail?: string };
-            try {
-                body = JSON.parse(errorText);
-            } catch {
-                body = {};
-            }
-            const status = resp.status === 404 ? 404 : resp.status === 403 ? 403 : resp.status === 409 ? 409 : 502;
-            const message = resp.status === 404 ? "Project not found" : (body.detail || body.error || "Backend error");
-            return NextResponse.json({ error: message, detail: body.detail }, { status });
+            return NextResponse.json({ error: "Backend error" }, { status: resp.status });
         }
 
         const data = await resp.json();
         return NextResponse.json(data);
     } catch (error: unknown) {
-        console.error("[PROXY] Project rename failed:", error);
+        console.error("[PROXY] Project patch failed:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }

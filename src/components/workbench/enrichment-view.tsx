@@ -10,7 +10,6 @@ import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
 import { useQueryState } from "nuqs";
 import { useStreamContext } from "@/providers/Stream";
-import { getDefaultClientApiUrl } from "@/lib/backend-proxy";
 import { KgDiffDiagramView } from "@/components/workbench/kg-diff-diagram-view";
 
 // Available KG Artifact types (from backend)
@@ -73,7 +72,7 @@ export function EnrichmentView() {
   const [fetching, setFetching] = useState(false);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
   const [threadId] = useQueryState("threadId");
-  const rawApiUrl = (stream as any)?.apiUrl ?? getDefaultClientApiUrl();
+  const rawApiUrl = (stream as any)?.apiUrl || "http://localhost:8080";
   
   // Helper function to get the direct backend URL, bypassing Next.js proxy
   // This ensures enrichment requests go directly to the backend, not through the proxy
@@ -123,7 +122,6 @@ export function EnrichmentView() {
     if (pendingArtifactIds.length === 0) return;
 
     const fetchProposals = async () => {
-      console.log("[EnrichmentView] ENTER fetchProposals", { pendingArtifactIds, threadId });
       setFetching(true);
       const newProposals = new Map<string, EnrichmentProposal>();
       const newSelectedTypes = new Map<string, string[]>();
@@ -198,9 +196,8 @@ export function EnrichmentView() {
 
         setProposals(newProposals);
         setSelectedTypes(newSelectedTypes);
-        console.log("[EnrichmentView] EXIT fetchProposals: SUCCESS", { proposalsCount: newProposals.size });
       } catch (error) {
-        console.error("[EnrichmentView] EXIT fetchProposals: ERROR", error);
+        console.error("[Enrichment] Failed to fetch proposals:", error);
         toast.error("Failed to load enrichment proposals");
       } finally {
         setFetching(false);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 export async function GET(
     req: Request,
