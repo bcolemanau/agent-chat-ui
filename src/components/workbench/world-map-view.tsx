@@ -51,9 +51,16 @@ const typeConfig: Record<string, { color: string; label: string }> = {
     CRIT: { color: '#f43f5e', label: 'Risk' },
 };
 
-export function WorldMapView() {
+export interface WorldMapViewProps {
+    /** When true, the decisions table on the left is the timeline; hide the built-in timeline panel. */
+    embeddedInDecisions?: boolean;
+}
+
+export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps = {}) {
     const stream = useStreamContext();
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
+    const [compareParam] = useQueryState("compare"); // When "1" or "true", open timeline (header "Compare on map")
+    const [versionParam] = useQueryState("version"); // Select this decision version in timeline and show its diff (per-decision "Compare on map")
     /** Filtered KG streamed from backend when Project Configurator runs; use for map without extra /api/kg-data. */
     const filteredKg = (stream as any)?.values?.filtered_kg as { nodes: any[]; links: any[]; metadata?: any } | undefined;
 
@@ -74,12 +81,65 @@ export function WorldMapView() {
     const [activeVersion, setActiveVersion] = useState<string | null>(null);
     const [inactiveOpacity, setInactiveOpacity] = useState(0.15); // Transparency for inactive nodes (0-1)
     const [compareMode, setCompareMode] = useState(false);
+
+    // Open timeline when arriving via shortcut (e.g. ?compare=1 from header "Compare on map")
+    useEffect(() => {
+        if (compareParam === "1" || compareParam === "true") {
+            setShowHistory(true);
+        }
+    }, [compareParam]);
+    // When version= in URL (per-decision "Compare on map"), open timeline, select that version, show its diff
+    const lastUrlVersion = useRef<string | null>(null);
+    useEffect(() => {
+        if (!versionParam || !threadId) return;
+        if (!kgHistory?.versions?.length) {
+            console.log('[WorldMapView] Timeline diff: version= in URL but no kgHistory yet, fetching history');
+            fetchKgHistory();
+            return;
+        }
+        const versions = kgHistory.versions as { id?: string }[];
+        const idx = versions.findIndex((v) => v.id === versionParam);
+        const versionBefore = idx >= 0 && idx < versions.length - 1 ? versions[idx + 1]?.id : undefined;
+        console.log('[WorldMapView] Timeline diff: version= in URL', {
+            versionParam,
+            threadId,
+            versionsCount: versions.length,
+            idx,
+            versionBefore: versionBefore ?? null,
+            willFetchDiff: lastUrlVersion.current !== versionParam && !!versionBefore,
+        });
+        setShowHistory(true);
+        setCompareMode(false);
+        setSelectedTimelineVersionId(versionParam);
+        setActiveVersion(versionParam);
+        if (lastUrlVersion.current !== versionParam) {
+            lastUrlVersion.current = versionParam;
+            fetchDiffForTimelineVersion(versionParam);
+        }
+        fetchData(versionParam);
+    }, [versionParam, threadId, kgHistory]);
     const [compareVersion1, setCompareVersion1] = useState<string | null>(null);
     const [compareVersion2, setCompareVersion2] = useState<string | null>(null);
     const [diffData, setDiffData] = useState<any>(null);
     const [loadingDiff, setLoadingDiff] = useState(false);
     /** When in compare mode: 'graph' = force-directed map with diff colors; 'diff' = KgDiffDiagramView (list by change type). Harmonized with KG_DIFF_CONTRACT. */
     const [compareViewMode, setCompareViewMode] = useState<'graph' | 'diff'>('graph');
+    /** Timeline view: version selected for showing its introduced diff (before → this version). */
+    const [selectedTimelineVersionId, setSelectedTimelineVersionId] = useState<string | null>(null);
+    const [timelineVersionDiff, setTimelineVersionDiff] = useState<any>(null);
+    const [loadingTimelineDiff, setLoadingTimelineDiff] = useState(false);
+
+    useEffect(() => {
+        if (selectedTimelineVersionId) {
+            console.log('[WorldMapView] Timeline diff state', {
+                selectedTimelineVersionId,
+                loadingTimelineDiff,
+                hasDiff: !!timelineVersionDiff?.diff,
+                hasSummary: !!timelineVersionDiff?.summary,
+                nodeCount: timelineVersionDiff?.diff?.nodes?.length ?? 0,
+            });
+        }
+    }, [selectedTimelineVersionId, timelineVersionDiff, loadingTimelineDiff]);
 
     const unifiedPreviews = useUnifiedPreviews();
     const draftArtifactNodes = useMemo(() => {
@@ -160,6 +220,46 @@ export function WorldMapView() {
             console.error('Diff fetch error:', e);
         } finally {
             setLoadingDiff(false);
+        }
+    };
+
+    /** Fetch diff for a single timeline version (versionBefore → versionId). Used in timeline view for decision versions. */
+    const fetchDiffForTimelineVersion = async (versionId: string) => {
+        if (!threadId || !kgHistory?.versions?.length) {
+            console.log('[WorldMapView] Timeline diff fetch skipped: no threadId or kgHistory', { threadId: !!threadId, versionsLength: kgHistory?.versions?.length ?? 0 });
+            return;
+        }
+        const versions = kgHistory.versions as { id?: string }[];
+        const idx = versions.findIndex((v) => v.id === versionId);
+        const versionBefore = idx >= 0 && idx < versions.length - 1 ? versions[idx + 1]?.id : undefined;
+        if (!versionBefore) {
+            console.log('[WorldMapView] Timeline diff fetch skipped: no versionBefore', { versionId, idx, versionsLength: versions.length });
+            return;
+        }
+        const url = `/api/project/diff?thread_id=${threadId}&version1=${versionBefore}&version2=${versionId}`;
+        console.log('[WorldMapView] Timeline diff fetch start', { versionId, versionBefore, url });
+        try {
+            setLoadingTimelineDiff(true);
+            const orgContext = localStorage.getItem('reflexion_org_context');
+            const headers: Record<string, string> = {};
+            if (orgContext) headers['X-Organization-Context'] = orgContext;
+            const res = await fetch(url, { headers });
+            if (res.ok) {
+                const diff = await res.json();
+                const hasDiff = !!diff?.diff;
+                const hasSummary = !!diff?.summary;
+                const nodeCount = diff?.diff?.nodes?.length ?? 0;
+                const edgeCount = (diff?.diff?.edges ?? diff?.diff?.links)?.length ?? 0;
+                console.log('[WorldMapView] Timeline diff fetch OK', { versionId, hasDiff, hasSummary, nodeCount, edgeCount, summaryKeys: hasSummary ? Object.keys(diff.summary) : [] });
+                setTimelineVersionDiff(diff);
+            } else {
+                const text = await res.text();
+                console.warn('[WorldMapView] Timeline diff fetch failed', { versionId, status: res.status, body: text.slice(0, 200) });
+            }
+        } catch (e) {
+            console.error('[WorldMapView] Timeline version diff fetch error:', e);
+        } finally {
+            setLoadingTimelineDiff(false);
         }
     };
 
@@ -269,9 +369,10 @@ export function WorldMapView() {
 
         const svgElForCleanup = svgRef.current;
 
-        // Single prominent log so you can filter console by "WorldMapView" and ignore 404/Stream noise
-        const hasDiff = !!(diffData?.diff?.nodes?.length && (diffData?.diff?.links?.length ?? diffData?.diff?.edges?.length));
-        console.log('[WorldMapView] graph rendering', { nodes: data.nodes?.length, links: data.links?.length, hasDiff, diffNodes: diffData?.diff?.nodes?.length, diffEdges: (diffData?.diff?.links ?? diffData?.diff?.edges)?.length });
+        // When a timeline version is selected, use its diff for semantic coloring on the main graph; otherwise use compare-mode diff.
+        const effectiveDiff = (selectedTimelineVersionId && timelineVersionDiff) ? timelineVersionDiff : diffData;
+        const hasDiff = !!(effectiveDiff?.diff?.nodes?.length && (effectiveDiff?.diff?.links?.length ?? effectiveDiff?.diff?.edges?.length));
+        console.log('[WorldMapView] graph rendering', { nodes: data.nodes?.length, links: data.links?.length, hasDiff, diffSource: selectedTimelineVersionId ? 'timelineVersionDiff' : 'diffData', diffNodes: effectiveDiff?.diff?.nodes?.length, diffEdges: (effectiveDiff?.diff?.links ?? effectiveDiff?.diff?.edges)?.length });
 
         const width = containerRef.current.clientWidth;
         const height = containerRef.current.clientHeight;
@@ -302,10 +403,10 @@ export function WorldMapView() {
             .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
             .attr('fill', '#888');
 
-        // In compare mode, use the diff payload as the single source of truth for nodes and links
+        // In compare mode or timeline-version-selected mode, use the diff payload as the single source of truth for nodes and links
         // so link endpoints always match node ids (no orphaned added nodes).
-        const diffEdges = (diffData?.diff?.links ?? diffData?.diff?.edges) as Array<{ source?: string | number | { id?: string }; target?: string | number | { id?: string }; changeType?: string; type?: string }> | undefined;
-        const diffNodesList = diffData?.diff?.nodes as Array<{ id: string; name?: string; changeType?: string; diff_status?: string }> | undefined;
+        const diffEdges = (effectiveDiff?.diff?.links ?? effectiveDiff?.diff?.edges) as Array<{ source?: string | number | { id?: string }; target?: string | number | { id?: string }; changeType?: string; type?: string }> | undefined;
+        const diffNodesList = effectiveDiff?.diff?.nodes as Array<{ id: string; name?: string; changeType?: string; diff_status?: string }> | undefined;
         const useDiffPayload = diffNodesList?.length && diffEdges?.length;
 
         let nodes: Node[];
@@ -336,30 +437,30 @@ export function WorldMapView() {
         }
 
         // If we have diff data but didn't use diff payload (e.g. no edges), merge diff_status into nodes for coloring.
-        if (diffData && diffData.diff && diffData.diff.nodes && !useDiffPayload) {
+        if (effectiveDiff && effectiveDiff.diff && effectiveDiff.diff.nodes && !useDiffPayload) {
             console.log('[WorldMapView] Applying diff visualization (data nodes + diff status):', {
                 diffDataStructure: {
-                    hasDiff: !!diffData.diff,
-                    hasNodes: !!diffData.diff.nodes,
-                    nodesLength: diffData.diff.nodes?.length,
-                    summary: diffData.summary
+                    hasDiff: !!effectiveDiff.diff,
+                    hasNodes: !!effectiveDiff.diff.nodes,
+                    nodesLength: effectiveDiff.diff.nodes?.length,
+                    summary: effectiveDiff.summary
                 },
-                diffNodes: diffData.diff.nodes.length,
+                diffNodes: effectiveDiff.diff.nodes.length,
                 currentNodes: nodes.length,
-                sampleDiffNode: diffData.diff.nodes[0],
+                sampleDiffNode: effectiveDiff.diff.nodes[0],
                 sampleCurrentNode: nodes[0]
             });
             
             // Create maps for both ID and name/label matching (KG-diff contract: changeType or diff_status)
-            const diffNodesById = new Map(diffData.diff.nodes.map((n: any) => [n.id, n]));
+            const diffNodesById = new Map(effectiveDiff.diff.nodes.map((n: any) => [n.id, n]));
             const diffNodesByName = new Map(
-                diffData.diff.nodes
+                effectiveDiff.diff.nodes
                     .filter((n: any) => n.name != null || (n as any).label != null)
                     .map((n: any) => [n.name ?? (n as any).label, n])
             );
             
             // Log detailed structure
-            const sampleDiffNode = diffData.diff.nodes[0];
+            const sampleDiffNode = effectiveDiff.diff.nodes[0];
             const sampleCurrentNode = nodes[0];
             console.log('[WorldMapView] Sample diff node structure:', {
                 id: sampleDiffNode?.id,
@@ -385,7 +486,7 @@ export function WorldMapView() {
             console.log('[WorldMapView] Matching names:', matchingNames.slice(0, 10));
             
             // Check all diff nodes with their status
-            const diffNodesWithStatus = diffData.diff.nodes.filter((n: any) => n.diff_status).map((n: any) => ({
+            const diffNodesWithStatus = effectiveDiff.diff.nodes.filter((n: any) => n.diff_status).map((n: any) => ({
                 id: n.id,
                 name: n.name || (n as any).label,
                 status: n.diff_status,
@@ -436,10 +537,10 @@ export function WorldMapView() {
             });
         } else {
             console.log('[WorldMapView] No diff data available:', { 
-                diffData: diffData, 
-                hasDiff: !!diffData?.diff,
-                hasDiffNodes: !!diffData?.diff?.nodes,
-                diffNodesLength: diffData?.diff?.nodes?.length
+                effectiveDiff, 
+                hasDiff: !!effectiveDiff?.diff,
+                hasDiffNodes: !!effectiveDiff?.diff?.nodes,
+                diffNodesLength: effectiveDiff?.diff?.nodes?.length
             });
         }
 
@@ -544,7 +645,7 @@ export function WorldMapView() {
 
         // In diff mode: add anchor links for orphan added nodes so they are pulled into the layout (no floating).
         let validLinks: Link[] = resolvedLinks;
-        if (diffData && orphanAddedNodes.length > 0) {
+        if (effectiveDiff && orphanAddedNodes.length > 0) {
             const anchor = nodes.find((n) => allEndpointIdsFromResolved.has(n.id)) ?? nodes[0];
             if (anchor) {
                 const anchorLinks: Link[] = orphanAddedNodes.map((orphan) => ({
@@ -580,9 +681,9 @@ export function WorldMapView() {
         console.log('[WorldMapView] Endpoint sample (from links) vs node ids:', { endpoints: Array.from(endpointSet).slice(0, 15), nodeIds: nodes.slice(0, 12).map((n: Node) => n.id) });
 
         // Consolidated diff debug: filter console by "WorldMapView" to hide 404/Stream noise
-        if (diffData) {
+        if (effectiveDiff) {
             const added = nodes.filter((n: Node) => (n as any).diff_status === 'added');
-            const summaryFromApi = diffData.summary ?? (diffData.diff as any)?.summary ?? {};
+            const summaryFromApi = effectiveDiff.summary ?? (effectiveDiff.diff as any)?.summary ?? {};
             const _allEndpointIds = allEndpointIdsFromResolved;
             const orphans = orphanNodeIds;
             const linkSample = links.slice(0, 8).map((l: Link) => ({
@@ -593,7 +694,7 @@ export function WorldMapView() {
             console.log('source', useDiffPayload ? 'diff payload' : 'data + diff status');
             console.log('counts', { nodes: nodes.length, links: links.length, resolved: validLinks.length, dropped: droppedLinks.length });
             console.log('apiSummary', { added: summaryFromApi.added, modified: summaryFromApi.modified, removed: summaryFromApi.removed, total_nodes_v2: summaryFromApi.total_nodes_v2, total_links_v2: summaryFromApi.total_links_v2 });
-            console.log('semanticSummary', (summaryFromApi.semanticSummary ?? (diffData.diff as any)?.summary?.semanticSummary) ? String(summaryFromApi.semanticSummary ?? (diffData.diff as any)?.summary?.semanticSummary).slice(0, 200) : undefined);
+            console.log('semanticSummary', (summaryFromApi.semanticSummary ?? (effectiveDiff.diff as any)?.summary?.semanticSummary) ? String(summaryFromApi.semanticSummary ?? (effectiveDiff.diff as any)?.summary?.semanticSummary).slice(0, 200) : undefined);
             console.log('added nodes (ids)', added.map((n: Node) => n.id));
             console.log('orphans (nodes with no link endpoint)', orphans.length ? orphans : 'none');
             if (orphans.length) console.warn('orphan node ids', orphans);
@@ -798,7 +899,7 @@ export function WorldMapView() {
                 }
             }
         };
-    }, [data, viewMode, inactiveOpacity, diffData, selectedNode, compareViewMode]);
+    }, [data, viewMode, inactiveOpacity, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -886,7 +987,7 @@ export function WorldMapView() {
             {/* Toolbar */}
             <div className="h-12 border-b border-border bg-muted/30 flex items-center justify-between px-4 z-20">
                 <div className="flex items-center gap-4">
-                    {kgHistory && (
+                    {!embeddedInDecisions && kgHistory && (
                         <>
                             <UIButton
                                 variant="ghost"
@@ -967,8 +1068,8 @@ export function WorldMapView() {
                 </div>
             </div>
 
-            {/* History Panel - Slide In */}
-            {showHistory && kgHistory && (
+            {/* History Panel - Slide In (hidden when decisions table is the timeline) */}
+            {!embeddedInDecisions && showHistory && kgHistory && (
                 <div className="absolute top-12 left-0 bottom-0 w-80 bg-background/95 backdrop-blur-sm border-r border-border z-30 flex flex-col animate-in slide-in-from-left-4 duration-200">
                     <div className="p-4 border-b border-border flex justify-between items-center bg-muted/30">
                         <div>
@@ -1115,13 +1216,17 @@ export function WorldMapView() {
                             )}
                         </div>
                     ) : (
-                        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        <div className="flex-1 overflow-y-auto p-2 space-y-1 flex flex-col">
                             <div
                                 className={cn(
                                     "p-3 rounded-md cursor-pointer transition-colors flex flex-col gap-1",
                                     !activeVersion ? "bg-primary/10 border border-primary/20" : "hover:bg-muted"
                                 )}
-                                onClick={() => fetchData()}
+                                onClick={() => {
+                                    setSelectedTimelineVersionId(null);
+                                    setTimelineVersionDiff(null);
+                                    fetchData();
+                                }}
                             >
                                 <span className="text-xs font-semibold text-foreground flex items-center justify-between">
                                     Current State
@@ -1130,29 +1235,91 @@ export function WorldMapView() {
                                 <span className="text-[10px] text-muted-foreground">Live Active Graph</span>
                             </div>
 
-                            {kgHistory.versions.map((v: any) => (
-                                <div
-                                    key={v.id}
-                                    className={cn(
-                                        "p-3 rounded-md cursor-pointer transition-colors flex flex-col gap-1 border border-transparent",
-                                        activeVersion === v.id ? "bg-purple-500/10 border-purple-500/20" : "hover:bg-muted"
-                                    )}
-                                    onClick={() => fetchData(v.id)}
-                                >
-                                    <span className="text-xs font-medium text-foreground">
-                                        {v.message || v.id}
-                                    </span>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-[10px] text-muted-foreground">{v.timestamp}</span>
-                                        {v.sha && (
-                                            <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
+                            {kgHistory.versions.map((v: any) => {
+                                const isDecision = kgDecisions.some((d: any) => d.kg_version_sha === v.id);
+                                return (
+                                    <div
+                                        key={v.id}
+                                        className={cn(
+                                            "p-3 rounded-md cursor-pointer transition-colors flex flex-col gap-1 border border-transparent",
+                                            activeVersion === v.id ? "bg-purple-500/10 border-purple-500/20" : "hover:bg-muted"
+                                        )}
+                                        onClick={() => {
+                                            setActiveVersion(v.id);
+                                            fetchData(v.id);
+                                            if (isDecision) {
+                                                setSelectedTimelineVersionId(v.id);
+                                                console.log('[WorldMapView] Timeline: selected decision version', { versionId: v.id });
+                                                fetchDiffForTimelineVersion(v.id);
+                                            } else {
+                                                setSelectedTimelineVersionId(null);
+                                                setTimelineVersionDiff(null);
+                                            }
+                                        }}
+                                    >
+                                        <span className="text-xs font-medium text-foreground">
+                                            {v.message || v.id}
+                                        </span>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] text-muted-foreground">{v.timestamp}</span>
+                                            {v.sha && (
+                                                <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
+                                            )}
+                                        </div>
+                                        {isDecision && (
+                                            <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
                                         )}
                                     </div>
-                                    {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
-                                        <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
+                                );
+                            })}
+
+                            {/* Diff for selected decision version (timeline view) */}
+                            {selectedTimelineVersionId && (
+                                <div className="mt-4 p-3 border-t border-border space-y-2">
+                                    <div className="text-[10px] font-bold text-muted-foreground uppercase">Diff for this version</div>
+                                    {loadingTimelineDiff && (
+                                        <div className="flex justify-center py-4">
+                                            <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                        </div>
+                                    )}
+                                    {!loadingTimelineDiff && timelineVersionDiff && (
+                                        <>
+                                            {/* Numeric summary (from API top-level summary) */}
+                                            {timelineVersionDiff.summary && (
+                                                <div className="space-y-1 text-xs p-2 rounded-md bg-muted/30 border border-border">
+                                                    <div className="flex justify-between">
+                                                        <span className="text-green-500">Added:</span>
+                                                        <span className="font-medium">{timelineVersionDiff.summary.added ?? 0}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-yellow-500">Modified:</span>
+                                                        <span className="font-medium">{timelineVersionDiff.summary.modified ?? 0}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-red-500">Removed:</span>
+                                                        <span className="font-medium">{timelineVersionDiff.summary.removed ?? 0}</span>
+                                                    </div>
+                                                    {timelineVersionDiff.summary.semanticSummary && (
+                                                        <p className="text-[10px] text-muted-foreground italic pt-1 border-t border-border mt-1">
+                                                            {timelineVersionDiff.summary.semanticSummary}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {/* Full diagram (nodes/edges list) */}
+                                            {timelineVersionDiff.diff && (
+                                                <KgDiffDiagramView payload={timelineVersionDiff.diff} isLoading={false} />
+                                            )}
+                                            {!loadingTimelineDiff && !timelineVersionDiff.diff && timelineVersionDiff.summary && (
+                                                <p className="text-xs text-muted-foreground">No structural diff (summary only).</p>
+                                            )}
+                                        </>
+                                    )}
+                                    {!loadingTimelineDiff && selectedTimelineVersionId && !timelineVersionDiff && (
+                                        <p className="text-xs text-muted-foreground">Loading diff from previous version…</p>
                                     )}
                                 </div>
-                            ))}
+                            )}
                         </div>
                     )}
                 </div>
