@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 /**
  * Proxy to backend GET /artifact/draft-content.
@@ -59,8 +60,8 @@ export async function GET(req: Request) {
 
         const data = await resp.json();
         return NextResponse.json(data);
-    } catch (error: unknown) {
-        console.error("[PROXY] Artifact draft-content failed:", error);
+    } catch (error) {
+        console.error("[PROXY] draft-content fetch failed:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }

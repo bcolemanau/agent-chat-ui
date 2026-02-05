@@ -5,7 +5,6 @@ import { ReactNode, useEffect, useMemo, useRef, useState, FormEvent } from "reac
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
-import { getDefaultClientApiUrl } from "@/lib/backend-proxy";
 import { useBranding } from "@/providers/Branding";
 import { withThreadSpan } from "@/lib/otel-client";
 import { Button } from "../ui/button";
@@ -119,11 +118,10 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     messages = [],
     isLoading,
     setApiKey: _setApiKey,
-    apiUrl: streamApiUrl,
+    apiUrl = "http://localhost:8080",
   } = stream;
-  const apiUrl = streamApiUrl ?? getDefaultClientApiUrl();
-  // Use stream's threadId when URL hasn't updated yet so upload sends thread_id and backend can inject proposals.
-  const effectiveThreadIdForUpload = (stream as { threadId?: string | null })?.threadId ?? threadId ?? undefined;
+  // Use stream's threadId when URL hasn't updated yet (avoids enrichment going to "default" on new threads)
+  const effectiveThreadIdForUpload = (stream as { threadId?: string | null })?.threadId ?? threadId;
   const {
     contentBlocks,
     setContentBlocks,
@@ -161,7 +159,6 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
       .filter((id): id is string => !!id && !processedArtifactIds.has(id));
 
     if (newArtifactIds.length > 0) {
-      console.log("[Thread] ENTER effect: post-upload submit", { newArtifactIdsCount: newArtifactIds.length, effectiveThreadId: effectiveThreadIdForUpload });
       // Mark as processed
       setProcessedArtifactIds((prev) => {
         const updated = new Set(prev);
@@ -199,7 +196,6 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
           streamResumable: true,
         }
       );
-      console.log("[Thread] EXIT effect: post-upload submit SUCCESS", { pending_document_ids: context.pending_document_ids });
 
       // Refetch thread state so stream messages include backend-injected proposals (enrichment, link)
       const refetch = (stream as any).refetchThreadState;

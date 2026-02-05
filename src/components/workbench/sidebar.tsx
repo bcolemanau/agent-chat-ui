@@ -61,8 +61,8 @@ export function Sidebar() {
     const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState("");
 
-    // Check if user is NewCo/Reflexion Admin (match backend: admin, newco_admin, NewCo Administrator, reflexion_admin)
-    const isAdmin = ['reflexion_admin', 'admin', 'newco_admin', 'Newco_admin', 'NewCo Administrator'].includes(userRole ?? '') || (userRole?.toLowerCase() === 'newco_admin');
+    // Check if user is Reflexion Admin (keys are reflexion_admin or admin)
+    const isAdmin = userRole === "reflexion_admin" || userRole === "admin";
 
     const fetchProjects = useCallback(async () => {
         try {
@@ -168,12 +168,7 @@ export function Sidebar() {
     useEffect(() => {
         fetchProjects();
         window.addEventListener('focus', fetchProjects);
-        const handleOrgContextChanged = () => fetchProjects();
-        window.addEventListener('reflexion_org_context_changed', handleOrgContextChanged);
-        return () => {
-            window.removeEventListener('focus', fetchProjects);
-            window.removeEventListener('reflexion_org_context_changed', handleOrgContextChanged);
-        };
+        return () => window.removeEventListener('focus', fetchProjects);
     }, [fetchProjects]);
 
     const filteredProjects = useMemo(() => {

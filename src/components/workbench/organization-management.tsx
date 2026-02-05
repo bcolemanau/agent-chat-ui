@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Building2, Plus, Edit, Trash2, Palette, Loader2, Users, UserPlus } from "lucide-react";
+import { Building2, Plus, Edit, Trash2, Palette, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,34 +14,11 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
 interface Organization {
     id: string;
     name: string;
-    workflow_id?: string;
-}
-
-interface WorkflowOption {
-    id: string;
-    name?: string;
-}
-
-// Fallback when backend (e.g. staging) doesn't yet return digital_primary_npd
-const KNOWN_WORKFLOW_FALLBACKS: WorkflowOption[] = [
-    { id: "default", name: "Default" },
-    { id: "digital_primary_npd", name: "Digital primary NPD" },
-];
-
-interface Role {
-    key: string;
-    name: string;
-}
-
-interface OrgUser {
-    email: string;
-    roles: string[];
 }
 
 interface Branding {
@@ -68,8 +45,7 @@ export function OrganizationManagement() {
     const [isBrandingDialogOpen, setIsBrandingDialogOpen] = useState(false);
     const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
     const [editingBranding, setEditingBranding] = useState<{ orgId: string; branding: Branding | null } | null>(null);
-    const [formData, setFormData] = useState({ id: "", name: "", workflow_id: "default" });
-    const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
+    const [formData, setFormData] = useState({ id: "", name: "" });
     const [brandingFormData, setBrandingFormData] = useState<Branding>({
         name: "",
         brand_title: "",
@@ -78,176 +54,9 @@ export function OrganizationManagement() {
     });
     const [submitting, setSubmitting] = useState(false);
 
-    // Users (RBAC) state
-    const [roles, setRoles] = useState<Role[]>([]);
-    const [orgUsers, setOrgUsers] = useState<Record<string, OrgUser[]>>({});
-    const [usersPanelOpen, setUsersPanelOpen] = useState<string | null>(null);
-    const [usersLoading, setUsersLoading] = useState<Record<string, boolean>>({});
-    const [isAddUserOpen, setIsAddUserOpen] = useState<{ orgId: string } | null>(null);
-    const [isEditUserOpen, setIsEditUserOpen] = useState<{ orgId: string; user: OrgUser } | null>(null);
-    const [addUserForm, setAddUserForm] = useState({ email: "", roles: [] as string[] });
-    const [editUserRoles, setEditUserRoles] = useState<string[]>([]);
-
     useEffect(() => {
         loadData();
     }, []);
-
-    const loadWorkflows = async () => {
-        try {
-            const resp = await fetch("/api/auth/workflows");
-            if (resp.ok) {
-                const data = await resp.json();
-                const fromApi = Array.isArray(data) ? data : [];
-                const ids = new Set(fromApi.map((w: WorkflowOption) => w.id));
-                const merged = [...fromApi];
-                for (const w of KNOWN_WORKFLOW_FALLBACKS) {
-                    if (!ids.has(w.id)) {
-                        merged.push(w);
-                        ids.add(w.id);
-                    }
-                }
-                setWorkflows(merged);
-            } else {
-                setWorkflows(KNOWN_WORKFLOW_FALLBACKS);
-            }
-        } catch (e) {
-            console.warn("[ORG_MGMT] Failed to load workflows:", e);
-            setWorkflows(KNOWN_WORKFLOW_FALLBACKS);
-        }
-    };
-
-    const loadRoles = async () => {
-        try {
-            const resp = await fetch("/api/auth/roles");
-            if (resp.ok) {
-                const data = await resp.json();
-                setRoles(Array.isArray(data) ? data : []);
-            }
-        } catch (e) {
-            console.warn("[ORG_MGMT] Failed to load roles:", e);
-        }
-    };
-
-    const loadOrgUsers = async (orgId: string) => {
-        setUsersLoading((prev) => ({ ...prev, [orgId]: true }));
-        try {
-            const resp = await fetch(`/api/auth/organizations/${encodeURIComponent(orgId)}/users`);
-            if (resp.ok) {
-                const data = await resp.json();
-                setOrgUsers((prev) => ({ ...prev, [orgId]: Array.isArray(data) ? data : [] }));
-            } else {
-                const err = await resp.json().catch(() => ({}));
-                toast.error(err.error || "Failed to load users");
-            }
-        } catch (e) {
-            console.error("[ORG_MGMT] Load org users failed:", e);
-            toast.error("Failed to load users");
-        } finally {
-            setUsersLoading((prev) => ({ ...prev, [orgId]: false }));
-        }
-    };
-
-    const openUsersPanel = (orgId: string) => {
-        if (usersPanelOpen === orgId) {
-            setUsersPanelOpen(null);
-            return;
-        }
-        setUsersPanelOpen(orgId);
-        if (roles.length === 0) loadRoles();
-        if (!orgUsers[orgId]) loadOrgUsers(orgId);
-    };
-
-    const handleAddUser = async () => {
-        const ctx = isAddUserOpen;
-        if (!ctx || !addUserForm.email.trim()) {
-            toast.error("Email is required");
-            return;
-        }
-        try {
-            setSubmitting(true);
-            const resp = await fetch(`/api/auth/organizations/${encodeURIComponent(ctx.orgId)}/users`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email: addUserForm.email.trim(), roles: addUserForm.roles }),
-            });
-            if (resp.ok) {
-                toast.success("User added");
-                setIsAddUserOpen(null);
-                setAddUserForm({ email: "", roles: [] });
-                loadOrgUsers(ctx.orgId);
-            } else {
-                const err = await resp.json().catch(() => ({}));
-                toast.error(err.error || "Failed to add user");
-            }
-        } catch (e) {
-            console.error("[ORG_MGMT] Add user failed:", e);
-            toast.error("Failed to add user");
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const handleUpdateUserRoles = async () => {
-        const ctx = isEditUserOpen;
-        if (!ctx) return;
-        try {
-            setSubmitting(true);
-            const resp = await fetch(
-                `/api/auth/organizations/${encodeURIComponent(ctx.orgId)}/users/${encodeURIComponent(ctx.user.email)}`,
-                {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ roles: editUserRoles }),
-                }
-            );
-            if (resp.ok) {
-                toast.success("Roles updated");
-                setIsEditUserOpen(null);
-                loadOrgUsers(ctx.orgId);
-            } else {
-                const err = await resp.json().catch(() => ({}));
-                toast.error(err.error || "Failed to update roles");
-            }
-        } catch (e) {
-            console.error("[ORG_MGMT] Update roles failed:", e);
-            toast.error("Failed to update roles");
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const handleRemoveUser = async (orgId: string, email: string) => {
-        if (!confirm(`Remove "${email}" from this organization?`)) return;
-        try {
-            const resp = await fetch(
-                `/api/auth/organizations/${encodeURIComponent(orgId)}/users/${encodeURIComponent(email)}`,
-                { method: "DELETE" }
-            );
-            if (resp.ok) {
-                toast.success("User removed");
-                loadOrgUsers(orgId);
-            } else {
-                const err = await resp.json().catch(() => ({}));
-                toast.error(err.error || "Failed to remove user");
-            }
-        } catch (e) {
-            console.error("[ORG_MGMT] Remove user failed:", e);
-            toast.error("Failed to remove user");
-        }
-    };
-
-    const toggleAddUserRole = (key: string) => {
-        setAddUserForm((prev) => ({
-            ...prev,
-            roles: prev.roles.includes(key) ? prev.roles.filter((r) => r !== key) : [...prev.roles, key],
-        }));
-    };
-
-    const toggleEditUserRole = (key: string) => {
-        setEditUserRoles((prev) =>
-            prev.includes(key) ? prev.filter((r) => r !== key) : [...prev, key]
-        );
-    };
 
     const loadData = async () => {
         try {
@@ -298,7 +107,7 @@ export function OrganizationManagement() {
             if (resp.ok) {
                 toast.success("Organization created successfully");
                 setIsCreateDialogOpen(false);
-                setFormData({ id: "", name: "", workflow_id: "default" });
+                setFormData({ id: "", name: "" });
                 await loadData();
                 // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
@@ -326,14 +135,14 @@ export function OrganizationManagement() {
             const resp = await fetch(`/api/organizations/${editingOrg.id}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: formData.name, workflow_id: formData.workflow_id || "default" }),
+                body: JSON.stringify({ name: formData.name }),
             });
 
             if (resp.ok) {
                 toast.success("Organization updated successfully");
                 setIsEditDialogOpen(false);
                 setEditingOrg(null);
-                setFormData({ id: "", name: "", workflow_id: "default" });
+                setFormData({ id: "", name: "" });
                 await loadData();
                 // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
@@ -378,8 +187,7 @@ export function OrganizationManagement() {
 
     const handleOpenEdit = (org: Organization) => {
         setEditingOrg(org);
-        setFormData({ id: org.id, name: org.name, workflow_id: org.workflow_id || "default" });
-        if (workflows.length === 0) loadWorkflows();
+        setFormData({ id: org.id, name: org.name });
         setIsEditDialogOpen(true);
     };
 
@@ -467,22 +275,10 @@ export function OrganizationManagement() {
                                     <Building2 className="h-5 w-5 text-muted-foreground" />
                                     <div>
                                         <CardTitle>{org.name}</CardTitle>
-                                        <CardDescription>
-                                            ID: {org.id}
-                                            {" · "}
-                                            Default workflow: {org.workflow_id || "default"}
-                                        </CardDescription>
+                                        <CardDescription>ID: {org.id}</CardDescription>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <Button
-                                        variant={usersPanelOpen === org.id ? "secondary" : "outline"}
-                                        size="sm"
-                                        onClick={() => openUsersPanel(org.id)}
-                                    >
-                                        <Users className="h-4 w-4 mr-2" />
-                                        Users
-                                    </Button>
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -514,72 +310,6 @@ export function OrganizationManagement() {
                                 </div>
                             </div>
                         </CardHeader>
-                        {usersPanelOpen === org.id && (
-                            <CardContent className="border-t bg-muted/30">
-                                {usersLoading[org.id] ? (
-                                    <div className="flex items-center gap-2 py-4">
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        <span className="text-sm text-muted-foreground">Loading users…</span>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm font-medium">Organization users</span>
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                onClick={() => {
-                                                    setIsAddUserOpen({ orgId: org.id });
-                                                    setAddUserForm({ email: "", roles: [] });
-                                                }}
-                                            >
-                                                <UserPlus className="h-4 w-4 mr-2" />
-                                                Add user
-                                            </Button>
-                                        </div>
-                                        {(orgUsers[org.id]?.length ?? 0) === 0 ? (
-                                            <p className="text-sm text-muted-foreground">No users in this organization.</p>
-                                        ) : (
-                                            <ul className="space-y-2">
-                                                {(orgUsers[org.id] ?? []).map((u) => (
-                                                    <li
-                                                        key={u.email}
-                                                        className="flex items-center justify-between rounded-md border bg-background px-3 py-2 text-sm"
-                                                    >
-                                                        <span className="font-medium">{u.email}</span>
-                                                        <div className="flex items-center gap-2">
-                                                            {(u.roles ?? []).map((r) => (
-                                                                <Badge key={r} variant="secondary">
-                                                                    {roles.find((x) => x.key === r)?.name ?? r}
-                                                                </Badge>
-                                                            ))}
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                onClick={() => {
-                                                                    setIsEditUserOpen({ orgId: org.id, user: u });
-                                                                    setEditUserRoles(u.roles ?? []);
-                                                                }}
-                                                            >
-                                                                <Edit className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                className="text-destructive hover:text-destructive"
-                                                                onClick={() => handleRemoveUser(org.id, u.email)}
-                                                            >
-                                                                <Trash2 className="h-4 w-4" />
-                                                            </Button>
-                                                        </div>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
-                                    </div>
-                                )}
-                            </CardContent>
-                        )}
                         {branding[org.id] && (
                             <CardContent>
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -624,28 +354,6 @@ export function OrganizationManagement() {
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             />
                         </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="create-org-workflow">Default workflow</Label>
-                            <select
-                                id="create-org-workflow"
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                value={formData.workflow_id}
-                                onChange={(e) => setFormData({ ...formData, workflow_id: e.target.value })}
-                            >
-                                {workflows.length === 0 ? (
-                                    <option value="default">default</option>
-                                ) : (
-                                    workflows.map((w) => (
-                                        <option key={w.id} value={w.id}>
-                                            {w.name ?? w.id}
-                                        </option>
-                                    ))
-                                )}
-                            </select>
-                            <p className="text-xs text-muted-foreground">
-                                New chat threads and projects in this org will use this workflow (e.g. digital_primary_npd for Reflexion).
-                            </p>
-                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -679,34 +387,6 @@ export function OrganizationManagement() {
                                 value={formData.name}
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-org-workflow">Default workflow</Label>
-                            <select
-                                id="edit-org-workflow"
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                value={formData.workflow_id}
-                                onChange={(e) => setFormData({ ...formData, workflow_id: e.target.value })}
-                            >
-                                {workflows.length === 0 ? (
-                                    <option value="default">default</option>
-                                ) : (
-                                    <>
-                                        {workflows.map((w) => (
-                                            <option key={w.id} value={w.id}>
-                                                {w.name ?? w.id}
-                                            </option>
-                                        ))}
-                                        {formData.workflow_id &&
-                                            !workflows.some((w) => w.id === formData.workflow_id) && (
-                                                <option value={formData.workflow_id}>{formData.workflow_id}</option>
-                                            )}
-                                    </>
-                                )}
-                            </select>
-                            <p className="text-xs text-muted-foreground">
-                                New chat threads and projects in this org will use this workflow (graph).
-                            </p>
                         </div>
                     </div>
                     <DialogFooter>
@@ -865,106 +545,6 @@ export function OrganizationManagement() {
                             Cancel
                         </Button>
                         <Button onClick={handleSaveBranding} disabled={submitting}>
-                            {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                            Save
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* Add User Dialog */}
-            <Dialog open={!!isAddUserOpen} onOpenChange={(open) => !open && setIsAddUserOpen(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Add user to organization</DialogTitle>
-                        <DialogDescription>
-                            Add a user to {isAddUserOpen?.orgId ?? ""} with one or more roles.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="user-email">Email</Label>
-                            <Input
-                                id="user-email"
-                                type="email"
-                                placeholder="user@example.com"
-                                value={addUserForm.email}
-                                onChange={(e) => setAddUserForm((prev) => ({ ...prev, email: e.target.value }))}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Roles</Label>
-                            <div className="flex flex-wrap gap-2">
-                                {roles.map((r) => (
-                                    <label
-                                        key={r.key}
-                                        className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer hover:bg-muted/50"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={addUserForm.roles.includes(r.key)}
-                                            onChange={() => toggleAddUserRole(r.key)}
-                                            className="rounded border-input"
-                                        />
-                                        {r.name}
-                                    </label>
-                                ))}
-                                {roles.length === 0 && (
-                                    <span className="text-sm text-muted-foreground">No roles available.</span>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsAddUserOpen(null)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleAddUser} disabled={submitting}>
-                            {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                            Add user
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* Edit User Roles Dialog */}
-            <Dialog open={!!isEditUserOpen} onOpenChange={(open) => !open && setIsEditUserOpen(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Edit user roles</DialogTitle>
-                        <DialogDescription>
-                            Update roles for {isEditUserOpen?.user.email ?? ""} in {isEditUserOpen?.orgId ?? ""}.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                            <Label>Roles</Label>
-                            <div className="flex flex-wrap gap-2">
-                                {roles.map((r) => (
-                                    <label
-                                        key={r.key}
-                                        className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer hover:bg-muted/50"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={editUserRoles.includes(r.key)}
-                                            onChange={() => toggleEditUserRole(r.key)}
-                                            className="rounded border-input"
-                                        />
-                                        {r.name}
-                                    </label>
-                                ))}
-                                {roles.length === 0 && (
-                                    <span className="text-sm text-muted-foreground">No roles available.</span>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsEditUserOpen(null)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleUpdateUserRoles} disabled={submitting}>
                             {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
                             Save
                         </Button>

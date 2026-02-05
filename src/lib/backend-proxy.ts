@@ -3,16 +3,8 @@ import { NextResponse } from "next/server";
 const DEFAULT_BACKEND = "https://reflexion-staging.up.railway.app";
 
 /**
- * Default API URL for client-side when stream/env does not provide one.
- * Browser: same-origin /api (Next.js proxy). SSR/fallback: staging.
- */
-export function getDefaultClientApiUrl(): string {
-    if (typeof window !== "undefined") return `${window.location.origin}/api`;
-    return DEFAULT_BACKEND;
-}
-
-/**
  * Backend base URL (no trailing slash). Used by API routes that proxy to the Reflexion backend.
+ * Server-only; for client default API URL use getDefaultClientApiUrl from @/lib/default-client-api-url.
  */
 export function getBackendBaseUrl(): string {
     const url = process.env.LANGGRAPH_API_URL || DEFAULT_BACKEND;

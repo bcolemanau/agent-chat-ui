@@ -56,20 +56,16 @@ export function ProjectSwitcher() {
 
     React.useEffect(() => {
         fetchProjects();
+
+        // Refresh when org changes (using custom event or interval as a simple fallback)
         const handleFocus = () => fetchProjects();
-        const handleOrgContextChanged = () => fetchProjects();
         window.addEventListener('focus', handleFocus);
-        window.addEventListener('reflexion_org_context_changed', handleOrgContextChanged);
-        return () => {
-            window.removeEventListener('focus', handleFocus);
-            window.removeEventListener('reflexion_org_context_changed', handleOrgContextChanged);
-        };
+        return () => window.removeEventListener('focus', handleFocus);
     }, [fetchProjects]);
 
     const currentProject = threadId ? projects.find((p) => p.id === threadId) : null;
-    const currentLabel = currentProject ? formatProjectLabel(currentProject) : (threadId ? `Project ${threadId.substring(0, 8)}` : null);
-    const triggerTitle = currentProject ? (currentProject.name || currentProject.id) : (threadId ?? undefined);
-    const threadIdNotInList = threadId && !projects.some((p) => p.id === threadId);
+    const currentLabel = currentProject ? formatProjectLabel(currentProject) : null;
+    const triggerTitle = currentProject ? (currentProject.name || currentProject.id) : undefined;
 
     return (
         <Select
@@ -86,11 +82,6 @@ export function ProjectSwitcher() {
                 </SelectValue>
             </SelectTrigger>
             <SelectContent className="bg-background border-border text-foreground">
-                {threadIdNotInList && (
-                    <SelectItem key={threadId} value={threadId} className="focus:bg-muted focus:text-foreground italic">
-                        {currentLabel}
-                    </SelectItem>
-                )}
                 {projects.map((project) => (
                     <SelectItem key={project.id} value={project.id} className="focus:bg-muted focus:text-foreground italic">
                         {formatProjectLabel(project)}
