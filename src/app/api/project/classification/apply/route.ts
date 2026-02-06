@@ -5,7 +5,7 @@ import { getBackendBaseUrl } from "@/lib/backend-proxy";
 /**
  * Issue 37 Phase 1: Apply classification (Begin Enriching).
  * Proxies POST to backend /project/classification/apply with session auth.
- * Body: { trigger_id, thread_id?, reasoning?, confidence? }.
+ * Body: { decision_id, trigger_id, project_id?, thread_id?, reasoning?, confidence? }.
  * Returns: { success, active_agent, current_trigger_id, ... }.
  */
 export async function POST(req: Request) {
@@ -16,13 +16,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    let body: { trigger_id: string; thread_id?: string; reasoning?: string; confidence?: number };
+    let body: {
+      decision_id: string;
+      trigger_id: string;
+      project_id?: string;
+      thread_id?: string;
+      reasoning?: string;
+      confidence?: number;
+    };
     try {
       body = await req.json();
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
+    if (!body.decision_id) {
+      return NextResponse.json({ error: "decision_id is required" }, { status: 400 });
+    }
     if (!body.trigger_id) {
       return NextResponse.json({ error: "trigger_id is required" }, { status: 400 });
     }
@@ -45,7 +55,9 @@ export async function POST(req: Request) {
       method: "POST",
       headers,
       body: JSON.stringify({
+        decision_id: body.decision_id,
         trigger_id: body.trigger_id,
+        project_id: body.project_id ?? undefined,
         thread_id: body.thread_id ?? undefined,
         reasoning: body.reasoning ?? undefined,
         confidence: body.confidence ?? undefined,

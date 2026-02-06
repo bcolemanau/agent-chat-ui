@@ -74,7 +74,7 @@ export function ProjectSwitcher() {
         >
             <SelectTrigger
                 title={triggerTitle}
-                className="h-7 w-auto min-w-0 max-w-[220px] px-2 py-0.5 text-sm font-medium bg-muted/50 border border-border rounded-md text-foreground hover:bg-muted gap-1.5 shadow-none [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"
+                className="h-7 w-auto min-w-0 max-w-[300px] px-2 py-0.5 text-sm font-medium bg-muted/50 border border-border rounded-md text-foreground hover:bg-muted gap-1.5 shadow-none [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"
             >
                 <Briefcase className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                 <SelectValue placeholder="Select Project">

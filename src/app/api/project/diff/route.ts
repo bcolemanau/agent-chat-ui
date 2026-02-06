@@ -41,7 +41,15 @@ export async function GET(req: Request) {
 
         console.log(`[PROXY] Fetching KG diff from ${targetUrl}`);
 
-        const resp = await fetch(targetUrl, { headers });
+        const controller = new AbortController();
+        const timeoutMs = Number(process.env.PROJECT_DIFF_TIMEOUT_MS) || 60_000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        const resp = await fetch(targetUrl, {
+            headers,
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
         if (!resp.ok) {
             const errorText = await resp.text();
@@ -57,6 +65,18 @@ export async function GET(req: Request) {
         });
 
     } catch (error: any) {
+        const cause = error?.cause;
+        const code = cause?.code ?? cause?.errno;
+        const isReset = code === "ECONNRESET" || code === -104 || error?.name === "AbortError";
+
+        if (isReset || code === "ECONNREFUSED" || code === "ETIMEDOUT") {
+            console.error("[PROXY] KG Diff fetch failed (connection):", code ?? error?.message, error);
+            const message =
+                error?.name === "AbortError"
+                    ? "Backend timeout"
+                    : "Backend connection reset or unreachable. Try again.";
+            return NextResponse.json({ error: message, code: code ?? "FETCH_FAILED" }, { status: 502 });
+        }
         console.error("[PROXY] KG Diff fetch failed:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }

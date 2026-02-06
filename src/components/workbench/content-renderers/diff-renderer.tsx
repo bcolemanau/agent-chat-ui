@@ -13,6 +13,7 @@ import {
 } from "@/lib/diff-types";
 import { AlertCircle, ArrowRight, ShieldCheck, ShieldAlert } from "lucide-react";
 import { MarkdownText } from "@/components/thread/markdown-text";
+import { DecisionSummaryView } from "../decision-summary-view";
 
 export interface DiffRendererMetadata {
   diff: any;
@@ -106,10 +107,12 @@ export class DiffRenderer implements ContentRenderer {
 
     const type = diff.type as "progression" | "similarity" | "subset" | "kg_diff" | undefined;
     console.log("[DiffRenderer] ENTER render", { type, proposalType, hasBaseArtifactTypes: !!(diff as any).right?.base_artifact_types?.length });
-    const traceabilityBlock =
-      previewData?.impact_forecast || previewData?.coverage_analysis ? (
-        <TraceabilityPreviewBlock previewData={previewData} />
-      ) : null;
+    const decisionSummary = previewData?.decision_summary;
+    const traceabilityBlock = decisionSummary ? (
+      <DecisionSummaryView decisionSummary={decisionSummary} className="mb-3" />
+    ) : previewData?.impact_forecast || previewData?.coverage_analysis ? (
+      <TraceabilityPreviewBlock previewData={previewData} />
+    ) : null;
 
     let mainContent: ReactNode = null;
     switch (type) {

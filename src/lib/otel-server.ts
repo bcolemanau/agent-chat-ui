@@ -14,12 +14,13 @@ import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-node';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 
 // Fetch LangSmith configuration from environment
-const apiKey = process.env.LANGSMITH_API_KEY;
+const rawKey = process.env.LANGSMITH_API_KEY;
+const apiKey = typeof rawKey === 'string' && rawKey.trim() && rawKey !== 'remove-me' ? rawKey : undefined;
 const endpoint = process.env.LANGSMITH_ENDPOINT || process.env.LANGSMITH_URL || 'https://api.smith.langchain.com';
 const project = process.env.LANGSMITH_PROJECT || process.env.LANGCHAIN_PROJECT || 'NewCo';
 
 if (!apiKey) {
-  console.warn('[OTEL] LANGSMITH_API_KEY not set, skipping server-side OpenTelemetry initialization');
+  console.warn('[OTEL] LANGSMITH_API_KEY not set or placeholder, skipping server-side OpenTelemetry initialization');
 } else {
   try {
     // Configure OTLP exporter for LangSmith

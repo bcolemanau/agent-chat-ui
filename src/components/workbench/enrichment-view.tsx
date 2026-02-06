@@ -11,6 +11,7 @@ import { getApiKey } from "@/lib/api-key";
 import { useQueryState } from "nuqs";
 import { useStreamContext } from "@/providers/Stream";
 import { KgDiffDiagramView } from "@/components/workbench/kg-diff-diagram-view";
+import { DecisionSummaryView } from "@/components/workbench/decision-summary-view";
 
 // Available KG Artifact types (from backend)
 const ARTIFACT_TYPES = [
@@ -50,6 +51,8 @@ export interface EnrichmentProposal {
     impact_forecast?: { message?: string; downstream_template_ids?: string[] };
     /** Issue #63: uncovered CRITs (risks in scope); uncovered_crits_with_labels has id + label for display */
     coverage_analysis?: { message?: string; uncovered_crits?: string[]; uncovered_crits_with_labels?: Array<{ id: string; label: string }> };
+    /** Decision-time 3-view: semantic summary + tables + graph */
+    decision_summary?: import("@/lib/diff-types").DecisionSummary;
   };
 }
 
@@ -487,8 +490,12 @@ export function EnrichmentView() {
                   </div>
                 )}
 
-                {/* Issue #63: Impact forecast and coverage analysis (risks in scope) */}
-                {(proposal.preview_data?.impact_forecast || proposal.preview_data?.coverage_analysis) && (
+                {/* Decision-time 3-view: semantic + table + graph (when backend provides decision_summary) */}
+                {proposal.preview_data?.decision_summary ? (
+                  <div className="mb-4">
+                    <DecisionSummaryView decisionSummary={proposal.preview_data.decision_summary} />
+                  </div>
+                ) : (proposal.preview_data?.impact_forecast || proposal.preview_data?.coverage_analysis) ? (
                   <div className="mb-4 p-3 border border-border rounded-lg bg-muted/30 text-sm space-y-3">
                     {proposal.preview_data.impact_forecast && (
                       <div>
@@ -525,7 +532,7 @@ export function EnrichmentView() {
                       </div>
                     )}
                   </div>
-                )}
+                ) : null}
 
                 {/* Summary */}
                 {proposal.enrichment.summary && (

@@ -87,22 +87,28 @@ export function OrgSwitcher() {
 
     if (!isAdmin) return null;
 
+    const selectedOrg = organizations.find(org => org.id === selectedOrgId);
+    const selectedOrgName = selectedOrg?.name || 'Organization';
+
     if (loading && organizations.length === 0) {
         return (
-            <div className="flex items-center gap-2 w-[180px] h-9">
-                <Building2 className="w-4 h-4 text-muted-foreground" />
+            <div className="flex items-center gap-2 min-w-[140px] h-9">
+                <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
                 <span className="text-sm text-muted-foreground">Loading...</span>
             </div>
         );
     }
 
     return (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
             <Select value={selectedOrgId} onValueChange={handleValueChange}>
-                <SelectTrigger className="w-[180px] h-9 bg-background border-border text-foreground">
-                    <Building2 className="w-4 h-4 mr-2 text-muted-foreground" />
+                <SelectTrigger
+                    title={selectedOrgName}
+                    className="h-9 min-w-[140px] max-w-[320px] w-auto bg-background border-border text-foreground [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"
+                >
+                    <Building2 className="w-4 h-4 mr-2 text-muted-foreground shrink-0" />
                     <SelectValue placeholder="Organization">
-                        {organizations.find(org => org.id === selectedOrgId)?.name || 'Organization'}
+                        {selectedOrgName}
                     </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="bg-background border-border text-foreground">

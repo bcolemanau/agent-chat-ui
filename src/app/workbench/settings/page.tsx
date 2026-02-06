@@ -22,8 +22,9 @@ export default function SettingsPage() {
     };
 
     return (
-        <div className="flex flex-col h-full min-h-0 bg-background overflow-auto">
-            <div className="max-w-4xl mx-auto w-full p-8 pb-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div className="flex flex-col h-full min-h-0 bg-background">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+                <div className="max-w-4xl mx-auto w-full p-8 pb-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
                 <div className="flex flex-col gap-2 shrink-0">
                     <div className="flex items-center gap-3 text-primary mb-2">
                         <div className="p-2 bg-primary/10 rounded-lg">
@@ -197,6 +198,7 @@ export default function SettingsPage() {
                             </div>
                         )}
                     </section>
+                </div>
                 </div>
             </div>
         </div>
