@@ -324,7 +324,12 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: res.statusText }));
-            throw new Error((err as any).detail || "Failed to apply artifact link");
+            const detail = typeof (err as any).detail === "string" ? (err as any).detail : (err as any).detail?.message;
+            const message =
+              res.status === 404
+                ? "Artifact link is not available. The backend may not support this action—check deployment."
+                : detail || "Failed to apply artifact link";
+            throw new Error(message);
           }
           const data = await res.json();
           setStatus("approved");
@@ -338,7 +343,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
         } catch (error: any) {
           console.error("[ApprovalCard] Error applying artifact link:", error);
           setStatus("pending");
-          toast.error("Error", { description: error.message || "Failed to apply artifact link" });
+          toast.error("Artifact link failed", { description: error.message || "Failed to apply artifact link" });
         } finally {
           setIsLoading(false);
         }

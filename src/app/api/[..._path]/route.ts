@@ -5,7 +5,7 @@ import { getSessionSafe } from "@/auth";
 // We use a custom implementation to ensure the client's JWT token is forwarded correctly.
 // Middleware: Automatically injects Google auth token from NextAuth session.
 
-const BACKEND_URL = process.env.LANGGRAPH_API_URL ?? "https://reflexion-staging.up.railway.app";
+const BACKEND_URL = (process.env.LANGGRAPH_API_URL ?? "https://reflexion-staging.up.railway.app").replace(/\/+$/, "");
 
 /** Unbuffered write so Docker/local logs show up (stdout can be buffered when not a TTY). */
 function debugLog(msg: string) {
@@ -16,12 +16,13 @@ function debugLog(msg: string) {
 
 async function proxyRequest(req: NextRequest, method: string) {
   try {
-    // Get the path from the request (everything after /api/)
-    const path = req.nextUrl.pathname.replace(/^\/api/, "");
+    // Path: everything after /api/ (strip /api so backend gets /artifact/..., /threads/..., etc.)
+    const rawPath = req.nextUrl.pathname.replace(/^\/api\/?/, "") || "";
+    const path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
     // Debug: always log so we see output on every catch-all request (Docker/local)
     debugLog(`catch-all proxyRequest ${method} ${path}`);
 
-    // Construct backend URL
+    // Construct backend URL (no double slash: BACKEND_URL has no trailing slash, path has leading slash)
     const backendUrl = `${BACKEND_URL}${path}${req.nextUrl.search}`;
     
     // List of endpoints that don't require auth (matches backend proxy_server.py exclusions)
@@ -111,10 +112,14 @@ async function proxyRequest(req: NextRequest, method: string) {
       headers,
       body,
     });
-    
+
+    if (response.status === 404) {
+      debugLog(`catch-all backend 404: ${method} ${backendUrl}`);
+    }
+
     // Create response with backend's response
     const responseBody = await response.text();
-    
+
     return new NextResponse(responseBody, {
       status: response.status,
       statusText: response.statusText,

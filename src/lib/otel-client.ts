@@ -61,6 +61,25 @@ export async function initializeOpenTelemetry(): Promise<boolean> {
       return false;
     }
 
+    // Preflight: if the key is rejected (403), skip init to avoid flooding the console
+    try {
+      const preflight = await fetch(`${endpoint}/otel/v1/traces`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'Langsmith-Project': project,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ resourceSpans: [] }),
+      });
+      if (preflight.status === 403) {
+        console.warn('[OTEL] LangSmith returned 403 (invalid or disabled key), skipping OpenTelemetry initialization');
+        return false;
+      }
+    } catch {
+      // Network error on preflight: still init; first real export may fail
+    }
+
     // Dynamic imports to avoid SSR issues
     const { WebTracerProvider } = await import('@opentelemetry/sdk-trace-web');
     const { FetchInstrumentation } = await import('@opentelemetry/instrumentation-fetch');

@@ -12,7 +12,17 @@
 - **To stop the errors:** Unset `LANGSMITH_API_KEY` or set it to `remove-me`. The app will skip OpenTelemetry initialization and no traces will be sent (no 403).
 - **To use tracing:** Set `LANGSMITH_API_KEY` to a valid LangSmith API key. Ensure the project (e.g. `LANGSMITH_PROJECT` / `LANGCHAIN_PROJECT`) exists and tracing is enabled.
 
-**Code:** Client OTEL only initializes when `/api/langsmith-config` returns a valid key (503 when not configured). Server OTEL (`otel-server.ts`) skips init when the key is missing or equals `remove-me`.
+**Code:** Client OTEL only initializes when `/api/langsmith-config` returns a valid key (503 when not configured). Before initializing, the client does a **preflight** POST to the traces endpoint; if the response is **403**, init is skipped so the console is not flooded. Server OTEL (`otel-server.ts`) skips init when the key is missing or equals `remove-me`.
+
+---
+
+## 1b. `/api/threads/{id}/state` 409 (Conflict)
+
+**Symptom:** `Failed to load resource: the server responded with a status of 409` when updating thread state (e.g. after applying a decision or syncing state).
+
+**Cause:** The LangGraph backend returns 409 when the state update conflicts with the current version (e.g. concurrent updates, or the client’s view of state is stale).
+
+**Fix:** The app usually retries or refetches state. If 409 persists, avoid rapid repeated state updates; ensure only one writer updates a thread at a time, or use the backend’s recommended concurrency pattern (e.g. conditional update with version).
 
 ---
 
