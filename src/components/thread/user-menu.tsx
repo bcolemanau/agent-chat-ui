@@ -1,6 +1,7 @@
 "use client";
 
 import { signOut, useSession } from "next-auth/react";
+import Link from "next/link";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -11,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
+import { LogOut, Settings } from "lucide-react";
 
 export function UserMenu() {
     const { data: session } = useSession();
@@ -64,6 +65,13 @@ export function UserMenu() {
                     </>
                 )}
 
+                <DropdownMenuItem asChild>
+                    <Link href="/workbench/settings" className="cursor-pointer flex items-center">
+                        <Settings className="mr-2 h-4 w-4" />
+                        <span>System Settings</span>
+                    </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => signOut()} className="text-red-600 focus:text-red-700 focus:bg-red-50 cursor-pointer">
                     <LogOut className="mr-2 h-4 w-4" />
                     <span>Log out</span>

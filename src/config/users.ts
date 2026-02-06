@@ -1,5 +1,16 @@
-
 export type UserRole = "admin" | "user" | "guest" | "reflexion_admin" | "newco_admin" | "customer_admin" | "ReflexionAdministrator" | "CustomerAdministrator";
+
+/** Admin roles that see full org switcher, workflow strip Administration, etc. Compare case-insensitively. */
+const ADMIN_ROLES_LOWER = new Set(["reflexion_admin", "admin", "newco_admin"]);
+
+/**
+ * Returns true if the given role is an admin role (reflexion_admin, admin, newco_admin).
+ * Comparison is case-insensitive so "Newco_admin" and "newco_admin" both match.
+ */
+export function isReflexionAdmin(role: string | null | undefined): boolean {
+    if (role == null || typeof role !== "string") return false;
+    return ADMIN_ROLES_LOWER.has(role.trim().toLowerCase());
+}
 
 export interface UserConfig {
     customerId: string;

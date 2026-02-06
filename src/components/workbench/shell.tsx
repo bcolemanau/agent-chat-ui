@@ -21,14 +21,14 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductPanel } from "@/components/product-panel/ProductPanel";
 import { useApprovalCount } from "./hooks/use-approval-count";
 import { DecisionsPanel } from "./decisions-panel";
+import { isReflexionAdmin } from "@/config/users";
 
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
     const router = useRouter();
     const pathname = usePathname();
     const { data: session, status } = useSession();
-    const userRole = session?.user?.role;
-    const isAdmin = Boolean(userRole && ["reflexion_admin", "admin", "newco_admin"].includes(userRole as string));
+    const isAdmin = isReflexionAdmin(session?.user?.role);
     const { isRecording, startRecording, stopRecording, downloadRecording } = useRecording();
 
     // Robust Mode Derivation (active_mode and active_agent are synced from graph/overlay)
@@ -519,7 +519,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                         {isWorkbenchOpen && (
                             <aside className={cn(
                                 "border-l bg-background flex flex-col shadow-xl z-30 transition-all",
-                                isWorkbenchMinimized ? "h-12" : "flex-1"
+                                isWorkbenchMinimized ? "h-12" : "flex-1 min-h-0"
                             )}>
                             {/* Workbench Tabs - Now inside the Right Pane */}
                             <div className="h-12 border-b flex items-center justify-between px-6 bg-muted/10 shrink-0">
@@ -592,10 +592,10 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                             )}
                                             onClick={() => {
                                                 closeArtifact();
-                                                setViewMode("settings");
                                                 lastSyncedView.current = "settings";
                                                 stream.setWorkbenchView("settings" as any);
-                                                router.push(workbenchHref("/workbench/settings"));
+                                                // Navigate to /workbench/settings without view=settings (path is canonical)
+                                                router.push(threadId ? `/workbench/settings?threadId=${encodeURIComponent(threadId)}` : "/workbench/settings");
                                             }}
                                         >
                                             <Settings className="w-3.5 h-3.5" />
@@ -674,8 +674,13 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                 <div className="h-full w-full overflow-hidden">
                                     <DecisionsPanel />
                                 </div>
+                            ) : pathname?.includes("/workbench/settings") ? (
+                                // Settings: allow inner scroll so all sections are reachable
+                                <div className="h-full w-full min-h-0 overflow-hidden flex flex-col">
+                                    {children}
+                                </div>
                             ) : (
-                                <div className="h-full w-full overflow-hidden">
+                                <div className="h-full w-full min-h-0 overflow-hidden">
                                     {children}
                                 </div>
                             ))}

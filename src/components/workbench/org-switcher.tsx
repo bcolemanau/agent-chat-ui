@@ -10,6 +10,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { isReflexionAdmin } from '@/config/users';
 
 interface Organization {
     id: string;
@@ -22,29 +23,24 @@ export function OrgSwitcher() {
     const [selectedOrgId, setSelectedOrgId] = React.useState<string>('');
     const [loading, setLoading] = React.useState(false);
 
-    // Check if user is Reflexion Admin (matching sidebar logic)
-    const userRole = session?.user?.role;
-    const isAdmin = userRole === 'reflexion_admin' || userRole === 'admin';
+    const isAdmin = isReflexionAdmin(session?.user?.role);
 
     const fetchOrganizations = React.useCallback(async () => {
-        if (!isAdmin) return;
-        
         try {
             setLoading(true);
             const resp = await fetch('/api/organizations');
             if (resp.ok) {
                 const data = await resp.json();
-                setOrganizations(data);
+                setOrganizations(Array.isArray(data) ? data : []);
 
                 // Load from local storage or fallback to current session customerId
                 const savedContext = localStorage.getItem('reflexion_org_context');
-                if (savedContext && data.some((org: Organization) => org.id === savedContext)) {
+                if (savedContext && (data as Organization[]).some((org: Organization) => org.id === savedContext)) {
                     setSelectedOrgId(savedContext);
-                } else if (session?.user?.customerId && data.some((org: Organization) => org.id === session.user.customerId)) {
-                    setSelectedOrgId(session.user.customerId);
-                } else if (data.length > 0) {
-                    // Fallback to first organization if saved context doesn't exist
-                    setSelectedOrgId(data[0].id);
+                } else if (session?.user?.customerId && (data as Organization[]).some((org: Organization) => org.id === session.user!.customerId)) {
+                    setSelectedOrgId(session.user.customerId!);
+                } else if ((data as Organization[]).length > 0) {
+                    setSelectedOrgId((data as Organization[])[0].id);
                 }
             }
         } catch (e) {
@@ -52,7 +48,7 @@ export function OrgSwitcher() {
         } finally {
             setLoading(false);
         }
-    }, [isAdmin, session?.user?.customerId]);
+    }, [session?.user?.customerId]);
 
     React.useEffect(() => {
         fetchOrganizations();

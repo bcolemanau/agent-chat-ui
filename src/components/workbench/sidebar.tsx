@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, Search as SearchIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import { isReflexionAdmin } from "@/config/users";
 
 interface Project {
     id: string;
@@ -52,7 +53,7 @@ const PRODUCT_LINKS = [
 export function Sidebar() {
     const { data: session } = useSession();
     const pathname = usePathname();
-    const userRole = session?.user?.role;
+    const isAdmin = isReflexionAdmin(session?.user?.role);
 
     const [threadId, setThreadId] = useQueryState("threadId");
     const [projects, setProjects] = useState<Project[]>([]);
@@ -60,9 +61,6 @@ export function Sidebar() {
     const [searchQuery, setSearchQuery] = useState("");
     const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState("");
-
-    // Check if user is Reflexion Admin (keys are reflexion_admin or admin)
-    const isAdmin = userRole === "reflexion_admin" || userRole === "admin";
 
     const fetchProjects = useCallback(async () => {
         try {
