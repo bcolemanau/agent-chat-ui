@@ -246,3 +246,40 @@ export interface KgDiffPayload {
 
 /** View payload for KG-diff diagram view (diagram-consumable shape). */
 export type KgDiffView = KgDiffPayload;
+
+// ---------------------------------------------------------------------------
+// Decision-time 3-view: semantic summary + tabular summary + graph
+// ---------------------------------------------------------------------------
+
+export type DecisionSummaryTab = 'semantic' | 'table' | 'graph';
+
+export interface DecisionSummaryGraphNode {
+  id: string;
+  name: string;
+  type: 'upstream' | 'current' | 'downstream';
+}
+
+export interface DecisionSummaryGraphEdge {
+  source: string;
+  target: string;
+}
+
+export interface DecisionSummary {
+  semanticSummary?: string;
+  tables?: {
+    change: Array<Record<string, unknown>>;
+    coverage: Array<Record<string, unknown>>;
+    impact: Array<Record<string, unknown>>;
+  };
+  graph?: {
+    nodes: DecisionSummaryGraphNode[];
+    edges: DecisionSummaryGraphEdge[];
+  };
+}
+
+/** Colours for traceability graph: upstream (sources), downstream (impact). */
+export const TRACEABILITY_COLORS = {
+  upstream: '#3b82f6',
+  current: '#94a3b8',
+  downstream: '#10b981',
+} as const;

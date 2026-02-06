@@ -430,10 +430,9 @@ export function OrganizationManagement() {
                                     <SelectValue placeholder="Default (system)" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="default">Default (system)</SelectItem>
                                     {workflows.map((wf) => (
                                         <SelectItem key={wf.id} value={wf.id}>
-                                            {wf.name ?? wf.id}
+                                            {wf.id === "default" ? "Default (system)" : (wf.name ?? wf.id)}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>

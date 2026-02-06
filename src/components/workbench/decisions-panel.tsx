@@ -8,9 +8,11 @@ import { usePendingDecisions } from "./hooks/use-pending-decisions";
 import { useProcessedDecisions, ProcessedDecision } from "./hooks/use-processed-decisions";
 import { ApprovalCard } from "./approval-card";
 import { KgDiffDiagramView } from "./kg-diff-diagram-view";
+import { DecisionSummaryView } from "./decision-summary-view";
 import { FullProposalContent } from "./full-proposal-modal";
 import { WorldMapView } from "./world-map-view";
 import { useStreamContext } from "@/providers/Stream";
+import type { DecisionSummary } from "@/lib/diff-types";
 import { AlertCircle, LayoutGrid, Table2, Rows3, PanelRight, ArrowLeft, GitCompare, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -119,6 +121,7 @@ export function DecisionsPanel() {
         status,
         timestamp: Date.now(),
         ...(extra?.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
+        ...(item.data?.preview_data != null ? { preview_data: item.data.preview_data as Record<string, unknown> } : {}),
       });
       refetchPending();
     },
@@ -565,6 +568,15 @@ function ProcessedRow({ decision, threadId }: { decision: ProcessedDecision; thr
           <span className="text-muted-foreground text-xs">{relativeTime(decision.timestamp)}</span>
         </div>
       </div>
+      {/* Decision context (what was shown when this was processed), for both approved and rejected */}
+      {decision.preview_data?.decision_summary != null ? (
+        <div className="px-4 pb-4">
+          <DecisionSummaryView
+            decisionSummary={decision.preview_data.decision_summary as DecisionSummary}
+            className="mt-3"
+          />
+        </div>
+      ) : null}
       {decision.kg_version_sha && threadId && (
         <div className="px-4 pb-4 space-y-2">
           <div className="flex items-center gap-2">

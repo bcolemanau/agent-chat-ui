@@ -163,7 +163,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             headers,
             body: JSON.stringify({
               decision_id: item.id,
-              trigger_id: item.data?.args?.trigger_id,
+              trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
               project_id: threadId,
               thread_id: threadId,
               reasoning: item.data?.args?.reasoning,
@@ -172,7 +172,16 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: res.statusText }));
-            throw new Error((err as any).detail || "Failed to apply classification");
+            const d = (err as any).detail;
+            const msg =
+              typeof d === "string"
+                ? d
+                : Array.isArray(d)
+                  ? d.map((e: any) => (e?.loc ? `${e.loc.join(".")}: ${e.msg ?? ""}` : String(e)).trim()).filter(Boolean).join("; ") || "Validation failed"
+                  : d != null
+                    ? JSON.stringify(d)
+                    : res.statusText;
+            throw new Error(msg || "Failed to apply classification");
           }
           const data = await res.json();
           setStatus("approved");
@@ -308,6 +317,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
               decision_id: item.id,
               artifact_id: item.data?.args?.document_id ?? item.data?.preview_data?.artifact_id,
               artifact_type: item.data?.args?.artifact_type ?? item.data?.preview_data?.artifact_type,
+              project_id: threadId,
               thread_id: threadId,
               trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
             }),
