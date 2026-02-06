@@ -3,12 +3,6 @@
 import React, { useEffect, useState } from "react";
 import { ZoomOut, Activity, Loader2, Pencil, CheckCircle2 } from "lucide-react";
 import { Button as UIButton } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { contentRendererRegistry } from "./content-renderers";
 // Import renderers to ensure they register themselves
 import "./content-renderers/markdown-renderer";
@@ -62,6 +56,9 @@ export function NodeDetailPanel({
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editApplying, setEditApplying] = useState(false);
+  // Edit with me (M4)
+  const [reviseInstruction, setReviseInstruction] = useState("");
+  const [reviseLoading, setReviseLoading] = useState(false);
 
   // Fetch artifact content when node changes
   useEffect(() => {
@@ -160,12 +157,10 @@ export function NodeDetailPanel({
   const metadata = (node as Node & { metadata?: Record<string, unknown> }).metadata || {};
   const artifactTypes = (metadata.artifact_types as string[] | undefined) || [];
   const status = (metadata.status as string | undefined) ?? "accepted";
-  const isAcceptedConceptBrief =
+  const hasArtifactId = !!(metadata.artifact_id as string | undefined);
+  const isEditableArtifact =
     node.type === "ARTIFACT" &&
-    status !== "draft" &&
-    !node.id.startsWith("draft-") &&
-    !node.id.startsWith("ART-concept-brief-edit-") &&
-    artifactTypes.some((t: string) => t && String(t).toLowerCase().includes("concept brief"));
+    ((status === "accepted" && hasArtifactId) || status === "draft");
 
   const handleStartEdit = async () => {
     if (!node) return;
@@ -215,6 +210,50 @@ export function NodeDetailPanel({
     }
   };
 
+  const artifactTypeForApply = (): string => {
+    const t = (artifactTypes[0] as string)?.toLowerCase() ?? "";
+    if (t.includes("concept brief")) return "concept_brief";
+    if (t.includes("ux brief")) return "ux_brief";
+    if (t.includes("requirements")) return "requirements_package";
+    if (t.includes("architecture")) return "architecture";
+    if (t.includes("design")) return "design";
+    return "concept_brief";
+  };
+
+  const handleReviseFromDraft = async () => {
+    if (!editCacheKey || !reviseInstruction.trim()) return;
+    setReviseLoading(true);
+    try {
+      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      const res = await fetch("/api/artifact/revise-from-draft", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          cache_key: editCacheKey,
+          thread_id: threadId ?? undefined,
+          content: editDraftContent,
+          instruction: reviseInstruction.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error((err as { error?: string }).error ?? "Revise failed");
+      }
+      const data = await res.json();
+      if (typeof data.content === "string") {
+        setEditDraftContent(data.content);
+        setReviseInstruction("");
+        toast.success("Draft revised");
+      }
+    } catch (e) {
+      toast.error("Error", { description: e instanceof Error ? e.message : "Revise failed" });
+    } finally {
+      setReviseLoading(false);
+    }
+  };
+
   const handleApplyEdit = async () => {
     if (!node || !editCacheKey) return;
     setEditApplying(true);
@@ -230,7 +269,7 @@ export function NodeDetailPanel({
           cache_key: editCacheKey,
           option_index: 0,
           thread_id: threadId ?? undefined,
-          artifact_type: "concept_brief",
+          artifact_type: artifactTypeForApply(),
           source_node_id: node.id,
           draft_content: editDraftContent,
         }),
@@ -239,7 +278,7 @@ export function NodeDetailPanel({
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error((err as { detail?: string }).detail ?? "Failed to apply edit");
       }
-      toast.success("Concept brief updated");
+      toast.success("Artifact updated");
       setEditModalOpen(false);
       setEditCacheKey(null);
       setEditDraftContent("");
@@ -296,10 +335,15 @@ export function NodeDetailPanel({
           <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 block">
             {typeLabel}
           </span>
-          <h3 className="text-lg font-bold text-foreground leading-tight truncate">{node.name}</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-lg font-bold text-foreground leading-tight truncate">{node.name}</h3>
+            {node.metadata?.version_number != null && node.metadata.version_number >= 1 && (
+              <span className="text-xs font-medium text-muted-foreground shrink-0">v{node.metadata.version_number}</span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
-          {isAcceptedConceptBrief && (
+          {isEditableArtifact && !editModalOpen && (
             <UIButton
               variant="outline"
               size="sm"
@@ -311,15 +355,84 @@ export function NodeDetailPanel({
               Edit
             </UIButton>
           )}
+          {editModalOpen && (
+            <>
+              <UIButton
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+                onClick={handleSaveDraft}
+                disabled={editSaving}
+              >
+                {editSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                Save draft
+              </UIButton>
+              <UIButton
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+                onClick={handleApplyEdit}
+                disabled={editApplying}
+              >
+                {editApplying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                Apply
+              </UIButton>
+              <UIButton
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setEditModalOpen(false);
+                  setEditCacheKey(null);
+                  setEditDraftContent("");
+                }}
+              >
+                Cancel
+              </UIButton>
+            </>
+          )}
           <UIButton variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
             <ZoomOut className="h-3.5 w-3.5" />
           </UIButton>
         </div>
       </div>
 
-      {/* Content Area - Scrollable */}
+      {/* Content Area - Scrollable (view content or inline edit) */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 pt-4 space-y-4">
-        {loading ? (
+        {editModalOpen ? (
+          /* Inline edit in right pane (no modal) */
+          <div className="flex flex-col gap-4 h-full min-h-0">
+            <p className="text-xs text-muted-foreground">
+              Changes are saved as a draft. Use &quot;Edit with me&quot; to ask the LLM to revise, or click Apply to update the artifact.
+            </p>
+            <div className="flex flex-col gap-2 rounded border border-border bg-muted/20 p-2">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase">Edit with me</span>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 min-w-0 rounded border bg-background px-2 py-1.5 text-sm placeholder:text-muted-foreground"
+                  placeholder="e.g. make the BMS section more detailed"
+                  value={reviseInstruction}
+                  onChange={(e) => setReviseInstruction(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleReviseFromDraft()}
+                />
+                <UIButton
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleReviseFromDraft}
+                  disabled={reviseLoading || !reviseInstruction.trim()}
+                >
+                  {reviseLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+                  Revise
+                </UIButton>
+              </div>
+            </div>
+            <textarea
+              className="w-full flex-1 min-h-[200px] rounded border bg-muted/30 px-3 py-2 text-sm font-mono whitespace-pre-wrap resize-y"
+              value={editDraftContent}
+              onChange={(e) => setEditDraftContent(e.target.value)}
+              spellCheck="false"
+            />
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center p-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
@@ -429,39 +542,6 @@ export function NodeDetailPanel({
           </p>
         )}
       </div>
-
-      {/* Edit concept brief modal (draft-from-existing flow) */}
-      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col gap-4">
-          <DialogHeader className="shrink-0">
-            <DialogTitle>Edit Concept Brief</DialogTitle>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground">
-            Changes are saved as a draft. Click Apply to update the artifact.
-          </p>
-          <div className="min-h-0 flex-1 flex flex-col gap-2">
-            <textarea
-              className="w-full min-h-[40vh] rounded border bg-muted/30 px-3 py-2 text-sm font-mono whitespace-pre-wrap resize-y"
-              value={editDraftContent}
-              onChange={(e) => setEditDraftContent(e.target.value)}
-              spellCheck="false"
-            />
-            <div className="flex items-center gap-2">
-              <UIButton variant="outline" size="sm" onClick={handleSaveDraft} disabled={editSaving}>
-                {editSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                Save draft
-              </UIButton>
-              <UIButton size="sm" onClick={handleApplyEdit} disabled={editApplying}>
-                {editApplying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                Apply
-              </UIButton>
-              <UIButton variant="ghost" size="sm" onClick={() => setEditModalOpen(false)}>
-                Cancel
-              </UIButton>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -33,7 +33,8 @@ interface ArtifactWithStatus extends Node {
   section?: string;
   artifactTypes?: string[];
   filename?: string;
-  versionCount?: number;
+  /** Artifact-level version number (from KG node metadata.version_number). */
+  versionNumber?: number;
 }
 
 /**
@@ -168,7 +169,7 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
         section: getSection(artifact.properties),
         artifactTypes: getArtifactTypes(artifact),
         filename: artifact.metadata?.filename,
-        versionCount: artifact.properties?.versions || 0
+        versionNumber: typeof artifact.metadata?.version_number === "number" ? artifact.metadata.version_number : undefined
       };
     });
   }, [artifacts]);
@@ -451,10 +452,12 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
                             onNodeSelect?.(artifact);
                           }}
                         >
-                          {artifact.versionCount && artifact.versionCount > 0 ? (
+                          {(artifact.versionNumber != null && artifact.versionNumber >= 1) ? (
                             <span className="text-xs bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full font-medium">
-                              v{artifact.versionCount + 1}
+                              v{artifact.versionNumber}
                             </span>
+                          ) : artifact.hasDetails ? (
+                            <span className="text-xs text-muted-foreground">v1</span>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
