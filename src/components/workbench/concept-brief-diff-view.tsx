@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { ConceptBriefDiffView as ConceptBriefDiffViewType } from "@/lib/diff-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,8 @@ import {
 import { CheckCircle2, AlertCircle, Star, FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownText } from "@/components/thread/markdown-text";
+
+const DRAFT_SAVE_DEBOUNCE_MS = 1500;
 
 const TEMPLATE_ID_LABELS: Record<string, string> = {
   "T-CONCEPT": "Concept Brief",
@@ -52,6 +54,12 @@ export function ConceptBriefDiffView({
   const [draftContent, setDraftContent] = useState<{ content: string; content_type: string } | null>(null);
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
+  /** Editable draft body (UX Brief M2); only when dialog is open with cacheKey and markdown */
+  const [editorContent, setEditorContent] = useState<string>("");
+  const [draftSaving, setDraftSaving] = useState(false);
+  const draftSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorContentRef = useRef<string>("");
+  editorContentRef.current = editorContent;
 
   // Fetch full draft when user opens the dialog: by artifact_id (saved draft) or by cache_key + option_index (in-memory cache)
   useEffect(() => {
@@ -77,7 +85,11 @@ export function ConceptBriefDiffView({
           const res = await fetch(url, { headers });
           if (!res.ok) throw new Error("Failed to load draft");
           const data = await res.json();
-          if (!cancelled) setDraftContent({ content: data.content ?? "", content_type: data.content_type ?? "text" });
+          if (!cancelled) {
+            const next = { content: data.content ?? "", content_type: data.content_type ?? "text" };
+            setDraftContent(next);
+            setEditorContent(next.content);
+          }
         } catch (e: unknown) {
           if (!cancelled) setDraftError(e instanceof Error ? e.message : "Failed to load draft");
         } finally {
@@ -101,7 +113,11 @@ export function ConceptBriefDiffView({
           const res = await fetch(url, { headers });
           if (!res.ok) throw new Error("Failed to load draft");
           const data = await res.json();
-          if (!cancelled) setDraftContent({ content: data.content ?? "", content_type: data.content_type ?? "markdown" });
+          if (!cancelled) {
+            const next = { content: data.content ?? "", content_type: data.content_type ?? "markdown" };
+            setDraftContent(next);
+            setEditorContent(next.content);
+          }
         } catch (e: unknown) {
           if (!cancelled) setDraftError(e instanceof Error ? e.message : "Failed to load draft");
         } finally {
@@ -114,9 +130,44 @@ export function ConceptBriefDiffView({
     // No artifact_id and no cache_key: show summary fallback only
     setDraftLoading(false);
     setDraftContent(summaryFallback != null ? { content: summaryFallback, content_type: "text" } : null);
+    setEditorContent(summaryFallback ?? "");
     return () => {};
     // eslint-disable-next-line react-hooks/exhaustive-deps -- draftViewState intentionally partial to avoid re-run loops
   }, [draftViewState.artifactId, draftViewState.optionIndex, draftViewState.summaryFallback, draftViewState.cacheKey, threadId]);
+
+  // Debounced save of draft content to KG (UX Brief M2)
+  const saveDraftToBackend = useCallback(async (content: string) => {
+    const cacheKey = draftViewState.cacheKey;
+    if (!cacheKey || !content.trim()) return;
+    setDraftSaving(true);
+    try {
+      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      const res = await fetch("/api/artifact/draft-content", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ cache_key: cacheKey, thread_id: threadId ?? undefined, content }),
+      });
+      if (!res.ok) throw new Error("Failed to save draft");
+    } catch (e) {
+      console.warn("[ConceptBriefDiffView] draft save failed:", e);
+    } finally {
+      setDraftSaving(false);
+    }
+  }, [draftViewState.cacheKey, threadId]);
+
+  useEffect(() => {
+    if (draftViewState.optionIndex < 0 || !draftViewState.cacheKey || (draftContent?.content_type !== "markdown" && draftContent?.content_type !== "text")) return;
+    if (draftSaveTimeoutRef.current) clearTimeout(draftSaveTimeoutRef.current);
+    draftSaveTimeoutRef.current = setTimeout(() => {
+      draftSaveTimeoutRef.current = null;
+      saveDraftToBackend(editorContentRef.current);
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+    return () => {
+      if (draftSaveTimeoutRef.current) clearTimeout(draftSaveTimeoutRef.current);
+    };
+  }, [editorContent, draftViewState.optionIndex, draftViewState.cacheKey, draftContent?.content_type, saveDraftToBackend]);
 
   if (!diffData) {
     return (
@@ -262,7 +313,24 @@ export function ConceptBriefDiffView({
             {draftError && (
               <p className="text-sm text-destructive py-4">{draftError}</p>
             )}
-            {!draftLoading && !draftError && draftContent && (
+            {!draftLoading && !draftError && draftContent && draftViewState.cacheKey && (draftContent.content_type === "markdown" || draftContent.content_type === "text") && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Editable draft — changes are saved automatically.</p>
+                <textarea
+                  className="w-full min-h-[40vh] rounded border bg-background px-3 py-2 text-sm font-mono whitespace-pre-wrap resize-y"
+                  value={editorContent}
+                  onChange={(e) => setEditorContent(e.target.value)}
+                  spellCheck="false"
+                />
+                {draftSaving && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Saving…
+                  </span>
+                )}
+              </div>
+            )}
+            {!draftLoading && !draftError && draftContent && !(draftViewState.cacheKey && (draftContent.content_type === "markdown" || draftContent.content_type === "text")) && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 {(draftContent.content_type === "markdown" || draftContent.content_type === "text") ? (
                   <MarkdownText>{draftContent.content}</MarkdownText>
@@ -291,7 +359,16 @@ export function ConceptBriefDiffView({
             )}
             {onApprove && (
               <Button
-                onClick={() => onApprove(effectiveSelected)}
+                onClick={async () => {
+                  if (
+                    draftViewState.cacheKey &&
+                    draftViewState.optionIndex === effectiveSelected &&
+                    (editorContent ?? "").trim()
+                  ) {
+                    await saveDraftToBackend(editorContent);
+                  }
+                  onApprove(effectiveSelected);
+                }}
                 disabled={isLoading}
               >
                 <CheckCircle2 className="h-4 w-4 mr-2" />

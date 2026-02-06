@@ -101,7 +101,11 @@ async function persistDecision(
           generation_inputs,
           option_index: extra.option_index ?? args.option_index ?? args.selected_option_index ?? undefined,
           artifact_id: extra.artifact_id,
-          args: { cache_key: args.cache_key, trigger_id: args.trigger_id },
+          args: {
+            cache_key: args.cache_key,
+            trigger_id: args.trigger_id,
+            ...(item.data?.preview_data != null ? { preview_data: item.data.preview_data } : {}),
+          },
           ...(extra.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
         },
       }),
@@ -460,6 +464,20 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
+          let draftContent: string | undefined;
+          if (artifactType === "concept_brief" || artifactType === "ux_brief") {
+            try {
+              const draftParams = new URLSearchParams({ cache_key: cacheKey, option_index: String(typeof optionIndex === "number" ? optionIndex : 0) });
+              if (threadId) draftParams.set("thread_id", threadId);
+              const draftRes = await fetch(`/api/artifact/draft-content?${draftParams.toString()}`, { headers });
+              if (draftRes.ok) {
+                const draftData = (await draftRes.json()) as { content?: string };
+                if (typeof draftData?.content === "string" && draftData.content.trim()) draftContent = draftData.content.trim();
+              }
+            } catch (_e) {
+              /* optional: use cached/generated content on apply */
+            }
+          }
           const res = await fetch("/api/artifact/apply", {
             method: "POST",
             headers,
@@ -469,6 +487,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
               option_index: typeof optionIndex === "number" ? optionIndex : -1,
               thread_id: threadId,
               artifact_type: artifactType,
+              ...(draftContent != null ? { draft_content: draftContent } : {}),
             }),
           });
           if (!res.ok) {

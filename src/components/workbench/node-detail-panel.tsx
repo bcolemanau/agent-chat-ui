@@ -1,8 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ZoomOut, Activity, Loader2 } from "lucide-react";
+import { ZoomOut, Activity, Loader2, Pencil, CheckCircle2 } from "lucide-react";
 import { Button as UIButton } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { contentRendererRegistry } from "./content-renderers";
 // Import renderers to ensure they register themselves
 import "./content-renderers/markdown-renderer";
@@ -10,6 +16,7 @@ import "./content-renderers/architecture-renderer";
 import "./content-renderers/text-renderer";
 import "./content-renderers/binary-renderer";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface Node {
   id: string;
@@ -17,6 +24,7 @@ interface Node {
   type: string;
   description?: string;
   properties?: Record<string, any>;
+  metadata?: Record<string, any>;
 }
 
 interface NodeDetailPanelProps {
@@ -46,6 +54,14 @@ export function NodeDetailPanel({
   const [_loadingHistory, setLoadingHistory] = useState(false);
   const [historicalContent, setHistoricalContent] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
+
+  // Edit existing concept brief (draft-from-existing flow)
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editDraftContent, setEditDraftContent] = useState("");
+  const [editCacheKey, setEditCacheKey] = useState<string | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editApplying, setEditApplying] = useState(false);
 
   // Fetch artifact content when node changes
   useEffect(() => {
@@ -141,12 +157,121 @@ export function NodeDetailPanel({
 
   if (!node) return null;
 
+  const metadata = (node as Node & { metadata?: Record<string, unknown> }).metadata || {};
+  const artifactTypes = (metadata.artifact_types as string[] | undefined) || [];
+  const status = (metadata.status as string | undefined) ?? "accepted";
+  const isAcceptedConceptBrief =
+    node.type === "ARTIFACT" &&
+    status !== "draft" &&
+    !node.id.startsWith("draft-") &&
+    !node.id.startsWith("ART-concept-brief-edit-") &&
+    artifactTypes.some((t: string) => t && String(t).toLowerCase().includes("concept brief"));
+
+  const handleStartEdit = async () => {
+    if (!node) return;
+    setEditLoading(true);
+    try {
+      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      const res = await fetch("/api/artifact/draft-from-existing", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ node_id: node.id, thread_id: threadId ?? undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error((err as { error?: string }).error ?? "Failed to start edit");
+      }
+      const data = (await res.json()) as { draft_cache_key: string; content: string };
+      setEditCacheKey(data.draft_cache_key);
+      setEditDraftContent(data.content ?? "");
+      setEditModalOpen(true);
+    } catch (e) {
+      toast.error("Error", { description: e instanceof Error ? e.message : "Failed to start edit" });
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!editCacheKey || editDraftContent === undefined) return;
+    setEditSaving(true);
+    try {
+      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      const res = await fetch("/api/artifact/draft-content", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ cache_key: editCacheKey, thread_id: threadId ?? undefined, content: editDraftContent }),
+      });
+      if (!res.ok) throw new Error("Failed to save draft");
+      toast.success("Draft saved");
+    } catch (e) {
+      toast.error("Error", { description: e instanceof Error ? e.message : "Failed to save draft" });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleApplyEdit = async () => {
+    if (!node || !editCacheKey) return;
+    setEditApplying(true);
+    try {
+      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      const res = await fetch("/api/artifact/apply", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          decision_id: `edit-${node.id}`,
+          cache_key: editCacheKey,
+          option_index: 0,
+          thread_id: threadId ?? undefined,
+          artifact_type: "concept_brief",
+          source_node_id: node.id,
+          draft_content: editDraftContent,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error((err as { detail?: string }).detail ?? "Failed to apply edit");
+      }
+      toast.success("Concept brief updated");
+      setEditModalOpen(false);
+      setEditCacheKey(null);
+      setEditDraftContent("");
+      onClose();
+    } catch (e) {
+      toast.error("Error", { description: e instanceof Error ? e.message : "Failed to apply edit" });
+    } finally {
+      setEditApplying(false);
+    }
+  };
+
   const typeConfig: Record<string, { label: string }> = {
     DOMAIN: { label: 'Domain' },
     REQ: { label: 'Trigger' },
     ARTIFACT: { label: 'Artifact' },
     MECH: { label: 'Mechanism' },
     CRIT: { label: 'Risk' },
+    // Content-entity types (imported from Concept, Requirements, Architecture, etc.)
+    OUTCOME: { label: 'Outcome' },
+    SCENARIO: { label: 'Scenario' },
+    METRIC: { label: 'Metric' },
+    DECISION: { label: 'Decision' },
+    UX_OUTCOME: { label: 'UX Outcome' },
+    FEAT: { label: 'Feature' },
+    FEATURE: { label: 'Feature' },
+    REQUIREMENT: { label: 'Requirement' },
+    COMPONENT: { label: 'Component' },
+    INTERFACE: { label: 'Interface' },
+    VIEW: { label: 'View' },
+    PERS: { label: 'Persona' },
+    LIFECYCLE: { label: 'Lifecycle' },
+    TEMPLATE: { label: 'Template' },
   };
 
   const typeLabel = typeConfig[node.type]?.label || node.type;
@@ -173,9 +298,23 @@ export function NodeDetailPanel({
           </span>
           <h3 className="text-lg font-bold text-foreground leading-tight truncate">{node.name}</h3>
         </div>
-        <UIButton variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0" onClick={onClose}>
-          <ZoomOut className="h-3.5 w-3.5" />
-        </UIButton>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {isAcceptedConceptBrief && (
+            <UIButton
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={handleStartEdit}
+              disabled={editLoading}
+            >
+              {editLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+              Edit
+            </UIButton>
+          )}
+          <UIButton variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
+            <ZoomOut className="h-3.5 w-3.5" />
+          </UIButton>
+        </div>
       </div>
 
       {/* Content Area - Scrollable */}
@@ -290,6 +429,39 @@ export function NodeDetailPanel({
           </p>
         )}
       </div>
+
+      {/* Edit concept brief modal (draft-from-existing flow) */}
+      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col gap-4">
+          <DialogHeader className="shrink-0">
+            <DialogTitle>Edit Concept Brief</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            Changes are saved as a draft. Click Apply to update the artifact.
+          </p>
+          <div className="min-h-0 flex-1 flex flex-col gap-2">
+            <textarea
+              className="w-full min-h-[40vh] rounded border bg-muted/30 px-3 py-2 text-sm font-mono whitespace-pre-wrap resize-y"
+              value={editDraftContent}
+              onChange={(e) => setEditDraftContent(e.target.value)}
+              spellCheck="false"
+            />
+            <div className="flex items-center gap-2">
+              <UIButton variant="outline" size="sm" onClick={handleSaveDraft} disabled={editSaving}>
+                {editSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                Save draft
+              </UIButton>
+              <UIButton size="sm" onClick={handleApplyEdit} disabled={editApplying}>
+                {editApplying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                Apply
+              </UIButton>
+              <UIButton variant="ghost" size="sm" onClick={() => setEditModalOpen(false)}>
+                Cancel
+              </UIButton>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

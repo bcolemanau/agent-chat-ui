@@ -64,3 +64,57 @@ export async function GET(req: Request) {
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }
+
+/**
+ * Proxy to backend POST /artifact/draft-content (UX Brief M2).
+ * Updates draft content (markdown) for concept brief in KG when user edits in the proposal view.
+ */
+export async function POST(req: Request) {
+    try {
+        const session = await getSessionSafe();
+
+        if (!session || !session.user) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const body = await req.json();
+        const cacheKey = body?.cache_key;
+        const content = typeof body?.content === "string" ? body.content : "";
+
+        if (!cacheKey || cacheKey === "") {
+            return NextResponse.json({ error: "Missing cache_key" }, { status: 400 });
+        }
+
+        const threadId = body?.thread_id ?? null;
+        const backendUrl = getBackendBaseUrl();
+        const targetUrl = `${backendUrl}/artifact/draft-content`;
+
+        const orgContext = req.headers.get("X-Organization-Context");
+
+        const headers: Record<string, string> = {
+            Authorization: `Bearer ${session.user.idToken}`,
+            "Content-Type": "application/json",
+        };
+
+        if (orgContext) {
+            headers["X-Organization-Context"] = orgContext;
+        }
+
+        const resp = await fetch(targetUrl, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ cache_key: cacheKey, thread_id: threadId, content }),
+        });
+
+        if (!resp.ok) {
+            const _errorText = await resp.text();
+            return NextResponse.json({ error: "Backend error" }, { status: resp.status });
+        }
+
+        const data = await resp.json();
+        return NextResponse.json(data);
+    } catch (error) {
+        console.error("[PROXY] draft-content POST failed:", error);
+        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    }
+}
