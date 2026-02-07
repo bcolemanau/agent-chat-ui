@@ -22,9 +22,9 @@ export function OrgSwitcher() {
     const [selectedOrgId, setSelectedOrgId] = React.useState<string>('');
     const [loading, setLoading] = React.useState(false);
 
-    // Check if user is Reflexion Admin (matching sidebar logic)
+    // Check if user can manage organizations (match shell + Organization Management: reflexion_admin, admin, newco_admin)
     const userRole = session?.user?.role;
-    const isAdmin = userRole === 'reflexion_admin' || userRole === 'admin';
+    const isAdmin = Boolean(userRole && ['reflexion_admin', 'admin', 'newco_admin'].includes(userRole as string));
 
     const fetchOrganizations = React.useCallback(async () => {
         if (!isAdmin) return;

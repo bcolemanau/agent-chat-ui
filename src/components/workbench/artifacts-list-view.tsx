@@ -283,11 +283,11 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
   );
 
   return (
-    <div className="h-full w-full flex flex-col bg-background overflow-hidden relative">
-      <div ref={resizeRef} className="flex-1 flex relative overflow-hidden">
+    <div className="h-full w-full flex flex-col min-h-0 bg-background overflow-hidden relative">
+      <div ref={resizeRef} className="flex-1 flex min-h-0 relative overflow-hidden">
         {/* List - Resizable width */}
         <div 
-          className="flex flex-col overflow-hidden border-r border-border"
+          className="flex flex-col overflow-hidden border-r border-border min-h-0"
           style={{ width: detailPanelOpen && selectedNode ? `${listWidth}%` : '100%' }}
         >
             {/* Header with filters */}
@@ -503,10 +503,10 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
           </div>
         )}
 
-        {/* Detail Panel - Resizable width */}
+        {/* Detail Panel - Resizable width; flex so header sticks and only content scrolls */}
         {detailPanelOpen && selectedNode && (
           <div 
-            className="flex-shrink-0 relative overflow-hidden flex flex-col"
+            className="flex-1 min-w-0 min-h-0 relative overflow-hidden flex flex-col"
             style={{ width: `${100 - listWidth}%` }}
             onClick={(e) => e.stopPropagation()}
           >

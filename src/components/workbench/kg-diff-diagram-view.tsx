@@ -1,12 +1,19 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import {
   KgDiffPayload,
   KgDiffEdge,
   KgDiffChangeType,
 } from "@/lib/diff-types";
 import { cn } from "@/lib/utils";
+
+function getChangeTypeNode(node: { changeType?: string; diff_status?: string }): KgDiffChangeType {
+  return (node.changeType ?? node.diff_status ?? "unchanged") as KgDiffChangeType;
+}
+function getChangeTypeEdge(edge: { changeType?: string }): KgDiffChangeType {
+  return (edge.changeType ?? "unchanged") as KgDiffChangeType;
+}
 
 const changeTypeStyles: Record<
   KgDiffChangeType,
@@ -61,6 +68,8 @@ export function KgDiffDiagramView({
   payload,
   isLoading = false,
 }: KgDiffDiagramViewProps) {
+  const [showUnchanged, setShowUnchanged] = useState(false);
+
   if (!payload) {
     return (
       <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
@@ -69,10 +78,20 @@ export function KgDiffDiagramView({
     );
   }
 
-  const nodes = payload.nodes ?? [];
-  const edges = payload.edges ?? payload.links ?? [];
+  const allNodes = payload.nodes ?? [];
+  const allEdges = payload.edges ?? payload.links ?? [];
   const summary = payload.summary;
   const metadata = payload.metadata;
+
+  const nodes = showUnchanged
+    ? allNodes
+    : allNodes.filter((n) => getChangeTypeNode(n) !== "unchanged");
+  const edges = showUnchanged
+    ? allEdges
+    : allEdges.filter((e) => getChangeTypeEdge(e) !== "unchanged");
+  const hiddenNodes = allNodes.length - nodes.length;
+  const hiddenEdges = allEdges.length - edges.length;
+  const hasHidden = hiddenNodes > 0 || hiddenEdges > 0;
 
   if (isLoading) {
     return (
@@ -141,15 +160,29 @@ export function KgDiffDiagramView({
         </div>
       )}
 
+      {/* Filter: hide unchanged by default */}
+      {hasHidden && (
+        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showUnchanged}
+            onChange={(e) => setShowUnchanged(e.target.checked)}
+            className="rounded border-border"
+          />
+          Show unchanged ({hiddenNodes} nodes, {hiddenEdges} edges)
+        </label>
+      )}
+
       {/* Nodes with changeType affordances */}
       {nodes.length > 0 && (
         <div>
           <h4 className="text-xs font-medium text-muted-foreground mb-2">
-            Nodes ({nodes.length})
+            Nodes ({nodes.length}
+            {!showUnchanged && hiddenNodes > 0 && ` of ${allNodes.length}`})
           </h4>
           <ul className="space-y-1 max-h-48 overflow-y-auto">
             {nodes.map((node, i) => {
-              const ct = (node.changeType ?? node.diff_status ?? "unchanged") as KgDiffChangeType;
+              const ct = getChangeTypeNode(node);
               const styles = changeTypeStyles[ct] ?? changeTypeStyles.unchanged;
               return (
                 <li
@@ -185,11 +218,12 @@ export function KgDiffDiagramView({
       {edges.length > 0 && (
         <div>
           <h4 className="text-xs font-medium text-muted-foreground mb-2">
-            Edges ({edges.length})
+            Edges ({edges.length}
+            {!showUnchanged && hiddenEdges > 0 && ` of ${allEdges.length}`})
           </h4>
           <ul className="space-y-1 max-h-32 overflow-y-auto">
             {edges.map((edge, i) => {
-              const ct = (edge.changeType ?? "unchanged") as KgDiffChangeType;
+              const ct = getChangeTypeEdge(edge);
               const styles = changeTypeStyles[ct] ?? changeTypeStyles.unchanged;
               return (
                 <li
@@ -218,7 +252,9 @@ export function KgDiffDiagramView({
 
       {nodes.length === 0 && edges.length === 0 && (
         <div className="text-xs text-muted-foreground py-2">
-          No nodes or edges in this diff.
+          {allNodes.length > 0 || allEdges.length > 0
+            ? "No added, modified, or removed items. Enable “Show unchanged” to see all."
+            : "No nodes or edges in this diff."}
         </div>
       )}
     </div>

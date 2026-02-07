@@ -141,20 +141,35 @@ export interface FullProposalContentProps {
   previewData: Record<string, unknown> | undefined;
 }
 
-/** Reusable full proposal content for use in modal or detail pane. */
+/** Reusable full proposal content for use in modal or detail pane. Renders markdown when present, else structured data per type. */
 export function FullProposalContent({
   title: _title,
   proposalType,
   previewData,
 }: FullProposalContentProps) {
+  const markdown =
+    (previewData?.content as string)?.trim() ||
+    (previewData?.markdown as string)?.trim();
+  if (markdown) {
+    return (
+      <div className="flex-1 min-h-0 overflow-y-auto pr-2 border rounded-lg bg-muted/30 p-4">
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          <MarkdownText>{markdown}</MarkdownText>
+        </div>
+      </div>
+    );
+  }
+
   const kind: ProposalKind | null =
-    proposalType === "generate_requirements_proposal"
-      ? "requirements"
-      : proposalType === "generate_architecture_proposal"
-        ? "architecture"
-        : proposalType === "generate_design_proposal"
-          ? "design"
-          : null;
+    proposalType === "generate"
+      ? (previewData?.requirements_data
+          ? "requirements"
+          : previewData?.architecture_data
+            ? "architecture"
+            : previewData?.design_data
+              ? "design"
+              : null)
+      : null;
 
   const data = kind
     ? (previewData?.[

@@ -17,8 +17,12 @@ export interface ProcessedDecision {
   timestamp: number;
   /** KG version (commit sha) produced by this decision; enables KG diff view and history navigation */
   kg_version_sha?: string;
+  /** Short outcome text shown in Decisions pane (e.g. "Artifact edit applied, draft removed.") */
+  outcome_description?: string;
   /** Preview data (diff, decision_summary, impact_forecast, etc.) for decision context on processed decisions (approved or rejected) */
   preview_data?: Record<string, unknown>;
+  /** Original decision args (artifact_id, cycle_id, preview_data.filename) for table display: subject + enrichment cycle label */
+  args?: Record<string, unknown>;
 }
 
 /** Backend DecisionRecord shape (GET /decisions response item). */
@@ -98,6 +102,7 @@ function mapRecordToProcessed(r: DecisionRecord): ProcessedDecision {
     timestamp,
     ...(r.kg_version_sha != null ? { kg_version_sha: r.kg_version_sha } : {}),
     ...(r.args?.preview_data != null ? { preview_data: r.args.preview_data as Record<string, unknown> } : {}),
+    ...(r.args != null ? { args: r.args } : {}),
   };
 }
 

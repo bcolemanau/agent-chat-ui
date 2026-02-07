@@ -126,13 +126,27 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Workbench shell: cap height at visible viewport so only list/edit panes scroll, not the whole section */
+.workbench-root-height {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none; /* prevent wheel/touch from chaining to body */
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
 
+  html {
+    height: 100%;
+  }
+
   body {
     @apply bg-background text-foreground;
+    min-height: 100%;
   }
 
   :root {

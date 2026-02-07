@@ -168,30 +168,8 @@ export function EnrichmentView() {
                   newSelectedTypes.set(artifactId, [data.enrichment.artifact_types[0]]);
                 }
               }
-            } else if (res.status === 404) {
-              // No enrichment cycle yet - trigger creation
-              const createRes = await fetch(`${apiUrl}/artifacts/${artifactId}/enrichment${threadId ? `?thread_id=${threadId}` : ''}`, {
-                method: "POST",
-                headers: { ...headers, "Content-Type": "application/json" },
-                body: JSON.stringify({ trigger: true, thread_id: threadId }),
-              });
-              if (createRes.ok) {
-                const createData = await createRes.json();
-                if (createData.cycle_id && createData.enrichment) {
-                  newProposals.set(artifactId, {
-                    artifact_id: artifactId,
-                    cycle_id: createData.cycle_id,
-                    enrichment: createData.enrichment,
-                    status: "pending",
-                    filename: createData.filename,
-                    preview_data: createData.preview_data, // Include diff data if available
-                  });
-                  if (createData.enrichment.artifact_types?.length > 0) {
-                    newSelectedTypes.set(artifactId, [createData.enrichment.artifact_types[0]]);
-                  }
-                }
-              }
             }
+            // Do NOT POST on 404: upload already creates one cycle; auto-POST caused duplicate cycles (1 link + 3 enrichments).
           } catch (error) {
             console.error(`[Enrichment] Failed to fetch proposal for ${artifactId}:`, error);
           }

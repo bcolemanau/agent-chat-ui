@@ -21,7 +21,7 @@ interface ApprovalCardProps {
   onDecisionProcessed?: (
     item: UnifiedPreviewItem,
     status: "approved" | "rejected",
-    extra?: { kg_version_sha?: string }
+    extra?: { kg_version_sha?: string; artifact_id?: string; outcome_description?: string }
   ) => void;
   /** When provided, "View full proposal" opens the proposal in the parent's detail pane instead of a modal. */
   onViewFullProposal?: () => void;
@@ -115,19 +115,27 @@ async function persistDecision(
   }
 }
 
-const ARTIFACT_PROPOSAL_TYPES_WITH_FULL_CONTENT = [
-  "generate_requirements_proposal",
-  "generate_architecture_proposal",
-  "generate_design_proposal",
-] as const;
+const ARTIFACT_TYPE_FOR_FULL_PREVIEW = new Set([
+  "concept_brief",
+  "ux_brief",
+  "requirements_package",
+  "architecture",
+  "design",
+  "manufacturing_ops",
+  "software_ops",
+]);
 
 function hasFullProposalContent(item: UnifiedPreviewItem): boolean {
   const pd = item.data?.preview_data as Record<string, unknown> | undefined;
   if (!pd) return false;
-  return (
-    ARTIFACT_PROPOSAL_TYPES_WITH_FULL_CONTENT.includes(item.type as (typeof ARTIFACT_PROPOSAL_TYPES_WITH_FULL_CONTENT)[number]) &&
-    (pd.requirements_data != null || pd.architecture_data != null || pd.design_data != null)
-  );
+  const artifactType = item.type === "generate" ? (item.data?.args as Record<string, unknown> | undefined)?.artifact_type : null;
+  const isArtifactProposal =
+    item.type === "generate" && artifactType && ARTIFACT_TYPE_FOR_FULL_PREVIEW.has(artifactType as string);
+  if (!isArtifactProposal) return false;
+  const hasMarkdown = (pd.content as string)?.trim() || (pd.markdown as string)?.trim();
+  const hasStructured =
+    pd.requirements_data != null || pd.architecture_data != null || pd.design_data != null;
+  return Boolean(hasMarkdown || hasStructured);
 }
 
 export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProposal }: ApprovalCardProps) {
@@ -438,15 +446,82 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       }
     }
 
-    // Artifact proposals (concept, UX, requirements, architecture, design): apply via API (preview-only, no interrupt)
-    const ARTIFACT_TOOL_TO_TYPE: Record<string, string> = {
-      generate_concept_brief: "concept_brief",
-      generate_ux_brief: "ux_brief",
-      generate_requirements_proposal: "requirements_package",
-      generate_architecture_proposal: "architecture",
-      generate_design_proposal: "design",
-    };
-    const artifactType = ARTIFACT_TOOL_TO_TYPE[item.type];
+    // Artifact edit proposal: approve = persist edit and bump version (no propose_only)
+    if (item.type === "artifact_edit") {
+      if (decisionType === "reject") {
+        setStatus("rejected");
+        onDecisionProcessed?.(item, "rejected");
+        await persistDecision(
+          item,
+          "rejected",
+          item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined
+        );
+        toast.info("Edit proposal rejected");
+        setIsLoading(false);
+        return;
+      }
+      if (decisionType === "approve") {
+        const args = item.data?.args ?? {};
+        const sourceNodeId = args.source_node_id;
+        const draftContent = args.draft_content;
+        const artifactType = args.artifact_type;
+        const cacheKey = args.cache_key;
+        const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+        const projectId = args.project_id ?? threadId;
+        if (!sourceNodeId || (draftContent == null || draftContent === "")) {
+          toast.error("Error", { description: "Missing source_node_id or draft_content for this edit proposal" });
+          setIsLoading(false);
+          return;
+        }
+        try {
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+          if (orgContext) headers["X-Organization-Context"] = orgContext;
+          const res = await fetch("/api/artifact/apply", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              decision_id: item.id,
+              cache_key: cacheKey ?? `edit:${sourceNodeId}`,
+              option_index: 0,
+              thread_id: threadId,
+              project_id: projectId,
+              artifact_type: artifactType ?? "concept_brief",
+              source_node_id: sourceNodeId,
+              draft_content: draftContent,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error((err as any).detail || "Failed to apply artifact edit");
+          }
+          const data = await res.json();
+          setStatus("approved");
+          const apiData = data as { artifact_id?: string; message?: string; outcome_description?: string };
+          const outcomeDesc = apiData.outcome_description ?? apiData.message ?? "Artifact edit applied, draft removed.";
+          onDecisionProcessed?.(item, "approved", {
+            ...(apiData.artifact_id != null ? { artifact_id: apiData.artifact_id } : {}),
+            outcome_description: outcomeDesc,
+          });
+          await persistDecision(item, "approved", threadId, { artifact_id: apiData.artifact_id });
+          toast.success("Artifact edit applied, draft removed.", { description: outcomeDesc !== "Artifact edit applied, draft removed." ? outcomeDesc : "Content updated and draft node removed from graph." });
+          (stream as any).triggerWorkbenchRefresh?.();
+        } catch (error: any) {
+          console.error("[ApprovalCard] Error applying artifact edit:", error);
+          setStatus("pending");
+          toast.error("Error", { description: error.message || "Failed to apply artifact edit" });
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+    }
+
+    // Artifact proposals: tool_name "generate" with args.artifact_type (concept_brief, ux_brief, requirements_package, architecture, design, manufacturing_ops, software_ops)
+    const artifactType =
+      item.type === "generate"
+        ? ((item.data?.args as Record<string, unknown> | undefined)?.artifact_type as string | undefined)
+        : undefined;
     if (artifactType) {
       if (decisionType === "reject") {
         setStatus("rejected");
@@ -552,17 +627,16 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       case "generate_project_configuration_summary":
       case "propose_hydration_complete":
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
-      case "generate_concept_brief":
-      case "generate_ux_brief":
+      case "generate":
         return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
-      case "generate_requirements_proposal":
-        return "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200";
       case "propose_enrichment":
       case "approve_enrichment":
       case "enrichment":
         return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200";
       case "link_uploaded_document":
         return "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200";
+      case "artifact_edit":
+        return "bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200";
       case "propose_organization":
       case "propose_user_add":
       case "propose_user_edit":
@@ -633,16 +707,9 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             previewData={item.data?.preview_data as Record<string, unknown> | undefined}
           />
         )}
-        {/* Diff Preview — Concept Brief / UX Brief: no inner scroll so Decisions panel scroll shows all options */}
+        {/* Diff Preview — same container for all artifact proposal types (Decisions panel scroll) */}
         {(item.data.diff || item.data.preview_data?.diff) && (
-          <div
-            className={cn(
-              "border rounded-lg p-4 bg-muted/50",
-              item.type === "generate_concept_brief" || item.type === "generate_ux_brief"
-                ? "min-h-0"
-                : "max-h-[600px] overflow-y-auto"
-            )}
-          >
+          <div className="border rounded-lg p-4 bg-muted/50 min-h-0">
             {contentRendererRegistry.get("diff")?.render("", {
               diff: item.data.diff || item.data.preview_data?.diff,
               previewData: item.data.preview_data,
@@ -651,7 +718,70 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             })}
           </div>
         )}
-        
+
+        {/* Artifact edit: show extraction details (regex vs LLM) and upstream/downstream impact */}
+        {item.type === "artifact_edit" && item.data?.preview_data && (
+          <div className="border rounded-lg p-4 bg-muted/30 space-y-3 text-sm">
+            {(() => {
+              const pd = item.data.preview_data as {
+                extraction_summary_line?: string;
+                entity_extraction_summary?: {
+                  totals?: { regex: number; llm: number; total: number };
+                  by_type?: Record<string, { regex: number; llm: number; total: number }>;
+                };
+                downstream_impact?: { id: string; name: string }[];
+                upstream_impact?: { id: string; name: string }[];
+              };
+              return (
+                <>
+                  {(pd.extraction_summary_line || (pd.entity_extraction_summary?.totals && (pd.entity_extraction_summary.totals.regex > 0 || pd.entity_extraction_summary.totals.llm > 0))) && (
+                    <div>
+                      <span className="font-medium text-muted-foreground">Extraction (this artifact):</span>
+                      <p className="mt-1 text-muted-foreground">
+                        {pd.extraction_summary_line ?? (
+                          pd.entity_extraction_summary?.totals
+                            ? `${pd.entity_extraction_summary.totals.total} entities (${pd.entity_extraction_summary.totals.regex} regex, ${pd.entity_extraction_summary.totals.llm} LLM)`
+                            : null
+                        )}
+                      </p>
+                      {pd.entity_extraction_summary?.by_type && Object.keys(pd.entity_extraction_summary.by_type).length > 0 && (
+                        <ul className="mt-1 list-disc list-inside text-muted-foreground text-xs">
+                          {Object.entries(pd.entity_extraction_summary.by_type).map(([et, counts]) => (
+                            <li key={et}>{et}: {counts.total} total ({counts.regex} regex, {counts.llm} LLM)</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                  {(pd.downstream_impact?.length ?? 0) > 0 && (
+                    <div>
+                      <span className="font-medium text-muted-foreground">Downstream impact (artifacts that reference this):</span>
+                      <ul className="mt-1 list-disc list-inside text-muted-foreground">
+                        {(pd.downstream_impact!.slice(0, 10)).map((d) => (
+                          <li key={d.id}>{d.name || d.id}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {(pd.upstream_impact?.length ?? 0) > 0 && (
+                    <div>
+                      <span className="font-medium text-muted-foreground">Upstream (this artifact references):</span>
+                      <ul className="mt-1 list-disc list-inside text-muted-foreground">
+                        {(pd.upstream_impact ?? []).slice(0, 10).map((u) => (
+                          <li key={u.id}>{u.name || u.id}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {!(pd.downstream_impact?.length) && !(pd.upstream_impact?.length) && !pd.extraction_summary_line && !(pd.entity_extraction_summary?.totals && (pd.entity_extraction_summary.totals.regex > 0 || pd.entity_extraction_summary.totals.llm > 0)) && (
+                    <p className="text-muted-foreground">No upstream/downstream links in this project.</p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
+
         {/* Action Buttons */}
         {status === "pending" && (
           <div className="flex gap-2">

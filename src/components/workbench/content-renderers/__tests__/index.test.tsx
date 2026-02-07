@@ -9,9 +9,8 @@
 
 import { contentRendererRegistry, ContentRenderer } from '../index';
 
-// Import renderers to ensure they register
+// Import renderers to ensure they register (all template types use markdown renderer)
 import '../markdown-renderer';
-import '../architecture-renderer';
 import '../text-renderer';
 import '../binary-renderer';
 
@@ -87,8 +86,9 @@ describe('ContentRendererRegistry', () => {
       expect(contentRendererRegistry.has('markdown')).toBe(true);
     });
 
-    it('should have architecture renderer registered', () => {
+    it('should have template types (e.g. architecture, concept_brief) registered as markdown', () => {
       expect(contentRendererRegistry.has('architecture')).toBe(true);
+      expect(contentRendererRegistry.has('concept_brief')).toBe(true);
     });
 
     it('should have text renderer registered', () => {

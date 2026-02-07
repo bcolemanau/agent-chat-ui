@@ -107,12 +107,21 @@ function getPreviewTitle(toolName: string, request: any): string {
     case "generate_project_configuration_summary":
     case "propose_hydration_complete":
       return "Project Configuration - Ready for Concept Phase";
-    case "generate_concept_brief":
-      return "Concept Brief Options";
-    case "generate_ux_brief":
-      return "UX Brief Options";
-    case "generate_requirements_proposal":
-      return "Requirements Proposal";
+    case "generate": {
+      const artifactType = request.args?.artifact_type as string | undefined;
+      const titles: Record<string, string> = {
+        concept_brief: "Concept Brief Options",
+        ux_brief: "UX Brief Options",
+        requirements_package: "Requirements Proposal",
+        architecture: "Architecture Proposal",
+        design: "Design Proposal",
+        manufacturing_ops: `Manufacturing Ops: ${request.args?.template_type || request.preview_data?.artifact_type || "runbook"}`,
+        software_ops: `Software Ops: ${request.args?.template_type || request.preview_data?.artifact_type || "ops"}`,
+      };
+      return artifactType != null && artifactType in titles
+        ? titles[artifactType]
+        : `${artifactType ?? "Artifact"} Proposal`;
+    }
     case "propose_enrichment":
     case "approve_enrichment":
     case "enrichment":
@@ -127,10 +136,6 @@ function getPreviewTitle(toolName: string, request: any): string {
       return `Update user: ${request.args?.user_email || request.preview_data?.user_email || "Unknown"} in ${request.args?.org_id || request.preview_data?.org_id || "org"}`;
     case "propose_user_remove":
       return `Remove user: ${request.args?.user_email || request.preview_data?.user_email || "Unknown"} from ${request.args?.org_id || request.preview_data?.org_id || "org"}`;
-    case "generate_manufacturing_ops_proposal":
-      return `Manufacturing Ops: ${request.args?.artifact_type || request.preview_data?.artifact_type || "runbook"}`;
-    case "generate_software_ops_proposal":
-      return `Software Ops: ${request.args?.artifact_type || request.preview_data?.artifact_type || "ops"}`;
     default:
       return request.summary || request.description || `${toolName} Approval`;
   }

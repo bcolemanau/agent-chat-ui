@@ -133,7 +133,7 @@ export function ToolCalls({
                 </tbody>
               </table>
             ) : (
-              <code className="block p-3 text-sm">{"{}"}</code>
+              <p className="px-4 py-2 text-sm text-muted-foreground italic">No arguments</p>
             )}
           </div>
         );
@@ -172,6 +172,51 @@ export function ToolResult({ message }: { message: ToolMessage }) {
         toolName={parsedContent.tool_name}
         proposal={parsedContent}
       />
+    );
+  }
+
+  // get_kg_with_decisions: show Knowledge Graph Summary + entity counts + decisions count
+  const isKgWithDecisions =
+    message.name === "get_kg_with_decisions" &&
+    typeof parsedContent === "object" &&
+    parsedContent !== null &&
+    "kg" in parsedContent;
+  if (isKgWithDecisions) {
+    const kg = (parsedContent as { kg?: { entity_counts?: Record<string, number>; artifact_count?: number; scope?: { artifacts?: string[] }; error?: string } }).kg;
+    const decisions = (parsedContent as { decisions?: unknown[] }).decisions;
+    const counts = kg?.entity_counts ?? {};
+    const entityCountStr = Object.keys(counts).length > 0
+      ? Object.entries(counts)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ")
+      : "—";
+    return (
+      <div className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-4 shadow-sm">
+        <h4 className="text-sm font-semibold text-foreground mb-2">Knowledge Graph Summary</h4>
+        {kg?.error ? (
+          <p className="text-sm text-amber-600 dark:text-amber-400">{kg.error}</p>
+        ) : (
+          <div className="text-sm space-y-1.5">
+            <div>
+              <span className="font-medium text-muted-foreground">Entity counts: </span>
+              <span className="text-foreground">{entityCountStr}</span>
+            </div>
+            {typeof kg?.artifact_count === "number" && (
+              <div>
+                <span className="font-medium text-muted-foreground">Artifacts: </span>
+                <span className="text-foreground">{kg.artifact_count}</span>
+              </div>
+            )}
+            {Array.isArray(decisions) && (
+              <div>
+                <span className="font-medium text-muted-foreground">Decisions (this thread): </span>
+                <span className="text-foreground">{decisions.length}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     );
   }
 

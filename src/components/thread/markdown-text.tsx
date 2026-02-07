@@ -8,6 +8,7 @@ import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import { FC, memo, useState, useEffect, useRef } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { useTheme } from "next-themes";
 import { SyntaxHighlighter } from "@/components/thread/syntax-highlighter";
 import mermaid from "mermaid";
 
@@ -263,61 +264,65 @@ const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
   );
 };
 
-// Mermaid diagram component for client-side rendering
+// Mermaid diagram component. Only re-runs when code or theme actually change to avoid flicker (e.g. Strict Mode double-mount).
 const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
   const diagramRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isRendered, setIsRendered] = useState(false);
+  const { resolvedTheme } = useTheme();
+  const lastRunRef = useRef<{ code: string; theme: string } | null>(null);
 
   useEffect(() => {
-    if (!diagramRef.current || isRendered) return;
-
-    const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
     const element = diagramRef.current;
+    if (!element || !code.trim()) return;
+
+    const theme = resolvedTheme === "dark" ? "dark" : "default";
+    if (lastRunRef.current?.code === code && lastRunRef.current?.theme === theme) return;
+
+    let cancelled = false;
+    element.innerHTML = "";
+    const id = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
     element.id = id;
     element.textContent = code;
 
-    // Initialize Mermaid
-    mermaid.initialize({ 
+    mermaid.initialize({
       startOnLoad: false,
-      theme: 'default',
-      securityLevel: 'loose',
+      theme,
+      securityLevel: "loose",
     });
 
-    // Render the diagram
     mermaid
-      .run({
-        nodes: [element],
-      })
+      .run({ nodes: [element] })
       .then(() => {
-        setIsRendered(true);
-        setError(null);
+        if (!cancelled) {
+          lastRunRef.current = { code, theme };
+          setError(null);
+        }
       })
       .catch((err) => {
-        console.error("Mermaid rendering error:", err);
-        setError(err.message || "Failed to render diagram");
+        if (!cancelled) {
+          lastRunRef.current = null;
+          console.error("Mermaid rendering error:", err);
+          setError(err.message || "Failed to render diagram");
+        }
       });
 
     return () => {
-      // Cleanup
-      if (element) {
-        element.innerHTML = "";
-        setIsRendered(false);
-      }
+      cancelled = true;
+      // Don't clear element here so we don't flash empty when effect re-runs (e.g. Strict Mode)
     };
-  }, [code, isRendered]);
+  }, [code, resolvedTheme]);
 
   if (error) {
     return (
-      <div className="my-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-        <p className="text-red-800 text-sm">Mermaid diagram error: {error}</p>
-        <pre className="mt-2 text-xs text-red-600 overflow-auto">{code}</pre>
+      <div className="my-4 p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+        <p className="text-red-800 dark:text-red-300 text-sm">Mermaid diagram error: {error}</p>
+        <pre className="mt-2 text-xs text-red-600 dark:text-red-400 overflow-auto max-h-48">{code}</pre>
       </div>
     );
   }
 
   return (
-    <div className="my-4 flex justify-center overflow-x-auto">
+    <div className="my-4 flex justify-center overflow-x-auto min-h-[120px]">
       <div ref={diagramRef} className="mermaid" />
     </div>
   );

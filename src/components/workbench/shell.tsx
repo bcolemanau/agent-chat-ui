@@ -21,6 +21,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ProductPanel } from "@/components/product-panel/ProductPanel";
 import { useApprovalCount } from "./hooks/use-approval-count";
 import { DecisionsPanel } from "./decisions-panel";
+import { getWorkflowNodeColor } from "@/lib/workflow-agent-colors";
 
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
@@ -304,14 +305,14 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
     if (status === "loading") {
         return (
-            <div className="flex h-screen items-center justify-center">
+            <div className="flex workbench-root-height items-center justify-center">
                 <span className="text-sm text-muted-foreground">Checking authentication…</span>
             </div>
         );
     }
 
     return (
-        <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+        <div className="flex flex-col bg-background text-foreground overflow-hidden workbench-root-height">
             {/* Level 1: Global header — full width, always left to right (above sidebar) */}
             <header className="h-14 border-b flex items-center justify-between px-6 bg-background z-20 shrink-0" data-workbench-container>
                     <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -332,6 +333,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     {displayNodes.map((node, i) => {
                                         const isActive = workflowStrip.active_node === node.id || activeAgent === node.id;
                                         const showSelect = isActive && threadId;
+                                        const nodeColor = getWorkflowNodeColor(node.id);
                                         return (
                                             <span key={node.id} className="flex items-center shrink-0 gap-0.5">
                                                 {showSelect ? (
@@ -347,9 +349,10 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                                             >
                                                                 <SelectTrigger
                                                                     className={cn(
-                                                                        "h-7 min-w-0 w-auto max-w-none overflow-visible px-2 py-0.5 text-sm font-medium border border-border rounded-md bg-muted/50 text-foreground hover:bg-muted shadow-none gap-1.5 ring-2 ring-primary/40 [&>span]:whitespace-nowrap [&>span]:overflow-visible [&>span]:text-inherit",
+                                                                        "h-7 min-w-0 w-auto max-w-none overflow-visible px-2 py-0.5 text-sm font-medium border rounded-md text-foreground hover:opacity-90 shadow-none gap-1.5 ring-2 ring-primary/40 [&>span]:whitespace-nowrap [&>span]:overflow-visible [&>span]:text-inherit",
                                                                         stream.isLoading && "opacity-80"
                                                                     )}
+                                                                    style={{ backgroundColor: `color-mix(in srgb, ${nodeColor} 28%, var(--muted))`, borderColor: `color-mix(in srgb, ${nodeColor} 55%, transparent)` }}
                                                                 >
                                                                     <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                                                                     <SelectValue>{node.label}</SelectValue>
@@ -368,9 +371,13 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                                 ) : (
                                                     <span
                                                         className={cn(
-                                                            "inline-block px-2 py-0.5 rounded-md text-sm font-medium whitespace-nowrap",
-                                                            isActive ? "bg-muted/50 text-foreground ring-2 ring-primary/40" : "bg-background/80 text-muted-foreground"
+                                                            "inline-block px-2 py-0.5 rounded-md text-sm font-medium whitespace-nowrap border",
+                                                            isActive ? "text-foreground ring-2 ring-primary/40" : "text-muted-foreground"
                                                         )}
+                                                        style={{
+                                                            backgroundColor: isActive ? `color-mix(in srgb, ${nodeColor} 28%, var(--muted))` : `color-mix(in srgb, ${nodeColor} 14%, var(--background))`,
+                                                            borderColor: isActive ? `color-mix(in srgb, ${nodeColor} 55%, transparent)` : `color-mix(in srgb, ${nodeColor} 35%, transparent)`,
+                                                        }}
                                                         title={node.label}
                                                     >
                                                         {node.label}
@@ -504,13 +511,13 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     </Button>
                 </div>
 
-                {/* Main Content Area — workbench + agent panel only (no header) */}
-                <div className="flex-1 flex flex-col min-w-0" data-workbench-container>
+                {/* Main Content Area — workbench + agent panel only (no header); min-h-0 so only list/detail panes scroll */}
+                <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden" data-workbench-container>
                 {/* Content Stage - Workbench in center, Chat on right */}
                 <div className="flex-1 flex overflow-hidden min-h-0">
-                    {/* Center Area - Workbench (and NodeDetailPanel when node selected) */}
+                    {/* Center Area - Workbench (and NodeDetailPanel when node selected); flex-1 so height is constrained */}
                     <div 
-                        className="flex flex-col overflow-hidden min-h-0 transition-all"
+                        className="flex-1 flex flex-col overflow-hidden min-h-0 transition-all"
                         style={{
                             width: isWorkbenchMaximized ? '100%' : isAgentPanelOpen && !isAgentPanelMinimized && !isAgentPanelMaximized ? `calc(100% - ${agentPanelHeight}px)` : '100%',
                             maxWidth: isWorkbenchMaximized ? '100%' : isAgentPanelOpen && !isAgentPanelMinimized && !isAgentPanelMaximized ? `calc(100% - ${agentPanelHeight}px)` : '100%'
@@ -518,7 +525,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                     >
                         {isWorkbenchOpen && (
                             <aside className={cn(
-                                "border-l bg-background flex flex-col shadow-xl z-30 transition-all",
+                                "border-l bg-background flex flex-col shadow-xl z-30 transition-all min-h-0 overflow-hidden",
                                 isWorkbenchMinimized ? "h-12" : "flex-1"
                             )}>
                             {/* Workbench Tabs - Now inside the Right Pane */}
@@ -592,7 +599,6 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                             )}
                                             onClick={() => {
                                                 closeArtifact();
-                                                setViewMode("settings");
                                                 lastSyncedView.current = "settings";
                                                 stream.setWorkbenchView("settings" as any);
                                                 router.push(workbenchHref("/workbench/settings"));
@@ -662,20 +668,21 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                 </div>
                             ) : pathname?.includes("/workbench/decisions") ? (
                                 // Show Decisions if we're on the decisions route
-                                <div className="h-full w-full overflow-hidden">
+                                <div className="h-full w-full min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
                                     {children}
                                 </div>
                             ) : pathname?.includes("/workbench/hydration") && viewMode === "decisions" ? (
                                 // If on hydration page but user selected Decisions tab, show Decisions view
-                                <div className="h-full w-full overflow-hidden">
+                                <div className="h-full w-full min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
                                     <DecisionsPanel />
                                 </div>
                             ) : viewMode === "decisions" ? (
-                                <div className="h-full w-full overflow-hidden">
+                                <div className="h-full w-full min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
                                     <DecisionsPanel />
                                 </div>
                             ) : (
-                                <div className="h-full w-full overflow-hidden">
+                                /* Map/Artifacts: no single scroll so list and detail panes scroll independently; edit header stays fixed */
+                                <div className="h-full w-full min-h-0 overflow-hidden flex flex-col">
                                     {children}
                                 </div>
                             ))}

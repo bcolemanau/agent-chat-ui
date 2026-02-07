@@ -13,18 +13,18 @@ import { FullProposalContent } from "./full-proposal-modal";
 import { WorldMapView } from "./world-map-view";
 import { useStreamContext } from "@/providers/Stream";
 import type { DecisionSummary } from "@/lib/diff-types";
-import { AlertCircle, LayoutGrid, Table2, Rows3, PanelRight, ArrowLeft, GitCompare, Globe } from "lucide-react";
+import { AlertCircle, PanelRight, ArrowLeft, GitCompare, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const VIEW_STORAGE_KEY = "reflexion_decisions_view";
-type ViewMode = "cards" | "table" | "hybrid" | "split" | "map";
+type ViewMode = "split" | "map";
 
 function getStoredView(): ViewMode {
-  if (typeof window === "undefined") return "cards";
+  if (typeof window === "undefined") return "split";
   const v = localStorage.getItem(VIEW_STORAGE_KEY);
-  if (v === "table" || v === "hybrid" || v === "split" || v === "map") return v;
-  return "cards";
+  if (v === "split" || v === "map") return v;
+  return "split";
 }
 
 function setStoredView(mode: ViewMode) {
@@ -62,6 +62,48 @@ function relativeTime(ts: number): string {
   return `${Math.floor(d / 86400_000)} d ago`;
 }
 
+type DecisionRow = {
+  id: string;
+  type: string;
+  title: string;
+  status: "pending" | "approved" | "rejected";
+  time: number;
+  item?: UnifiedPreviewItem;
+  kg_version_sha?: string;
+  args?: Record<string, unknown>;
+};
+
+function getArtifactDisplayName(row: DecisionRow): string | undefined {
+  const args = row.args ?? row.item?.data?.args;
+  if (!args) return undefined;
+  const filename =
+    (args.preview_data as Record<string, unknown> | undefined)?.filename as string | undefined ||
+    (args.filename as string | undefined);
+  if (filename) return filename;
+  if (row.type === "link_uploaded_document") return (args.document_id as string) || undefined;
+  return undefined;
+}
+
+function getDecisionDisplayTitle(row: DecisionRow): string {
+  const args = row.args ?? row.item?.data?.args;
+  const artifactName = getArtifactDisplayName(row);
+  const isEnrichment =
+    row.type === "enrichment" || row.type === "approve_enrichment" || row.type === "propose_enrichment";
+  const isLink = row.type === "link_uploaded_document";
+
+  if (isEnrichment && artifactName) {
+    const cycleId = (args as Record<string, unknown> | undefined)?.cycle_id as string | undefined;
+    const cycleSuffix =
+      cycleId && typeof cycleId === "string"
+        ? ` (${cycleId.length > 12 ? "…" + cycleId.slice(-8) : cycleId})`
+        : "";
+    return `Enrichment${cycleSuffix}: ${artifactName}`;
+  }
+  if (isLink && artifactName) return `Link: ${artifactName}`;
+  if (artifactName && (isEnrichment || isLink)) return artifactName;
+  return row.title;
+}
+
 export function DecisionsPanel() {
   const stream = useStreamContext();
   const router = useRouter();
@@ -94,7 +136,7 @@ export function DecisionsPanel() {
     return Array.from(byId.values()).filter((p) => !processedIds.has(p.id));
   }, [pendingFromApi, allPreviews, processedIds]);
 
-  const [viewMode, setViewModeState] = useState<ViewMode>("cards");
+  const [viewMode, setViewModeState] = useState<ViewMode>("split");
   const setViewMode = useCallback((mode: ViewMode) => {
     setViewModeState(mode);
     setStoredView(mode);
@@ -104,7 +146,6 @@ export function DecisionsPanel() {
     setViewModeState(getStoredView());
   }, []);
 
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [proposalViewActive, setProposalViewActive] = useState(false);
 
@@ -112,7 +153,7 @@ export function DecisionsPanel() {
     (
       item: UnifiedPreviewItem,
       status: "approved" | "rejected",
-      extra?: { kg_version_sha?: string }
+      extra?: { kg_version_sha?: string; artifact_id?: string; outcome_description?: string }
     ) => {
       addProcessed({
         id: item.id,
@@ -121,29 +162,33 @@ export function DecisionsPanel() {
         status,
         timestamp: Date.now(),
         ...(extra?.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
+        ...(extra?.outcome_description != null ? { outcome_description: extra.outcome_description } : {}),
         ...(item.data?.preview_data != null ? { preview_data: item.data.preview_data as Record<string, unknown> } : {}),
+        ...(item.data?.args != null ? { args: item.data.args as Record<string, unknown> } : {}),
       });
       refetchPending();
     },
     [addProcessed, refetchPending]
   );
 
-  const allRows = useMemo(() => {
-    const pendingRows: { id: string; type: string; title: string; status: "pending"; time: number; item?: UnifiedPreviewItem; kg_version_sha?: string }[] = pending.map((item) => ({
+  const allRows = useMemo((): DecisionRow[] => {
+    const pendingRows: DecisionRow[] = pending.map((item) => ({
       id: item.id,
       type: item.type,
       title: item.title,
       status: "pending" as const,
       time: Date.now(),
       item,
+      args: item.data?.args as Record<string, unknown> | undefined,
     }));
-    const processedRows: { id: string; type: string; title: string; status: "approved" | "rejected"; time: number; kg_version_sha?: string }[] = processed.map((p) => ({
+    const processedRows: DecisionRow[] = processed.map((p) => ({
       id: p.id,
       type: p.type,
       title: p.title,
       status: p.status,
       time: p.timestamp,
       kg_version_sha: p.kg_version_sha,
+      args: p.args,
     }));
     return [...pendingRows, ...processedRows];
   }, [pending, processed]);
@@ -189,30 +234,6 @@ export function DecisionsPanel() {
           </Button>
           <div className="flex items-center gap-1 rounded-lg border bg-muted/30 p-1">
             <Button
-              variant={viewMode === "cards" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setViewMode("cards")}
-              title="Cards"
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={viewMode === "table" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setViewMode("table")}
-              title="Table"
-            >
-              <Table2 className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={viewMode === "hybrid" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setViewMode("hybrid")}
-              title="Hybrid (table + expand)"
-            >
-              <Rows3 className="h-4 w-4" />
-            </Button>
-            <Button
               variant={viewMode === "split" ? "secondary" : "ghost"}
               size="sm"
               onClick={() => setViewMode("split")}
@@ -255,12 +276,12 @@ export function DecisionsPanel() {
             (viewMode === "split" || viewMode === "map") && "flex-row"
           )}
         >
-          {/* Table (for table / hybrid / split / map) */}
-          {(viewMode === "table" || viewMode === "hybrid" || viewMode === "split" || viewMode === "map") && (
+          {/* Table (split and map: left column) */}
+          {(viewMode === "split" || viewMode === "map") && (
             <div
               className={cn(
                 "min-h-0 flex flex-col border rounded-lg bg-card overflow-hidden",
-                (viewMode === "split" || viewMode === "map") ? "w-1/2 min-w-[320px] shrink-0" : "flex-1"
+                "w-1/2 min-w-[320px] shrink-0"
               )}
             >
               <div className="overflow-auto flex-1 min-h-0">
@@ -269,101 +290,65 @@ export function DecisionsPanel() {
                     <tr>
                       <th className="text-left py-2 px-3 font-medium">Type</th>
                       <th className="text-left py-2 px-3 font-medium">Title</th>
+                      <th className="text-left py-2 px-3 font-medium">Subject</th>
                       <th className="text-left py-2 px-3 font-medium w-24">Status</th>
                       <th className="text-left py-2 px-3 font-medium w-24">Time</th>
-                      {viewMode !== "table" && <th className="w-10" />}
-                      <th className="text-right py-2 px-3 font-medium w-28">Actions</th>
+                      <th className="w-10" />
                     </tr>
                   </thead>
                   <tbody>
                     {allRows.map((row) => (
-                      <React.Fragment key={row.id}>
-                        <tr
-                          className={cn(
-                            "border-b border-border/50 hover:bg-muted/30",
-                            (viewMode === "hybrid" || viewMode === "split" || viewMode === "map") && "cursor-pointer",
-                            (expandedId === row.id || selectedId === row.id) && "bg-muted/50"
-                          )}
-                          onClick={() => {
-                            if (viewMode === "hybrid") setExpandedId((id) => (id === row.id ? null : row.id));
-                            if (viewMode === "split" || viewMode === "map") {
-                              const isDeselecting = selectedId === row.id;
-                              setSelectedId((id) => (id === row.id ? null : row.id));
-                              setProposalViewActive(false);
-                              // In map layout, decision table is the timeline: set URL version so map shows that KG version + diff
-                              if (viewMode === "map") {
-                                if (isDeselecting) setVersionParam(null);
-                                else {
-                                  const sha = "kg_version_sha" in row ? (row as { kg_version_sha?: string }).kg_version_sha : undefined;
-                                  setVersionParam(sha ?? null);
-                                }
-                              }
-                            }
-                            if (viewMode === "table" && row.status === "pending" && "item" in row) {
-                              setSelectedId(row.id);
-                              setViewMode("split");
-                            }
-                          }}
-                        >
-                          <td className="py-2 px-3">
-                            <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium">
-                              {getTypeLabel(row.type)}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 truncate max-w-[200px]" title={row.title}>
-                            {row.title}
-                          </td>
-                          <td className="py-2 px-3">
-                            <span
-                              className={cn(
-                                "text-xs font-medium",
-                                row.status === "pending" && "text-amber-600 dark:text-amber-400",
-                                row.status === "approved" && "text-green-600 dark:text-green-400",
-                                row.status === "rejected" && "text-muted-foreground"
-                              )}
-                            >
-                              {row.status}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 text-muted-foreground text-xs">
-                            {relativeTime(row.time)}
-                          </td>
-                          {(viewMode === "hybrid" || viewMode === "split" || viewMode === "map") && (
-                            <td className="py-2 px-1">
-                              {(expandedId === row.id || selectedId === row.id) && (
-                                <span className="text-muted-foreground text-xs">▼</span>
-                              )}
-                            </td>
-                          )}
-                          <td className="py-2 px-3 text-right">
-                            {row.status === "pending" && "item" in row && row.item && viewMode === "table" && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedId(row.id);
-                                  setViewMode("split");
-                                }}
-                              >
-                                Open
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
-                        {viewMode === "hybrid" && expandedId === row.id && "item" in row && row.item && (
-                          <tr className="bg-muted/20">
-                            <td colSpan={6} className="p-4">
-                              <ApprovalCard
-                                item={row.item}
-                                stream={stream}
-                                onDecisionProcessed={onDecisionProcessed}
-                              />
-                            </td>
-                          </tr>
+                      <tr
+                        key={row.id}
+                        className={cn(
+                          "border-b border-border/50 hover:bg-muted/30 cursor-pointer",
+                          (selectedId === row.id) && "bg-muted/50"
                         )}
-                      </React.Fragment>
+                        onClick={() => {
+                          const isDeselecting = selectedId === row.id;
+                          setSelectedId((id) => (id === row.id ? null : row.id));
+                          setProposalViewActive(false);
+                          if (viewMode === "map") {
+                            if (isDeselecting) setVersionParam(null);
+                            else {
+                              const sha = "kg_version_sha" in row ? (row as { kg_version_sha?: string }).kg_version_sha : undefined;
+                              setVersionParam(sha ?? null);
+                            }
+                          }
+                        }}
+                      >
+                        <td className="py-2 px-3">
+                          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium">
+                            {getTypeLabel(row.type)}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 truncate max-w-[200px]" title={getDecisionDisplayTitle(row)}>
+                          {getDecisionDisplayTitle(row)}
+                        </td>
+                        <td className="py-2 px-3 truncate max-w-[180px] text-muted-foreground text-sm" title={getArtifactDisplayName(row) ?? ""}>
+                          {getArtifactDisplayName(row) ?? "—"}
+                        </td>
+                        <td className="py-2 px-3">
+                          <span
+                            className={cn(
+                              "text-xs font-medium",
+                              row.status === "pending" && "text-amber-600 dark:text-amber-400",
+                              row.status === "approved" && "text-green-600 dark:text-green-400",
+                              row.status === "rejected" && "text-muted-foreground"
+                            )}
+                          >
+                            {row.status}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-muted-foreground text-xs">
+                          {relativeTime(row.time)}
+                        </td>
+                        <td className="py-2 px-1">
+                          {selectedId === row.id && (
+                            <span className="text-muted-foreground text-xs">▼</span>
+                          )}
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
@@ -378,43 +363,9 @@ export function DecisionsPanel() {
             </div>
           )}
 
-          {/* Cards area (cards view, or split detail) */}
-          {(viewMode === "cards" || viewMode === "split") && (
-            <div
-              className={cn(
-                "min-h-0 flex flex-col overflow-hidden",
-                viewMode === "cards" ? "flex-1" : "w-1/2 min-w-[320px] flex-1"
-              )}
-            >
-              {viewMode === "cards" ? (
-                <div className="flex-1 min-h-0 overflow-y-auto pr-2 space-y-6">
-                  {pending.length > 0 && (
-                    <section>
-                      <h2 className="text-lg font-medium mb-3">Pending ({pending.length})</h2>
-                      <div className="grid gap-4">
-                        {pending.map((item) => (
-                          <ApprovalCard
-                            key={item.id}
-                            item={item}
-                            stream={stream}
-                            onDecisionProcessed={onDecisionProcessed}
-                          />
-                        ))}
-                      </div>
-                    </section>
-                  )}
-                  {processed.length > 0 && (
-                    <section>
-                      <h2 className="text-lg font-medium mb-3">Processed ({processed.length})</h2>
-                      <div className="grid gap-4">
-                        {processed.map((p) => (
-                          <ProcessedRow key={p.id} decision={p} threadId={threadId} />
-                        ))}
-                      </div>
-                    </section>
-                  )}
-                </div>
-              ) : (
+          {/* Split detail pane */}
+          {viewMode === "split" && (
+            <div className="min-h-0 flex flex-col overflow-hidden w-1/2 min-w-[320px] flex-1">
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden border rounded-lg bg-card">
                   {proposalViewActive && selectedItem ? (
                     <>
@@ -449,7 +400,15 @@ export function DecisionsPanel() {
                     </div>
                   ) : selectedProcessed ? (
                     <div className="flex-1 min-h-0 overflow-y-auto p-4">
-                      <ProcessedRow decision={selectedProcessed} threadId={threadId} />
+                      <ProcessedRow
+                        decision={selectedProcessed}
+                        threadId={threadId}
+                        displayTitle={getDecisionDisplayTitle({
+                          ...selectedProcessed,
+                          time: selectedProcessed.timestamp,
+                          args: selectedProcessed.args,
+                        })}
+                      />
                     </div>
                   ) : (
                     <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -457,12 +416,7 @@ export function DecisionsPanel() {
                     </div>
                   )}
                 </div>
-              )}
             </div>
-          )}
-
-          {viewMode === "hybrid" && pending.length > 0 && expandedId === null && (
-            <p className="text-sm text-muted-foreground self-center">Expand a pending row to approve or reject.</p>
           )}
         </div>
       )}
@@ -534,8 +488,17 @@ function DecisionKgDiffView({
   );
 }
 
-function ProcessedRow({ decision, threadId }: { decision: ProcessedDecision; threadId: string | undefined }) {
+function ProcessedRow({
+  decision,
+  threadId,
+  displayTitle,
+}: {
+  decision: ProcessedDecision;
+  threadId: string | undefined;
+  displayTitle?: string;
+}) {
   const router = useRouter();
+  const title = displayTitle ?? decision.title;
 
   const openCompareOnMap = useCallback(() => {
     if (!threadId || !decision.kg_version_sha) return;
@@ -553,7 +516,9 @@ function ProcessedRow({ decision, threadId }: { decision: ProcessedDecision; thr
           <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium shrink-0">
             {getTypeLabel(decision.type)}
           </span>
-          <span className="truncate">{decision.title}</span>
+          <span className="truncate" title={title}>
+            {title}
+          </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span
@@ -568,6 +533,9 @@ function ProcessedRow({ decision, threadId }: { decision: ProcessedDecision; thr
           <span className="text-muted-foreground text-xs">{relativeTime(decision.timestamp)}</span>
         </div>
       </div>
+      {decision.outcome_description ? (
+        <p className="px-4 pb-2 text-sm text-muted-foreground border-b border-border/50">{decision.outcome_description}</p>
+      ) : null}
       {/* Decision context (what was shown when this was processed), for both approved and rejected */}
       {decision.preview_data?.decision_summary != null ? (
         <div className="px-4 pb-4">

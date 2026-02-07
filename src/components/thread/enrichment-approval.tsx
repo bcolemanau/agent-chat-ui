@@ -171,10 +171,8 @@ export function EnrichmentApproval({
                   data.enrichment.artifact_types || []
                 );
               }
-            } else if (response.status === 404) {
-              // No enrichment yet - trigger it
-              await triggerEnrichment(artifactId, headers);
             }
+            // Do NOT POST on 404: upload already creates one cycle; auto-POST caused duplicate cycles (1 link + 3 enrichments).
           } catch (error) {
             console.error(
               `[Enrichment] Failed to fetch proposal for ${artifactId}:`,

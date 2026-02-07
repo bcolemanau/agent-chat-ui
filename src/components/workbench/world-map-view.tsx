@@ -2,13 +2,14 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitCompare } from 'lucide-react';
+import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitCompare, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
 import { useQueryState } from 'nuqs';
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { KG_DIFF_COLORS } from '@/lib/diff-types';
+import { getWorkflowNodeColor } from '@/lib/workflow-agent-colors';
 import { NodeDetailPanel } from './node-detail-panel';
 import { ArtifactsListView } from './artifacts-list-view';
 import { useUnifiedPreviews } from './hooks/use-unified-previews';
@@ -43,13 +44,108 @@ interface GraphData {
     };
 }
 
+/** Type → display label (for legend and fallback). */
 const typeConfig: Record<string, { color: string; label: string }> = {
     DOMAIN: { color: '#64748b', label: 'Domain' },
     REQ: { color: '#fbbf24', label: 'Trigger' },
     ARTIFACT: { color: '#0ea5e9', label: 'Artifact' },
     MECH: { color: '#a855f7', label: 'Mechanism' },
     CRIT: { color: '#f43f5e', label: 'Risk' },
+    COMPONENT: { color: '#06b6d4', label: 'Component' },
+    VIEW: { color: '#22c55e', label: 'View' },
+    REQUIREMENT: { color: '#eab308', label: 'Requirement' },
+    SCENARIO: { color: '#ec4899', label: 'Scenario' },
+    INTERFACE: { color: '#8b5cf6', label: 'Interface' },
+    DECISION: { color: '#f97316', label: 'Decision' },
+    PERSONA: { color: '#ec4899', label: 'Persona' },
+    PERS: { color: '#ec4899', label: 'Persona' },
+    OUTCOME: { color: '#22c55e', label: 'Outcome' },
+    OUT: { color: '#22c55e', label: 'Outcome' },
+    METRIC: { color: '#06b6d4', label: 'Metric' },
+    MET: { color: '#06b6d4', label: 'Metric' },
+    CONSTRAINT: { color: '#8b5cf6', label: 'Constraint' },
+    CONST: { color: '#8b5cf6', label: 'Constraint' },
+    FEATURE: { color: '#eab308', label: 'Feature' },
+    FEAT: { color: '#eab308', label: 'Feature' },
+    JTBD: { color: '#a855f7', label: 'JTBD' },
+    UXO: { color: '#0ea5e9', label: 'UX Outcome' },
+    LIFECYCLE: { color: '#64748b', label: 'Lifecycle' },
+    TEMPLATE: { color: '#64748b', label: 'Template' },
 };
+
+/** Agent → Template → NodeTypes hierarchy (aligns with ArtifactTemplates_kg). Colour is at Agent level. */
+const MAP_LEGEND_AGENT_HIERARCHY: {
+    agentId: string;
+    agentName: string;
+    templates: { templateName: string; types: string[] }[];
+}[] = [
+    {
+        agentId: 'concept',
+        agentName: 'Concept',
+        templates: [
+            { templateName: 'Concept Brief', types: ['PERSONA', 'PERS', 'SCENARIO', 'OUTCOME', 'OUT', 'METRIC', 'MET', 'DECISION', 'CONSTRAINT', 'CONST'] },
+            { templateName: 'Feature Definition', types: ['FEATURE', 'FEAT', 'JTBD'] },
+            { templateName: 'UX Brief', types: ['UXO'] },
+        ],
+    },
+    {
+        agentId: 'requirements',
+        agentName: 'Requirements',
+        templates: [
+            { templateName: 'Requirements Package', types: ['REQUIREMENT', 'LIFECYCLE', 'SCENARIO'] },
+        ],
+    },
+    {
+        agentId: 'architecture',
+        agentName: 'Architecture',
+        templates: [
+            { templateName: 'Architecture', types: ['COMPONENT', 'INTERFACE', 'VIEW'] },
+        ],
+    },
+    {
+        agentId: 'design',
+        agentName: 'Design',
+        templates: [
+            { templateName: 'Design', types: ['COMPONENT', 'INTERFACE', 'REQUIREMENT', 'DECISION'] },
+        ],
+    },
+    {
+        agentId: 'system',
+        agentName: 'System',
+        templates: [
+            { templateName: 'Methodology / KG', types: ['DOMAIN', 'REQ', 'ARTIFACT', 'MECH', 'CRIT', 'TEMPLATE'] },
+        ],
+    },
+];
+
+/** Node type → agent id (for agent-level colour). First match in hierarchy wins. */
+const typeToAgentId: Record<string, string> = (() => {
+    const out: Record<string, string> = {};
+    for (const agent of MAP_LEGEND_AGENT_HIERARCHY) {
+        for (const t of agent.templates) {
+            for (const typeName of t.types) {
+                if (!(typeName in out)) out[typeName] = agent.agentId;
+            }
+        }
+    }
+    return out;
+})();
+
+/** Brand hue (customer brand); light → dark = start → finish. */
+const MAP_LEGEND_BRAND_HUE = 217;
+/** Agent-level colours: same hue, light (start) → dark (finish). */
+const agentColors: Record<string, string> = {
+    concept: `hsl(${MAP_LEGEND_BRAND_HUE}, 45%, 72%)`,
+    requirements: `hsl(${MAP_LEGEND_BRAND_HUE}, 50%, 58%)`,
+    architecture: `hsl(${MAP_LEGEND_BRAND_HUE}, 55%, 48%)`,
+    design: `hsl(${MAP_LEGEND_BRAND_HUE}, 55%, 38%)`,
+    system: 'hsl(215, 15%, 45%)',
+};
+
+function getAgentColorForNodeType(nodeType: string): string {
+    const agentId = typeToAgentId[nodeType];
+    return agentId ? agentColors[agentId] ?? '#888' : '#888';
+}
 
 export interface WorldMapViewProps {
     /** When true, the decisions table on the left is the timeline; hide the built-in timeline panel. */
@@ -129,6 +225,34 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const [timelineVersionDiff, setTimelineVersionDiff] = useState<any>(null);
     const [loadingTimelineDiff, setLoadingTimelineDiff] = useState(false);
 
+    /** Map search: single match → select node; multiple → filtered view. */
+    const [mapSearchQuery, setMapSearchQuery] = useState('');
+    /** Type filter: record of node type → visible (false = hidden). Empty = all visible. */
+    const [typeFilter, setTypeFilter] = useState<Record<string, boolean>>({});
+    /** Collapsed agent groups in the hierarchical legend (agentId → true = collapsed). */
+    const [legendCollapsed, setLegendCollapsed] = useState<Record<string, boolean>>({});
+    /** Workflow strip for bottom panel (same left-to-right as header). */
+    const [workflowStrip, setWorkflowStrip] = useState<{ nodes: { id: string; label: string }[]; active_node?: string } | null>(null);
+    /** Bottom panel (workflow | filter | search | zoom) collapsed. */
+    const [bottomPanelCollapsed, setBottomPanelCollapsed] = useState(false);
+
+    // Fetch workflow strip for bottom panel (same as header, left-to-right flow)
+    useEffect(() => {
+        if (!threadId || embeddedInDecisions) return;
+        let cancelled = false;
+        const params = new URLSearchParams();
+        const activeAgent = (stream as any)?.values?.active_agent;
+        if (activeAgent) params.set('active_node', activeAgent);
+        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ''}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data: { nodes?: { id: string; label: string }[]; active_node?: string } | null) => {
+                if (!cancelled && data?.nodes) setWorkflowStrip({ nodes: data.nodes, active_node: data.active_node });
+                else if (!cancelled) setWorkflowStrip(null);
+            })
+            .catch(() => { if (!cancelled) setWorkflowStrip(null); });
+        return () => { cancelled = true; };
+    }, [threadId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
+
     useEffect(() => {
         if (selectedTimelineVersionId) {
             console.log('[WorldMapView] Timeline diff state', {
@@ -143,21 +267,22 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     const unifiedPreviews = useUnifiedPreviews();
     const draftArtifactNodes = useMemo(() => {
-        const artifactTypes = new Set([
-            'generate_concept_brief',
-            'generate_ux_brief',
-            'generate_requirements_proposal',
-            'generate_architecture_proposal',
-            'generate_design_proposal',
-        ]);
         return unifiedPreviews
-            .filter((p) => p.status === 'pending' && artifactTypes.has(p.type))
-            .map((p) => ({
-                id: `draft-${p.id}`,
-                name: p.title,
-                type: 'ARTIFACT',
-                metadata: { draft: true, artifact_types: [p.type.replace('generate_', '').replace('_proposal', '').replace('_brief', '')], artifact_id: undefined },
-            })) as Node[];
+            .filter(
+                (p) =>
+                    p.status === 'pending' &&
+                    p.type === 'generate' &&
+                    (p.data?.args as Record<string, unknown> | undefined)?.artifact_type
+            )
+            .map((p) => {
+                const artifactType = (p.data?.args as Record<string, unknown> | undefined)?.artifact_type as string;
+                return {
+                    id: `draft-${p.id}`,
+                    name: p.title,
+                    type: 'ARTIFACT',
+                    metadata: { draft: true, artifact_types: [artifactType], artifact_id: undefined },
+                };
+            }) as Node[];
     }, [unifiedPreviews]);
 
     // Note: Workflow workbench view removed; version/orientation is in global header. Artifact history and content fetching is handled by NodeDetailPanel.
@@ -702,8 +827,41 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             console.groupEnd();
         }
 
-        const simulation = d3.forceSimulation<Node>(nodes)
-            .force('link', d3.forceLink<Node, Link>(validLinks).id(d => d.id).distance(150))
+        // Type filter: show only nodes whose type is not explicitly hidden (typeFilter[type] !== false)
+        const visibleByType = nodes.filter((n) => typeFilter[n.type] !== false);
+        const visibleNodeIds = new Set(visibleByType.map((n) => n.id));
+
+        // Search: match by id, name, or label (case-insensitive)
+        const matchesSearch = (n: Node, q: string) => {
+            const t = q.toLowerCase();
+            return (
+                (n.id && String(n.id).toLowerCase().includes(t)) ||
+                (n.name && String(n.name).toLowerCase().includes(t)) ||
+                ((n as { label?: string }).label && String((n as { label?: string }).label).toLowerCase().includes(t))
+            );
+        };
+        const query = mapSearchQuery.trim();
+        const searchMatches = query
+            ? visibleByType.filter((n) => matchesSearch(n, query))
+            : visibleByType;
+
+        if (searchMatches.length === 1 && searchMatches[0].id !== selectedNode?.id) {
+            setSelectedNode(searchMatches[0]);
+        }
+
+        const effectiveNodeIds =
+            query && searchMatches.length > 1
+                ? new Set(searchMatches.map((n) => n.id))
+                : visibleNodeIds;
+        const effectiveNodes = nodes.filter((n) => effectiveNodeIds.has(n.id));
+        const effectiveValidLinks = validLinks.filter(
+            (l) =>
+                effectiveNodeIds.has((l.source as Node).id) &&
+                effectiveNodeIds.has((l.target as Node).id)
+        );
+
+        const simulation = d3.forceSimulation<Node>(effectiveNodes)
+            .force('link', d3.forceLink<Node, Link>(effectiveValidLinks).id(d => d.id).distance(150))
             .force('charge', d3.forceManyBody().strength(-800))
             .force('center', d3.forceCenter(width / 2, height / 2))
             .force('collide', d3.forceCollide().radius(60));
@@ -712,7 +870,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         const link = g.append('g')
             .attr('class', 'links')
             .selectAll('line')
-            .data(validLinks)
+            .data(effectiveValidLinks)
             .enter().append('line')
             .attr('stroke', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? '#94a3b8' : '#888')
             .attr('stroke-width', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? 1 : 1.5)
@@ -723,7 +881,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         const node = g.append('g')
             .attr('class', 'nodes')
             .selectAll('.node')
-            .data(nodes)
+            .data(effectiveNodes)
             .enter().append('g')
             .attr('class', 'node')
             .style('opacity', d => d.is_active === false ? inactiveOpacity : 1)
@@ -774,7 +932,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 // Color by diff status (KG-diff contract, same as KgDiffDiagramView)
                 const status = (d as any).diff_status;
                 if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS];
-                return typeConfig[d.type]?.color || '#444';
+                return getAgentColorForNodeType(d.type);
             })
             .attr('stroke', d => {
                 if (selectedNode && d.id === selectedNode.id) return '#fff';
@@ -899,7 +1057,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 }
             }
         };
-    }, [data, viewMode, inactiveOpacity, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode]);
+    }, [data, viewMode, inactiveOpacity, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode, mapSearchQuery, typeFilter]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -960,7 +1118,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         [draftArtifactNodes, approvedDecisionIds]
     );
 
-    // Artifacts View Component: KG artifacts (accepted) + pending proposals (draft) — exclude drafts that were applied
+    // Artifacts View Component: KG artifacts (accepted) + pending proposals (draft) — exclude drafts that were applied.
+    // Dedupe by metadata.artifact_id so the same document does not appear twice (e.g. base + enriched node for same file).
     const ArtifactsView = () => {
         const kgArtifacts = data?.nodes.filter(n => n.type === 'ARTIFACT') || [];
         const enrichedKg = kgArtifacts.map(artifact => {
@@ -970,7 +1129,16 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 metadata: fullNode?.metadata || artifact.metadata || {}
             };
         });
-        const artifacts = [...draftsToShow, ...enrichedKg];
+        const seenArtifactIds = new Set<string>();
+        const dedupedKg = enrichedKg.filter((n) => {
+            const aid = n.metadata?.artifact_id;
+            if (aid != null && aid !== '') {
+                if (seenArtifactIds.has(String(aid))) return false;
+                seenArtifactIds.add(String(aid));
+            }
+            return true;
+        });
+        const artifacts = [...draftsToShow, ...dedupedKg];
 
         return (
             <ArtifactsListView
@@ -984,90 +1152,6 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     return (
         <div className="h-full w-full flex flex-col bg-background overflow-hidden relative">
-            {/* Toolbar */}
-            <div className="h-12 border-b border-border bg-muted/30 flex items-center justify-between px-4 z-20">
-                <div className="flex items-center gap-4">
-                    {!embeddedInDecisions && kgHistory && (
-                        <>
-                            <UIButton
-                                variant="ghost"
-                                size="sm"
-                                className={cn(
-                                    "flex items-center gap-2 px-2.5 py-1 border rounded-md transition-colors",
-                                    showHistory ? "bg-blue-500/20 border-blue-500/40" : "bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20"
-                                )}
-                                onClick={() => setShowHistory(!showHistory)}
-                            >
-                                <span className="text-[10px] font-bold text-blue-500 tracking-wider">KG v{kgHistory.total}</span>
-                            </UIButton>
-                            <UIButton
-                                variant="ghost"
-                                size="sm"
-                                className={cn(
-                                    "flex items-center gap-2 px-2.5 py-1 border rounded-md transition-colors",
-                                    compareMode ? "bg-purple-500/20 border-purple-500/40" : "bg-purple-500/10 border-purple-500/20 hover:bg-purple-500/20"
-                                )}
-                                onClick={() => {
-                                    setCompareMode(!compareMode);
-                                    if (!compareMode) {
-                                        setShowHistory(true);
-                                    } else {
-                                        setCompareVersion1(null);
-                                        setCompareVersion2(null);
-                                        setDiffData(null);
-                                    }
-                                }}
-                            >
-                                <GitCompare className="h-3 w-3 text-purple-500" />
-                                <span className="text-[10px] font-bold text-purple-500 tracking-wider">Compare</span>
-                            </UIButton>
-                        </>
-                    )}
-                    <div className="h-4 w-px bg-border ml-2" />
-                    <div className="flex items-center gap-2 px-2">
-                        <label className="text-[10px] text-muted-foreground whitespace-nowrap">Inactive Opacity:</label>
-                        <input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.05"
-                            value={inactiveOpacity}
-                            onChange={(e) => setInactiveOpacity(parseFloat(e.target.value))}
-                            className="w-20 h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
-                            title={`Inactive node opacity: ${Math.round(inactiveOpacity * 100)}%`}
-                        />
-                        <span className="text-[10px] text-muted-foreground w-8 text-right">{Math.round(inactiveOpacity * 100)}%</span>
-                    </div>
-                    <UIButton variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground" onClick={() => fetchData()}>
-                        <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
-                        <span className="text-xs">Refresh</span>
-                    </UIButton>
-                </div>
-                <div className="flex items-center gap-2">
-                    {data?.metadata.active_trigger && (
-                        <div className="flex items-center gap-2 px-3 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded-full">
-                            <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
-                            <span className="text-[10px] font-bold text-yellow-500 uppercase tracking-wider">Active Trigger: {data.metadata.active_trigger}</span>
-                        </div>
-                    )}
-                    {activeVersion && (
-                        <div className="flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full">
-                            <span className="text-[10px] font-bold text-purple-500 uppercase tracking-wider">Historical: {activeVersion}</span>
-                            <UIButton variant="ghost" size="icon" className="h-4 w-4 ml-1 hover:bg-purple-500/20 rounded-full" onClick={() => fetchData()}>
-                                <RefreshCw className="h-2.5 w-2.5 text-purple-500" />
-                            </UIButton>
-                        </div>
-                    )}
-                    <div className="relative">
-                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                            placeholder="Search nodes..."
-                            className="bg-muted border border-border rounded-md py-1 pl-8 pr-3 text-xs focus:outline-none focus:border-primary/50 transition-all w-48 text-foreground"
-                        />
-                    </div>
-                </div>
-            </div>
-
             {/* History Panel - Slide In (hidden when decisions table is the timeline) */}
             {!embeddedInDecisions && showHistory && kgHistory && (
                 <div className="absolute top-12 left-0 bottom-0 w-80 bg-background/95 backdrop-blur-sm border-r border-border z-30 flex flex-col animate-in slide-in-from-left-4 duration-200">
@@ -1415,18 +1499,20 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                     </>
                 )}
 
-                        {/* Floating Controls */}
-                        <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
-                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                                <ZoomIn className="h-4 w-4" />
-                            </UIButton>
-                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                                <ZoomOut className="h-4 w-4" />
-                            </UIButton>
-                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                                <Maximize className="h-4 w-4" />
-                            </UIButton>
-                        </div>
+                        {/* Floating Controls - only when bottom panel is collapsed */}
+                        {bottomPanelCollapsed && (
+                            <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
+                                <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                    <ZoomIn className="h-4 w-4" />
+                                </UIButton>
+                                <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                    <ZoomOut className="h-4 w-4" />
+                                </UIButton>
+                                <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                    <Maximize className="h-4 w-4" />
+                                </UIButton>
+                            </div>
+                        )}
                     </div>
 
                     {/* Detail Panel - Bottom, resizable height */}
@@ -1440,7 +1526,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                     </div>
                 </div>
             ) : (
-                <div ref={containerRef} className="flex-1 relative overflow-hidden" onClick={() => setSelectedNode(null)}>
+                <div ref={containerRef} className="flex-1 min-h-0 flex flex-col relative overflow-hidden" onClick={() => setSelectedNode(null)}>
                     {viewMode === 'artifacts' ? (
                         <ArtifactsView />
                     ) : (
@@ -1474,19 +1560,166 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                         </>
                     )}
 
-                    {/* Floating Controls */}
-                    <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
-                        <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                            <ZoomIn className="h-4 w-4" />
-                        </UIButton>
-                        <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                            <ZoomOut className="h-4 w-4" />
-                        </UIButton>
-                        <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
-                            <Maximize className="h-4 w-4" />
-                        </UIButton>
-                    </div>
+                    {/* Floating Controls - only when bottom panel is collapsed */}
+                    {bottomPanelCollapsed && (
+                        <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
+                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                <ZoomIn className="h-4 w-4" />
+                            </UIButton>
+                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                <ZoomOut className="h-4 w-4" />
+                            </UIButton>
+                            <UIButton variant="outline" size="icon" className="w-9 h-9 bg-background/50 border-border text-muted-foreground hover:text-foreground rounded-lg backdrop-blur-md">
+                                <Maximize className="h-4 w-4" />
+                            </UIButton>
+                        </div>
+                    )}
                 </div>
+            )}
+
+            {/* Map controls: only show when not embedded in Decisions tab */}
+            {!embeddedInDecisions && (
+            <div className={cn("border-t border-border bg-muted/30 z-20 shrink-0 flex flex-col", bottomPanelCollapsed ? "h-9" : "min-h-[52px]")}>
+                {bottomPanelCollapsed ? (
+                    <button
+                        type="button"
+                        onClick={() => setBottomPanelCollapsed(false)}
+                        className="h-full w-full flex items-center justify-center gap-2 px-4 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                        Map controls
+                    </button>
+                ) : (
+                    <div className="flex items-center gap-3 flex-wrap px-3 py-2">
+                        {/* Workflow strip (same order and colors as header) */}
+                        {workflowStrip && workflowStrip.nodes.length > 0 && (
+                            <div className="flex items-center gap-0.5 border border-border/50 rounded-md px-1.5 py-0.5 bg-background/50">
+                                {workflowStrip.nodes.map((node, i) => {
+                                    const color = getWorkflowNodeColor(node.id);
+                                    const isActive = workflowStrip.active_node === node.id;
+                                    return (
+                                        <span key={node.id} className="flex items-center shrink-0 gap-0.5">
+                                            <span
+                                                className={cn(
+                                                    "inline-block px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap border border-transparent",
+                                                    isActive ? "text-foreground ring-1 ring-primary/40" : "text-muted-foreground"
+                                                )}
+                                                style={isActive ? { backgroundColor: `color-mix(in srgb, ${color} 22%, hsl(215,20%,25%))`, borderColor: `color-mix(in srgb, ${color} 55%, transparent)` } : undefined}
+                                                title={node.label}
+                                            >
+                                                {node.label}
+                                            </span>
+                                            {i < workflowStrip.nodes.length - 1 && <span className="text-muted-foreground/50 text-[10px] shrink-0">→</span>}
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        <div className="h-4 w-px bg-border shrink-0" />
+                        {/* Filter by type (hierarchy) */}
+                        {data?.nodes?.length ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Filter</span>
+                                {(() => {
+                                    const typesInData = new Set(data.nodes.map((n) => n.type));
+                                    return MAP_LEGEND_AGENT_HIERARCHY.map((agent) => {
+                                        const agentTypesPresent = agent.templates.flatMap((t) => t.types.filter((ty) => typesInData.has(ty)));
+                                        if (agentTypesPresent.length === 0) return null;
+                                        const isCollapsed = legendCollapsed[agent.agentId] === true;
+                                        const color = agentColors[agent.agentId] ?? '#888';
+                                        return (
+                                            <div key={agent.agentId} className="rounded-md overflow-hidden border border-border" style={{ borderColor: `color-mix(in srgb, ${color} 65%, transparent)` }}>
+                                                <button type="button" onClick={() => setLegendCollapsed((prev) => ({ ...prev, [agent.agentId]: !prev[agent.agentId] }))} className={cn("w-full inline-flex items-center gap-1.5 rounded-t-md px-2 py-0.5 text-[10px] font-semibold border-b border-border transition-colors bg-muted/30 hover:bg-muted/50 text-foreground")} style={{ backgroundColor: `color-mix(in srgb, ${color} 22%, hsl(215,20%,25%))` }}>
+                                                    {isCollapsed ? <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
+                                                    <span>{agent.agentName}</span>
+                                                </button>
+                                                {!isCollapsed && (
+                                                    <div className="bg-background/50 p-1.5 pt-1 space-y-1">
+                                                        {agent.templates.map((tpl) => {
+                                                            const present = tpl.types.filter((ty) => typesInData.has(ty));
+                                                            if (present.length === 0) return null;
+                                                            return (
+                                                                <div key={tpl.templateName} className="pl-1">
+                                                                    <div className="text-[9px] font-medium text-muted-foreground mb-0.5">{tpl.templateName}</div>
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {present.map((t) => {
+                                                                            const cfg = typeConfig[t] ?? { label: t };
+                                                                            const visible = typeFilter[t] !== false;
+                                                                            return (
+                                                                                <button key={t} type="button" onClick={(e) => { e.stopPropagation(); setTypeFilter((prev) => ({ ...prev, [t]: !(prev[t] !== false) })); }} className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors", visible ? "border-border bg-muted/50 hover:bg-muted text-foreground" : "border-transparent bg-muted/20 text-muted-foreground opacity-60")} title={visible ? `Hide ${cfg.label}` : `Show ${cfg.label}`}>
+                                                                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                                                                    {cfg.label}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    });
+                                })()}
+                            </div>
+                        ) : null}
+                        <div className="h-4 w-px bg-border shrink-0" />
+                        {/* Search */}
+                        <div className="relative shrink-0">
+                            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                            <input value={mapSearchQuery} onChange={(e) => setMapSearchQuery(e.target.value)} placeholder="Search nodes..." className="bg-muted border border-border rounded-md py-1 pl-8 pr-3 text-xs focus:outline-none focus:border-primary/50 transition-all w-40 text-foreground" />
+                        </div>
+                        {/* Badges */}
+                        {data?.metadata?.active_trigger && (
+                            <div className="flex items-center gap-2 px-2 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded-full shrink-0">
+                                <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                                <span className="text-[10px] font-bold text-yellow-500 uppercase tracking-wider">Trigger: {data.metadata.active_trigger}</span>
+                            </div>
+                        )}
+                        {activeVersion && (
+                            <div className="flex items-center gap-2 px-2 py-0.5 bg-purple-500/10 border border-purple-500/20 rounded-full shrink-0">
+                                <span className="text-[10px] font-bold text-purple-500 uppercase tracking-wider">Historical: {activeVersion}</span>
+                                <UIButton variant="ghost" size="icon" className="h-4 w-4 hover:bg-purple-500/20 rounded-full" onClick={() => fetchData()}>
+                                    <RefreshCw className="h-2.5 w-2.5 text-purple-500" />
+                                </UIButton>
+                            </div>
+                        )}
+                        <div className="h-4 w-px bg-border shrink-0" />
+                        {/* Inactive + Refresh + KG v15 + Compare + Zoom */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                                <label className="text-[10px] text-muted-foreground whitespace-nowrap">Inactive:</label>
+                                <input type="range" min="0" max="1" step="0.05" value={inactiveOpacity} onChange={(e) => setInactiveOpacity(parseFloat(e.target.value))} className="w-16 h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary" title={`Inactive opacity: ${Math.round(inactiveOpacity * 100)}%`} />
+                                <span className="text-[10px] text-muted-foreground w-6 text-right">{Math.round(inactiveOpacity * 100)}%</span>
+                            </div>
+                            <UIButton variant="ghost" size="sm" className="h-7 gap-1.5 text-muted-foreground hover:text-foreground shrink-0" onClick={() => fetchData()}>
+                                <RefreshCw className={loading ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
+                                <span className="text-[10px]">Refresh</span>
+                            </UIButton>
+                            {!embeddedInDecisions && kgHistory && (
+                                <>
+                                    <UIButton variant="ghost" size="sm" className={cn("h-7 gap-1.5 border rounded-md transition-colors shrink-0", showHistory ? "bg-blue-500/20 border-blue-500/40" : "bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20")} onClick={() => setShowHistory(!showHistory)}>
+                                        <span className="text-[10px] font-bold text-blue-500 tracking-wider">KG v{kgHistory.total}</span>
+                                    </UIButton>
+                                    <UIButton variant="ghost" size="sm" className={cn("h-7 gap-1.5 border rounded-md transition-colors shrink-0", compareMode ? "bg-purple-500/20 border-purple-500/40" : "bg-purple-500/10 border-purple-500/20 hover:bg-purple-500/20")} onClick={() => { setCompareMode(!compareMode); if (!compareMode) setShowHistory(true); else { setCompareVersion1(null); setCompareVersion2(null); setDiffData(null); } }}>
+                                        <GitCompare className="h-3 w-3 text-purple-500" />
+                                        <span className="text-[10px] font-bold text-purple-500 tracking-wider">Compare</span>
+                                    </UIButton>
+                                </>
+                            )}
+                            <div className="flex items-center gap-1 shrink-0">
+                                <UIButton variant="outline" size="icon" className="w-8 h-8 border-border text-muted-foreground hover:text-foreground rounded-md" title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></UIButton>
+                                <UIButton variant="outline" size="icon" className="w-8 h-8 border-border text-muted-foreground hover:text-foreground rounded-md" title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></UIButton>
+                                <UIButton variant="outline" size="icon" className="w-8 h-8 border-border text-muted-foreground hover:text-foreground rounded-md" title="Fit to view"><Maximize className="h-3.5 w-3.5" /></UIButton>
+                            </div>
+                        </div>
+                        <button type="button" onClick={() => setBottomPanelCollapsed(true)} className="ml-auto shrink-0 p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors" title="Collapse map controls">
+                            <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                    </div>
+                )}
+            </div>
             )}
         </div>
     );

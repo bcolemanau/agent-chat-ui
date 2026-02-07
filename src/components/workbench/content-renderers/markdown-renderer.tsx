@@ -24,7 +24,15 @@ export class MarkdownRenderer implements ContentRenderer {
 // The registry is exported before this file is processed, so this should work
 import { contentRendererRegistry } from "./index";
 
-// Register immediately - registry should be initialized by now
+// Register immediately - registry should be initialized by now.
+// All template-backed artifacts render as markdown (same edit MD experience); agents can use mermaid in content.
+const markdownRenderer = new MarkdownRenderer();
 if (contentRendererRegistry) {
-  contentRendererRegistry.register("markdown", new MarkdownRenderer());
+  contentRendererRegistry.register("markdown", markdownRenderer);
+  contentRendererRegistry.register("architecture", markdownRenderer);
+  contentRendererRegistry.register("concept_brief", markdownRenderer);
+  contentRendererRegistry.register("ux_brief", markdownRenderer);
+  contentRendererRegistry.register("requirements_package", markdownRenderer);
+  contentRendererRegistry.register("design", markdownRenderer);
+  contentRendererRegistry.register("text", markdownRenderer);
 }
