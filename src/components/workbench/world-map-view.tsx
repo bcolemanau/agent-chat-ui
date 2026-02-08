@@ -19,7 +19,6 @@ interface Node extends d3.SimulationNodeDatum {
     id: string;
     name: string;
     type: string;
-    is_active?: boolean;
     description?: string;
     properties?: any;
     metadata?: Record<string, any>;
@@ -29,7 +28,6 @@ interface Node extends d3.SimulationNodeDatum {
 interface Link extends d3.SimulationLinkDatum<Node> {
     source: string | Node;
     target: string | Node;
-    is_active?: boolean;
     type?: string;
     is_anchor?: boolean;
 }
@@ -41,6 +39,10 @@ interface GraphData {
         active_trigger?: string;
         customer_id: string;
         thread_id: string;
+        /** Schema summary: counts by type, phase grouping, link-type counts (from API or streamed filtered_kg). */
+        entity_counts?: Record<string, number>;
+        phase_grouping?: { agent_id: string; agent_name: string; types: string[] }[];
+        link_type_counts?: Record<string, number>;
     };
 }
 
@@ -175,7 +177,6 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     const [showHistory, setShowHistory] = useState(false);
     const [activeVersion, setActiveVersion] = useState<string | null>(null);
-    const [inactiveOpacity, setInactiveOpacity] = useState(0.15); // Transparency for inactive nodes (0-1)
     const [compareMode, setCompareMode] = useState(false);
 
     // Open timeline when arriving via shortcut (e.g. ?compare=1 from header "Compare on map")
@@ -410,10 +411,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             const json = await res.json();
             console.log('[WorldMapView] Fetched data:', {
                 thread_id: json.metadata?.thread_id,
-                node_count: json.nodes?.length,
-                inactive_count: json.nodes?.filter((n: any) => n.is_active === false).length,
-                active_count: json.nodes?.filter((n: any) => n.is_active === true).length,
-                null_is_active: json.nodes?.filter((n: any) => n.is_active === undefined).length
+                node_count: json.nodes?.length
             });
             setData(json);
             // Only update history list if we are loading the latest version, 
@@ -502,9 +500,16 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         const width = containerRef.current.clientWidth;
         const height = containerRef.current.clientHeight;
 
+        // Clear SVG with a single DOM write to avoid removeChild errors when React and D3 disagree
+        const svgEl = svgRef.current;
+        if (svgEl) {
+            try {
+                svgEl.innerHTML = '';
+            } catch {
+                // ignore if already detached or DOM in inconsistent state
+            }
+        }
         const svg = d3.select(svgRef.current);
-        svg.selectAll('*').remove();
-
         const g = svg.append('g');
 
         const zoom = d3.zoom<SVGSVGElement, unknown>()
@@ -669,10 +674,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             });
         }
 
-        console.log('[WorldMapView] Initializing Simulation with:', {
-            node_count: nodes.length,
-            inactive_nodes: nodes.filter(n => n.is_active === false).map(n => n.id)
-        });
+        console.log('[WorldMapView] Initializing Simulation with:', { node_count: nodes.length });
 
         // Resolve link source/target to nodes: API may send ids that don't match node.id (e.g. ART-xxx_pdf vs ART-xxx, TRIGGER-O1 vs O1).
         // Build a map from all possible endpoint keys (id, name, _pdf variant, without prefix) to node so links resolve and green nodes aren't orphaned.
@@ -831,13 +833,16 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         const visibleByType = nodes.filter((n) => typeFilter[n.type] !== false);
         const visibleNodeIds = new Set(visibleByType.map((n) => n.id));
 
-        // Search: match by id, name, or label (case-insensitive)
+        // Search: match by id, name, label, or description (case-insensitive). Label/name are the main display fields.
         const matchesSearch = (n: Node, q: string) => {
             const t = q.toLowerCase();
+            const label = (n as { label?: string }).label;
+            const desc = (n as { description?: string }).description;
             return (
                 (n.id && String(n.id).toLowerCase().includes(t)) ||
                 (n.name && String(n.name).toLowerCase().includes(t)) ||
-                ((n as { label?: string }).label && String((n as { label?: string }).label).toLowerCase().includes(t))
+                (label && String(label).toLowerCase().includes(t)) ||
+                (desc && String(desc).toLowerCase().includes(t))
             );
         };
         const query = mapSearchQuery.trim();
@@ -876,7 +881,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .attr('stroke-width', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? 1 : 1.5)
             .attr('stroke-dasharray', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? '4,4' : null)
             .attr('marker-end', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? null : 'url(#arrowhead)')
-            .style('opacity', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? 0.35 : (d.is_active === false ? inactiveOpacity : 0.5));
+            .style('opacity', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? 0.35 : 0.5);
 
         const node = g.append('g')
             .attr('class', 'nodes')
@@ -884,8 +889,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .data(effectiveNodes)
             .enter().append('g')
             .attr('class', 'node')
-            .style('opacity', d => d.is_active === false ? inactiveOpacity : 1)
-            .style('filter', d => d.is_active === false ? 'grayscale(1) blur(1px)' : 'none')
+            .style('opacity', 1)
+            .style('filter', 'none')
             .on('click', (event, d) => {
                 setSelectedNode(d);
                 event.stopPropagation();
@@ -929,24 +934,26 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .attr('fill', d => {
                 // Selected node gets special color
                 if (selectedNode && d.id === selectedNode.id) return '#3b82f6';
-                // Color by diff status (KG-diff contract, same as KgDiffDiagramView)
-                const status = (d as any).diff_status;
+                // Color by diff status (KG-diff contract: diff_status or changeType)
+                const status = (d as any).diff_status ?? (d as any).changeType;
                 if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS];
                 return getAgentColorForNodeType(d.type);
             })
             .attr('stroke', d => {
                 if (selectedNode && d.id === selectedNode.id) return '#fff';
-                if ((d as any).diff_status) return '#fff';
+                const status = (d as any).diff_status ?? (d as any).changeType;
+                if (status) return '#fff';
                 return d.id === data.metadata.active_trigger ? '#fff' : '#000';
             })
             .attr('stroke-width', d => {
                 if (selectedNode && d.id === selectedNode.id) return 4;
-                if ((d as any).diff_status) return 2;
+                const status = (d as any).diff_status ?? (d as any).changeType;
+                if (status) return 2;
                 return d.id === data.metadata.active_trigger ? 3 : 1;
             })
             .style('filter', d => {
                 if (selectedNode && d.id === selectedNode.id) return 'drop-shadow(0 0 12px #3b82f6)';
-                const status = (d as any).diff_status;
+                const status = (d as any).diff_status ?? (d as any).changeType;
                 if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return `drop-shadow(0 0 6px ${KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]})`;
                 return d.id === data.metadata.active_trigger ? 'drop-shadow(0 0 8px #fbbf24)' : 'none';
             });
@@ -957,19 +964,19 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .text(d => {
                 const nameOrLabel = d.name ?? (d as { label?: string }).label ?? d.id ?? 'Unknown';
                 let label = String(nameOrLabel);
-                if ((d as any).diff_status === 'added') label += ' [+]';
-                if ((d as any).diff_status === 'modified') label += ' [~]';
-                if ((d as any).diff_status === 'removed') label += ' [-]';
-                if (d.is_active === false && !(d as any).diff_status) label += ' (inactive)';
+                const status = (d as any).diff_status ?? (d as any).changeType;
+                if (status === 'added') label += ' [+]';
+                if (status === 'modified') label += ' [~]';
+                if (status === 'removed') label += ' [-]';
                 return label;
             })
             .attr('fill', d => {
-                const status = (d as any).diff_status;
+                const status = (d as any).diff_status ?? (d as any).changeType;
                 if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS];
-                return d.is_active === false ? KG_DIFF_COLORS.unchanged : 'gray';
+                return 'gray';
             })
             .style('font-size', '10px')
-            .style('font-weight', d => (d as any).diff_status ? '600' : '500')
+            .style('font-weight', d => ((d as any).diff_status ?? (d as any).changeType) ? '600' : '500')
             .style('pointer-events', 'none');
 
         simulation.on('tick', () => {
@@ -983,11 +990,9 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                     if (selectedNode) {
                         const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
                         const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-                        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
-                            return d.is_active === false ? inactiveOpacity : 1;
-                        }
+                        if (sourceId === selectedNode.id || targetId === selectedNode.id) return 1;
                     }
-                    return d.is_active === false ? inactiveOpacity : 0.5;
+                    return 0.5;
                 })
                 .style('stroke-width', d => {
                     if (selectedNode) {
@@ -1014,10 +1019,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 .attr('transform', d => `translate(${d.x},${d.y})`)
                 .style('opacity', d => {
                     // Dim non-selected nodes when a node is selected
-                    if (selectedNode && d.id !== selectedNode.id) {
-                        return d.is_active === false ? inactiveOpacity * 0.3 : 0.4;
-                    }
-                    return d.is_active === false ? inactiveOpacity : 1;
+                    if (selectedNode && d.id !== selectedNode.id) return 0.4;
+                    return 1;
                 });
             
             // Update selection glow position
@@ -1057,7 +1060,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 }
             }
         };
-    }, [data, viewMode, inactiveOpacity, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode, mapSearchQuery, typeFilter]);
+    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode, mapSearchQuery, typeFilter]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -1441,9 +1444,9 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
                         )}
 
-                        {compareMode && diffData?.diff?.type === "kg_diff" && compareViewMode === "diff" ? (
+                        {((compareMode && diffData?.diff?.type === "kg_diff") || (selectedTimelineVersionId && timelineVersionDiff?.diff?.type === "kg_diff")) && compareViewMode === "diff" ? (
                             <div className="absolute inset-0 overflow-auto p-4 bg-background z-10">
-                                <KgDiffDiagramView payload={diffData.diff} isLoading={false} />
+                                <KgDiffDiagramView payload={(diffData?.diff ?? timelineVersionDiff?.diff)!} isLoading={false} />
                             </div>
                         ) : (
                             <svg ref={svgRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
@@ -1454,7 +1457,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                 <Globe className="w-3.5 h-3.5 text-muted-foreground" />
                                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Graph Mode</span>
                             </div>
-                            {diffData?.diff?.type === "kg_diff" && (
+                            {(diffData?.diff?.type === "kg_diff" || timelineVersionDiff?.diff?.type === "kg_diff") && (
                                 <div className="flex flex-col gap-2">
                                     <div className="flex items-center gap-2 px-2">
                                         <button
@@ -1616,11 +1619,12 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
                         )}
                         <div className="h-4 w-px bg-border shrink-0" />
-                        {/* Filter by type (hierarchy) */}
+                        {/* Filter by type (hierarchy). Schema summary (entity_counts) from metadata shows counts; else derive presence from nodes. */}
                         {data?.nodes?.length ? (
                             <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Filter</span>
                                 {(() => {
+                                    const entityCounts = data.metadata?.entity_counts ?? {};
                                     const typesInData = new Set(data.nodes.map((n) => n.type));
                                     return MAP_LEGEND_AGENT_HIERARCHY.map((agent) => {
                                         const agentTypesPresent = agent.templates.flatMap((t) => t.types.filter((ty) => typesInData.has(ty)));
@@ -1644,11 +1648,13 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                                     <div className="flex flex-wrap gap-1">
                                                                         {present.map((t) => {
                                                                             const cfg = typeConfig[t] ?? { label: t };
+                                                                            const count = entityCounts[t];
                                                                             const visible = typeFilter[t] !== false;
                                                                             return (
                                                                                 <button key={t} type="button" onClick={(e) => { e.stopPropagation(); setTypeFilter((prev) => ({ ...prev, [t]: !(prev[t] !== false) })); }} className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors", visible ? "border-border bg-muted/50 hover:bg-muted text-foreground" : "border-transparent bg-muted/20 text-muted-foreground opacity-60")} title={visible ? `Hide ${cfg.label}` : `Show ${cfg.label}`}>
                                                                                     <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
                                                                                     {cfg.label}
+                                                                                    {typeof count === "number" && <span className="text-muted-foreground tabular-nums">({count})</span>}
                                                                                 </button>
                                                                             );
                                                                         })}
@@ -1665,10 +1671,10 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
                         ) : null}
                         <div className="h-4 w-px bg-border shrink-0" />
-                        {/* Search */}
-                        <div className="relative shrink-0">
+                        {/* Search: same vocabulary as KG in chat (id, label/name, description). See docs/MAP_SEARCH_AND_LLM_KG_ALIGNMENT.md */}
+                        <div className="relative shrink-0" title="Search by node id (e.g. REQ-001), label (e.g. Concept Brief), or text in description. Same nodes the agent sees in context.">
                             <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                            <input value={mapSearchQuery} onChange={(e) => setMapSearchQuery(e.target.value)} placeholder="Search nodes..." className="bg-muted border border-border rounded-md py-1 pl-8 pr-3 text-xs focus:outline-none focus:border-primary/50 transition-all w-40 text-foreground" />
+                            <input value={mapSearchQuery} onChange={(e) => setMapSearchQuery(e.target.value)} placeholder="Search by id, label, or description…" className="bg-muted border border-border rounded-md py-1 pl-8 pr-3 text-xs focus:outline-none focus:border-primary/50 transition-all w-48 text-foreground" aria-label="Search knowledge graph nodes by id, label, or description" />
                         </div>
                         {/* Badges */}
                         {data?.metadata?.active_trigger && (
@@ -1686,13 +1692,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
                         )}
                         <div className="h-4 w-px bg-border shrink-0" />
-                        {/* Inactive + Refresh + KG v15 + Compare + Zoom */}
+                        {/* Refresh + KG v15 + Compare + Zoom */}
                         <div className="flex items-center gap-2 flex-wrap">
-                            <div className="flex items-center gap-1.5">
-                                <label className="text-[10px] text-muted-foreground whitespace-nowrap">Inactive:</label>
-                                <input type="range" min="0" max="1" step="0.05" value={inactiveOpacity} onChange={(e) => setInactiveOpacity(parseFloat(e.target.value))} className="w-16 h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary" title={`Inactive opacity: ${Math.round(inactiveOpacity * 100)}%`} />
-                                <span className="text-[10px] text-muted-foreground w-6 text-right">{Math.round(inactiveOpacity * 100)}%</span>
-                            </div>
                             <UIButton variant="ghost" size="sm" className="h-7 gap-1.5 text-muted-foreground hover:text-foreground shrink-0" onClick={() => fetchData()}>
                                 <RefreshCw className={loading ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
                                 <span className="text-[10px]">Refresh</span>

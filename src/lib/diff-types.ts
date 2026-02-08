@@ -99,7 +99,6 @@ export interface Node {
   id: string;
   name: string;
   type: string;
-  is_active?: boolean;
   [key: string]: any;
 }
 

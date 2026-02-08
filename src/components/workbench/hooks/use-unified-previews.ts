@@ -72,12 +72,14 @@ export function useUnifiedPreviews(): UnifiedPreviewItem[] {
             }
           }
 
+          // Use same id as persisted record (tool_call_id) so Decisions panel dedupes with GET /decisions
+          const proposalId = parsed.tool_call_id ?? `proposal-from-messages-${toolName}-${i}`;
           const existing = items.some(
-            (it) => it.type === toolName && JSON.stringify(it.data?.args) === JSON.stringify(args)
+            (it) => it.id === proposalId || (it.type === toolName && JSON.stringify(it.data?.args) === JSON.stringify(args))
           );
           if (!existing) {
             items.unshift({
-              id: `proposal-from-messages-${toolName}-${i}`,
+              id: proposalId,
               type: toolName,
               title: getPreviewTitle(toolName, { args, ...parsed }),
               summary: parsed.model_summary || `${toolName} ready to apply`,

@@ -17,6 +17,13 @@ export async function initializeOpenTelemetry(): Promise<boolean> {
     return false;
   }
 
+  // Explicit disable: set NEXT_PUBLIC_OTEL_DISABLED=true (or 1) to turn off client-side OTEL
+  const disabled = process.env.NEXT_PUBLIC_OTEL_DISABLED;
+  if (disabled === 'true' || disabled === '1') {
+    console.log('[OTEL] Disabled via NEXT_PUBLIC_OTEL_DISABLED');
+    return false;
+  }
+
   // Prevent double initialization
   if (initialized) {
     return true;

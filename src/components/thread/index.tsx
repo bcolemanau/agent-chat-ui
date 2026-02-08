@@ -48,6 +48,7 @@ import { FolderOpen } from "lucide-react";
 
 import { UserMenu } from "./user-menu";
 import { RunComparisonModal } from "./run-comparison-modal";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -143,6 +144,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const [processedArtifactIds, setProcessedArtifactIds] = useState<Set<string>>(new Set());
   const [compareModalOpen, setCompareModalOpen] = useState(false);
+  const [messagesBoundaryKey, setMessagesBoundaryKey] = useState(0);
   
   // Use URL query params for pending artifacts (shared with workbench)
   const [_pendingArtifactIds, _setPendingArtifactIds] = useQueryState<string[]>("pendingArtifacts", {
@@ -593,49 +595,66 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
               contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
               style={{ maxHeight: '100%', height: '100%', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}
               content={
-                <>
-                  {safeMessages
-                    .filter((m) => {
-                      const hasContentString = typeof m.content === 'string' && m.content.length > 0;
-                      const hasContentArray = Array.isArray(m.content) && m.content.length > 0;
-                      const hasStandardToolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) && (m.tool_calls as any[]).length > 0;
-                      const hasAnthropicToolCalls = Array.isArray(m.content) && m.content.some(c => (c as any).type === "tool_use");
+                <ErrorBoundary
+                  key={messagesBoundaryKey}
+                  name="ThreadMessages"
+                  fallback={
+                    <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-6 text-center">
+                      <p className="text-sm text-amber-800 dark:text-amber-200 mb-3">Messages failed to load</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setMessagesBoundaryKey((k) => k + 1)}
+                      >
+                        Try again
+                      </Button>
+                    </div>
+                  }
+                >
+                  <>
+                    {safeMessages
+                      .filter((m) => {
+                        const hasContentString = typeof m.content === 'string' && m.content.length > 0;
+                        const hasContentArray = Array.isArray(m.content) && m.content.length > 0;
+                        const hasStandardToolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) && (m.tool_calls as any[]).length > 0;
+                        const hasAnthropicToolCalls = Array.isArray(m.content) && m.content.some(c => (c as any).type === "tool_use");
 
-                      return (
-                        m?.id && !m.id.startsWith(DO_NOT_RENDER_ID_PREFIX) &&
-                        (m as any).type !== "ui" &&
-                        m.type !== "tool" &&
-                        (m.type !== "ai" || hasContentString || hasContentArray || hasStandardToolCalls || hasAnthropicToolCalls)
-                      );
-                    })
-                    .map((message, index) =>
-                      message.type === "human" ? (
-                        <HumanMessage
-                          key={message.id || `${message.type}-${index}`}
-                          message={message}
-                          isLoading={isLoading}
-                        />
-                      ) : (
-                        <AssistantMessage
-                          key={message.id || `${message.type}-${index}`}
-                          message={message}
-                          isLoading={isLoading}
-                          handleRegenerate={handleRegenerate}
-                        />
-                      ),
+                        return (
+                          m?.id && !m.id.startsWith(DO_NOT_RENDER_ID_PREFIX) &&
+                          (m as any).type !== "ui" &&
+                          m.type !== "tool" &&
+                          (m.type !== "ai" || hasContentString || hasContentArray || hasStandardToolCalls || hasAnthropicToolCalls)
+                        );
+                      })
+                      .map((message, index) =>
+                        message.type === "human" ? (
+                          <HumanMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={isLoading}
+                          />
+                        ) : (
+                          <AssistantMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={isLoading}
+                            handleRegenerate={handleRegenerate}
+                          />
+                        ),
+                      )}
+                    {hasNoAIOrToolMessages && !!stream.interrupt && (
+                      <AssistantMessage
+                        key="interrupt-msg"
+                        message={undefined}
+                        isLoading={isLoading}
+                        handleRegenerate={handleRegenerate}
+                      />
                     )}
-                  {hasNoAIOrToolMessages && !!stream.interrupt && (
-                    <AssistantMessage
-                      key="interrupt-msg"
-                      message={undefined}
-                      isLoading={isLoading}
-                      handleRegenerate={handleRegenerate}
-                    />
-                  )}
-                  {isLoading && !firstTokenReceived && (
-                    <AssistantMessageLoading />
-                  )}
-                </>
+                    {isLoading && !firstTokenReceived && (
+                      <AssistantMessageLoading />
+                    )}
+                  </>
+                </ErrorBoundary>
               }
               footer={
                 <div className="flex flex-col items-center gap-8 bg-background z-10 shrink-0 w-full" style={{ flexShrink: 0, maxWidth: '100%', overflow: 'hidden', boxSizing: 'border-box' }}>

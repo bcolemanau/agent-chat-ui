@@ -24,8 +24,7 @@ export async function GET(req: Request) {
         }
 
         const data = await resp.json();
-        const inactiveCount = data.nodes?.filter((n: { is_active?: boolean }) => n.is_active === false).length || 0;
-        console.log(`[PROXY] Delivered ${data.nodes?.length} nodes to client (${inactiveCount} inactive)`);
+        console.log(`[PROXY] Delivered ${data.nodes?.length} nodes to client`);
         return NextResponse.json(data, {
             headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
         });

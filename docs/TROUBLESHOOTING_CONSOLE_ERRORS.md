@@ -9,10 +9,13 @@
 - **Invalid or expired key:** The key is set but LangSmith rejects it (e.g. revoked, wrong project, or tracing not enabled).
 
 **Fix:**
-- **To stop the errors:** Unset `LANGSMITH_API_KEY` or set it to `remove-me`. The app will skip OpenTelemetry initialization and no traces will be sent (no 403).
-- **To use tracing:** Set `LANGSMITH_API_KEY` to a valid LangSmith API key. Ensure the project (e.g. `LANGSMITH_PROJECT` / `LANGCHAIN_PROJECT`) exists and tracing is enabled.
+- **To stop the errors / turn OTEL off:** Use one of:
+  - **`OTEL_DISABLED=true`** (server env) — `/api/langsmith-config` returns no key, so the client never initializes OTEL. Works in Docker/Railway.
+  - **`NEXT_PUBLIC_OTEL_DISABLED=true`** (client build-time) — client skips OpenTelemetry init before any fetch.
+  - Unset `LANGSMITH_API_KEY` or set it to `remove-me` — same effect as `OTEL_DISABLED=true` (no key → no init).
+- **To use tracing:** Set `LANGSMITH_API_KEY` to a valid LangSmith API key and do **not** set `OTEL_DISABLED` or `NEXT_PUBLIC_OTEL_DISABLED`. Ensure the project (e.g. `LANGSMITH_PROJECT` / `LANGCHAIN_PROJECT`) exists and tracing is enabled.
 
-**Code:** Client OTEL only initializes when `/api/langsmith-config` returns a valid key (503 when not configured). Before initializing, the client does a **preflight** POST to the traces endpoint; if the response is **403**, init is skipped so the console is not flooded. Server OTEL (`otel-server.ts`) skips init when the key is missing or equals `remove-me`.
+**Code:** Client OTEL only initializes when `/api/langsmith-config` returns a valid key (503 when not configured). If `OTEL_DISABLED=true`, the API route returns `apiKey: undefined` so the client skips init. If `NEXT_PUBLIC_OTEL_DISABLED=true`, the client skips init before calling the API. Before initializing, the client does a **preflight** POST to the traces endpoint; if the response is **403**, init is skipped so the console is not flooded. Server OTEL (`otel-server.ts`) skips init when the key is missing or equals `remove-me`.
 
 ---
 

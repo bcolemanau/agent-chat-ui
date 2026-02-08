@@ -11,6 +11,7 @@ import { KgDiffDiagramView } from "./kg-diff-diagram-view";
 import { DecisionSummaryView } from "./decision-summary-view";
 import { FullProposalContent } from "./full-proposal-modal";
 import { WorldMapView } from "./world-map-view";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { useStreamContext } from "@/providers/Stream";
 import type { DecisionSummary } from "@/lib/diff-types";
 import { AlertCircle, PanelRight, ArrowLeft, GitCompare, Globe } from "lucide-react";
@@ -126,12 +127,34 @@ export function DecisionsPanel() {
   }, [threadId, workbenchRefreshKey, refetchPending]);
 
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
-  // Merge persisted pending (GET /decisions) with stream-based pending; dedupe by id so we don't rely on refetch timing
+  // Logical key for link/enrich so one upload = one link + one enrich (dedupe API vs stream proposals)
+  const linkEnrichKey = (item: UnifiedPreviewItem): string | null => {
+    const args = item.data?.args;
+    if (!args) return null;
+    const artifactId = (args.artifact_id as string) ?? (args.document_id as string);
+    if (!artifactId) return null;
+    if (item.type === "link_uploaded_document") return `link:${artifactId}`;
+    if (item.type === "enrichment" || item.type === "approve_enrichment") {
+      const cycleId = args.cycle_id as string | undefined;
+      return `enrich:${artifactId}:${cycleId ?? ""}`;
+    }
+    return null;
+  };
+  // Merge persisted pending (GET /decisions) with stream-based pending; dedupe by id and by link/enrich key
   const pending = useMemo(() => {
     const byId = new Map<string, UnifiedPreviewItem>();
-    pendingFromApi.forEach((p) => byId.set(p.id, p));
+    const linkEnrichKeys = new Set<string>();
+    pendingFromApi.forEach((p) => {
+      byId.set(p.id, p);
+      const key = linkEnrichKey(p);
+      if (key) linkEnrichKeys.add(key);
+    });
     allPreviews.forEach((p) => {
-      if (!byId.has(p.id)) byId.set(p.id, p);
+      if (byId.has(p.id)) return;
+      const key = linkEnrichKey(p);
+      if (key && linkEnrichKeys.has(key)) return; // already have a pending link/enrich for this artifact (and cycle)
+      byId.set(p.id, p);
+      if (key) linkEnrichKeys.add(key);
     });
     return Array.from(byId.values()).filter((p) => !processedIds.has(p.id));
   }, [pendingFromApi, allPreviews, processedIds]);
@@ -359,7 +382,16 @@ export function DecisionsPanel() {
           {/* Map layout: decision table on the left is the timeline; map on the right shows selected version + diff */}
           {viewMode === "map" && (
             <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden border rounded-lg bg-card">
-              <WorldMapView key={threadId ?? "no-thread"} embeddedInDecisions />
+              <ErrorBoundary
+                name="WorldMapView"
+                fallback={
+                  <div className="flex flex-1 items-center justify-center rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-6">
+                    <p className="text-sm text-amber-800 dark:text-amber-200">Map failed to load. Reload the page to try again.</p>
+                  </div>
+                }
+              >
+                <WorldMapView key={threadId ?? "no-thread"} embeddedInDecisions />
+              </ErrorBoundary>
             </div>
           )}
 

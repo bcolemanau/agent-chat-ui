@@ -13,6 +13,7 @@ import { SyntaxHighlighter } from "@/components/thread/syntax-highlighter";
 import mermaid from "mermaid";
 
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { cn } from "@/lib/utils";
 
 import "katex/dist/katex.min.css";
@@ -220,7 +221,18 @@ const defaultComponents: any = {
 
       // Handle Mermaid diagrams
       if (language === "mermaid") {
-        return <MermaidDiagram code={code} />;
+        return (
+          <ErrorBoundary
+            name="MermaidDiagram"
+            fallback={
+              <div className="my-4 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                <p className="text-amber-800 dark:text-amber-200 text-sm">Diagram failed to render.</p>
+              </div>
+            }
+          >
+            <MermaidDiagram code={code} />
+          </ErrorBoundary>
+        );
       }
 
       return (
@@ -274,12 +286,18 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
   useEffect(() => {
     const element = diagramRef.current;
     if (!element || !code.trim()) return;
+    if (!element.isConnected) return;
 
     const theme = resolvedTheme === "dark" ? "dark" : "default";
     if (lastRunRef.current?.code === code && lastRunRef.current?.theme === theme) return;
 
     let cancelled = false;
-    element.innerHTML = "";
+    try {
+      element.innerHTML = "";
+    } catch {
+      // DOM may be in inconsistent state (e.g. React reconciling); skip this run
+      return;
+    }
     const id = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
     element.id = id;
     element.textContent = code;

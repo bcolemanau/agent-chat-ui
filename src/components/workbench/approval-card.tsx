@@ -359,10 +359,10 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       }
     }
 
-    // Enrichment from ToolMessages (upload/folder): apply via API; no LangGraph interrupt
+    // Enrichment (from stream or from GET /decisions): apply via API so KG gets entity nodes + links, not just link deltas
     const isEnrichmentType =
       item.type === "enrichment" || item.type === "propose_enrichment" || item.type === "approve_enrichment";
-    if (isEnrichmentType && item.fromMessages) {
+    if (isEnrichmentType) {
       const artifactId =
         item.data?.args?.artifact_id ?? item.data?.preview_data?.artifact_id;
       const cycleId =
@@ -370,7 +370,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       const enrichmentData =
         item.data?.args?.enrichment_data ?? item.data?.preview_data?.enrichment_data;
       const artifactTypes =
-        enrichmentData?.artifact_types ?? ["Requirements"];
+        enrichmentData?.artifact_types ?? item.data?.args?.artifact_types ?? ["Requirements"];
 
       if (decisionType === "reject") {
         try {
@@ -402,6 +402,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       if (decisionType === "approve" && artifactId && cycleId) {
         try {
           const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+          const projectId = threadId; // backend uses project_id for KG load/save
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
@@ -413,6 +414,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
               body: JSON.stringify({
                 artifact_types: Array.isArray(artifactTypes) ? artifactTypes : [artifactTypes],
                 thread_id: threadId,
+                project_id: projectId,
                 decision_id: item.id,
               }),
             }

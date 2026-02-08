@@ -47,7 +47,7 @@ export default function RootLayout({
                 <NuqsAdapter>
                   <TooltipProvider>
                     <Toaster />
-                    <ErrorBoundary>
+                    <ErrorBoundary name="Root">
                       <ThreadProvider>
                         <StreamProvider>
                           <ArtifactProvider>
