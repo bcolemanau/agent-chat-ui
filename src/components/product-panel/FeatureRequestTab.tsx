@@ -20,27 +20,46 @@ export function FeatureRequestTab() {
     const [priority, setPriority] = useState("medium");
     const [category, setCategory] = useState("ui");
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setIsSubmitting(true);
 
-        // For now, just log to console and show toast
-        console.log("Feature Request Submitted:", {
-            title,
-            description,
-            priority,
-            category,
-            timestamp: new Date().toISOString(),
-        });
+        try {
+            const res = await fetch("/api/features", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title, description, priority, category }),
+            });
 
-        toast.success("Feature request submitted!", {
-            description: "Thank you for your feedback. We'll review your request soon.",
-        });
+            const data = await res.json();
 
-        // Reset form
-        setTitle("");
-        setDescription("");
-        setPriority("medium");
-        setCategory("ui");
+            if (!res.ok) {
+                throw new Error(data.error || "Failed to submit request");
+            }
+
+            toast.success("Feature request submitted!", {
+                description: `Track your issue here: ${data.url}`,
+                action: {
+                    label: "View Issue",
+                    onClick: () => window.open(data.url, "_blank"),
+                },
+            });
+
+            // Reset form
+            setTitle("");
+            setDescription("");
+            setPriority("medium");
+            setCategory("ui");
+
+        } catch (error: any) {
+            toast.error("Error submitting feature request", {
+                description: error.message,
+            });
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (
@@ -107,8 +126,8 @@ export function FeatureRequestTab() {
                     </div>
                 </div>
 
-                <Button type="submit" size="lg" className="w-full">
-                    Submit Feature Request
+                <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+                    {isSubmitting ? "Submitting..." : "Submit Feature Request"}
                 </Button>
             </form>
         </div>

@@ -1,3 +1,6 @@
+/* eslint-disable react-refresh/only-export-components -- file exports provider + useStreamContext */
+"use client";
+
 import React, {
   createContext,
   useContext,
@@ -5,6 +8,8 @@ import React, {
   useState,
   useEffect,
   useMemo,
+  useRef,
+  useCallback,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -16,17 +21,19 @@ import {
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
 import { useQueryState } from "nuqs";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { LangGraphLogoSVG } from "@/components/icons/langgraph";
-import { Label } from "@/components/ui/label";
-import { ArrowRight } from "lucide-react";
-import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
-import { useBranding } from "./Branding";
 import { useSession } from "next-auth/react";
+import { createClient } from "./client";
+import { withThreadSpan } from "@/lib/otel-client";
+
+/** Filtered KG from backend (filter_graph_data(..., context_mode=true)); streamed when Project Configurator sets it. */
+export type FilteredKgType = {
+  nodes: Array<Record<string, unknown>>;
+  links: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+};
 
 export type StateType = {
   messages: Message[];
@@ -38,8 +45,12 @@ export type StateType = {
   active_risks?: string[];
   user_project_description?: string;
   context?: Record<string, unknown>;
-  active_agent?: "supervisor" | "hydrator";
+  /** Active workflow phase (from backend); e.g. supervisor, project_configurator, concept, requirements, architecture, design, administration */
+  active_agent?: string;
   visualization_html?: string;
+  workbench_view?: "map" | "workflow" | "artifacts" | "discovery" | "settings";
+  /** Filtered KG for current trigger; set by Project Configurator, streamed to client. Use for map view without extra /api/kg-data. */
+  filtered_kg?: FilteredKgType;
 };
 
 const useTypedStream = useStream<
@@ -66,7 +77,20 @@ type StreamContextType = UseStream<StateType, {
   CustomEventType: UIMessage | RemoveUIMessage;
 }> & {
   setApiKey: (key: string) => void;
+  setWorkbenchView: (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "decisions") => Promise<void>;
+  /** Issue 37: Update thread state (e.g. after Begin Enriching handoff). */
+  updateState?: (update: { values?: Record<string, unknown> }) => Promise<void>;
+  /** After Apply, backend triggers a graph run; call this after a short delay to refetch thread state (new messages, active_mode). */
+  refetchThreadState?: () => Promise<void>;
+  setActiveAgentDebug?: (agent: string) => Promise<void>;
+  /** Increment after a decision is applied so KG, Artifacts, Workflow refetch. */
+  workbenchRefreshKey?: number;
+  triggerWorkbenchRefresh?: () => void;
   apiUrl: string;
+  /** Proposals from upload when proposals_injected=false (not in thread state); show in Decisions panel. */
+  orphanProposals: Array<{ id: string; raw: Record<string, unknown> }>;
+  setOrphanProposalsFromUpload: (response: { proposals?: unknown[]; proposals_injected?: boolean }) => void;
+  removeOrphanProposal: (id: string) => void;
 };
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
@@ -79,7 +103,8 @@ async function checkGraphStatus(
   apiKey: string | null,
 ): Promise<boolean> {
   try {
-    const res = await fetch(`${apiUrl}/info`, {
+    // Use Next.js API route to proxy to backend
+    const res = await fetch("/api/info", {
       ...(apiKey && {
         headers: {
           "X-Api-Key": apiKey,
@@ -109,12 +134,23 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+  const prevThreadIdRef = useRef<string | null>(null);
+
+  // Load Org Context for Headers
+  const [orgContext, setOrgContext] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOrgContext(localStorage.getItem("reflexion_org_context"));
+    }
+  }, []);
+
   const rawStream = useTypedStream({
     apiUrl,
     apiKey: apiKey ?? undefined,
     assistantId: assistantId || "reflexion",
     threadId: threadId || undefined,
     fetchStateHistory: !!threadId,
+    defaultHeaders: orgContext ? { "X-Organization-Context": orgContext } : undefined,
     onCustomEvent: (event, options) => {
       console.log("[Stream] Custom event received:", event);
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
@@ -128,9 +164,35 @@ const StreamSession = ({
       console.error("[Stream] SDK Error:", error);
     },
     onThreadId: (id) => {
-      console.log("[Stream] Thread ID changed to:", id);
-      setThreadId(id);
-      sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      if (!id) return;
+      // Only adopt thread id when we don't have one (first message created a new thread).
+      // This preserves thread/project context during tool calls and node transitions:
+      // we never overwrite an existing threadId from stream events.
+      if (threadId && id !== threadId) {
+        console.warn("[Stream] Ignoring onThreadId during active thread to preserve context", {
+          received: id,
+          current: threadId,
+        });
+        return;
+      }
+      if (id !== threadId) {
+        console.log("[Stream] Thread ID set (new thread):", id);
+        setThreadId(id);
+        withThreadSpan(
+          "thread.created",
+          {
+            "thread.id": id || "unknown",
+            "thread.previous_id": threadId || "none",
+            "api.url": apiUrl,
+          },
+          async () => {
+            await sleep();
+            await getThreads().then(setThreads).catch(console.error);
+          }
+        ).catch((err) => {
+          console.error("[OTEL] Failed to trace thread creation:", err);
+        });
+      }
     },
   });
 
@@ -146,6 +208,214 @@ const StreamSession = ({
     }
   }, [rawStream.values]);
 
+  // Method to update the backend state with the current view.
+  // On 409 (thread busy), retry briefly then show a soft message instead of failing noisily.
+  const setWorkbenchView = async (view: "map" | "workflow" | "artifacts" | "discovery" | "settings" | "decisions") => {
+    if (!threadId || !apiUrl) return;
+
+    const maxRetries = 2;
+    const retryDelayMs = 2000;
+    const is409 = (e: unknown) =>
+      (e as Error)?.message?.includes?.("409") || (e as Error)?.message?.includes?.("Conflict") || (e as { status?: number })?.status === 409;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const headers: Record<string, string> = {};
+        if (orgContext) headers["X-Organization-Context"] = orgContext;
+        const client = createClient(apiUrl, apiKey ?? undefined, headers);
+        await client.threads.updateState(threadId, {
+          values: { workbench_view: view },
+        });
+        return;
+      } catch (e) {
+        if (is409(e) && attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+          continue;
+        }
+        if (is409(e)) {
+          console.warn("[Stream] Thread busy; workbench view will update when the run finishes.");
+          toast.info("Thread is busy. View will update when the run finishes.", { duration: 4000 });
+          return;
+        }
+        console.error("[Stream] Failed to update workbench view:", e);
+        return;
+      }
+    }
+  };
+
+  // When the user selects mode from the dropdown, we prefer overlay for a window so the selector doesn't revert.
+  const userSetModeAtRef = useRef<number>(0);
+  const USER_MODE_PRIORITY_MS = 60000; // 1 min: keep user's dropdown choice until backend/graph has caught up
+
+  // DEBUG: manually override the active agent for this thread.
+  const setActiveAgentDebug = async (agent: string) => {
+    if (!threadId || !apiUrl) {
+      console.warn(`[Stream] setActiveAgentDebug skipped: threadId=${threadId ?? "null"}, apiUrl=${apiUrl ? "set" : "null"} (need a thread; send a message first)`);
+      toast.warning("Open a thread first to switch the active agent.", {
+        description: "Send a message or select a thread so we can update the backend.",
+      });
+      return;
+    }
+
+    console.log(`[Stream] Setting active mode -> ${agent} (threadId=${threadId}, apiUrl=${apiUrl})`);
+    userSetModeAtRef.current = Date.now();
+    // Optimistic update so the mode dropdown reflects the new value immediately (stream won't refetch until next message).
+    valuesOverlayRef.current = { ...valuesOverlayRef.current, active_agent: agent, active_mode: agent };
+    setValuesOverlay({ ...valuesOverlayRef.current });
+    try {
+      const headers: Record<string, string> = {};
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+
+      const client = createClient(apiUrl, apiKey ?? undefined, headers);
+      await client.threads.updateState(threadId, {
+        values: { active_agent: agent, active_mode: agent },
+      });
+      console.log(`[Stream] Backend state updated to mode=${agent}`);
+    } catch (e) {
+      console.error("[Stream] Failed to set active mode (backend may not have updated):", e);
+      toast.error("Failed to switch agent", {
+        description: e instanceof Error ? e.message : "Backend may not have updated. Check console.",
+      });
+    }
+  };
+
+  // Optimistic overlay: stream hook doesn't refetch after updateState, so merge our updates so header (Mode) updates immediately.
+  const [valuesOverlay, setValuesOverlay] = useState<Record<string, unknown>>({});
+  const valuesOverlayRef = useRef<Record<string, unknown>>({});
+  // Track stream message count so refetch never overwrites with an older snapshot (prevents "bunch of messages inserted before mine").
+  const streamMessageCountRef = useRef(0);
+  useEffect(() => {
+    if (prevThreadIdRef.current !== (threadId ?? null)) {
+      prevThreadIdRef.current = threadId ?? null;
+      valuesOverlayRef.current = {};
+      setValuesOverlay({});
+      userSetModeAtRef.current = 0;
+    }
+  }, [threadId]);
+  useEffect(() => {
+    const list = (rawStream as any)?.values?.messages;
+    streamMessageCountRef.current = Array.isArray(list) ? list.length : 0;
+  }, [rawStream]);
+
+  // When the agent sets mode (e.g. set_active_mode tool), stream updates; sync overlay so the dropdown shows it.
+  // Don't overwrite overlay if the user just set mode from the dropdown (avoid immediate revert).
+  const rawValues = (rawStream as any)?.values;
+  const streamMode = rawValues?.active_mode ?? rawValues?.active_agent;
+  useEffect(() => {
+    if (streamMode == null || typeof streamMode !== "string") return;
+    const userJustSetMode = Date.now() - userSetModeAtRef.current < USER_MODE_PRIORITY_MS;
+    if (userJustSetMode) return;
+    const overlayMode = valuesOverlayRef.current?.active_mode ?? valuesOverlayRef.current?.active_agent;
+    if (overlayMode === streamMode) return;
+    valuesOverlayRef.current = { ...valuesOverlayRef.current, active_agent: streamMode, active_mode: streamMode };
+    setValuesOverlay({ ...valuesOverlayRef.current });
+  }, [streamMode]);
+
+  // Issue 37: Update thread state (e.g. after Begin Enriching → handoff to Enrichment).
+  // If values._appendMessages is present, merge those into overlay messages (so approval message appears in chat)
+  // and do not send _appendMessages to the backend (backend already wrote them to thread state).
+  const updateState = async (update: { values?: Record<string, unknown> }) => {
+    if (!threadId || !apiUrl || !update?.values) return;
+    try {
+      const values = update.values;
+      const appendMessages = values._appendMessages as unknown[] | undefined;
+      const rest = appendMessages
+        ? Object.fromEntries(Object.entries(values).filter(([k]) => k !== "_appendMessages"))
+        : values;
+      if (appendMessages?.length && Array.isArray(appendMessages)) {
+        const currentMessages = (rawStream as any)?.values?.messages ?? [];
+        const merged = Array.isArray(currentMessages)
+          ? [...currentMessages, ...appendMessages]
+          : [...appendMessages];
+        valuesOverlayRef.current = { ...valuesOverlayRef.current, ...rest, messages: merged };
+      } else {
+        valuesOverlayRef.current = { ...valuesOverlayRef.current, ...rest };
+      }
+      setValuesOverlay({ ...valuesOverlayRef.current });
+      const headers: Record<string, string> = {};
+      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      const client = createClient(apiUrl, apiKey ?? undefined, headers);
+      await client.threads.updateState(threadId, { values: rest });
+    } catch (e) {
+      console.error("[Stream] Failed to update state:", e);
+    }
+  };
+
+  // After Apply, backend triggers a graph run; refetch thread state so we see new messages and active_mode.
+  // Never overwrite with an older snapshot: if refetched has fewer messages than the stream, keep current messages
+  // to avoid "bunch of messages inserted before mine" when user just sent a message and refetch returns stale state.
+  // Handles 409 (thread busy) and connection resets with retries; 409 is expected while a run is in progress.
+  const refetchThreadState = useCallback(async (attempt = 0) => {
+    if (!threadId || !apiUrl) return;
+    const maxRetries = 2;
+    const retryDelayMs = 2000;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["X-Api-Key"] = apiKey;
+    if (orgContext) headers["X-Organization-Context"] = orgContext;
+    const base = apiUrl.replace(/\/+$/, "");
+    const url = `${base}/threads/${threadId}/state`;
+    try {
+      const res = await fetch(url, { headers });
+      if (res.status === 409 && attempt < maxRetries) {
+        if (attempt > 0) console.debug("[Stream] refetchThreadState: thread busy (409), retrying…");
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+        return refetchThreadState(attempt + 1);
+      }
+      if (!res.ok) {
+        if (res.status === 409) console.warn("[Stream] refetchThreadState: thread still busy after retries.");
+        return;
+      }
+      const data = (await res.json()) as { values?: Record<string, unknown> };
+      const values = data?.values;
+      if (values && typeof values === "object") {
+        const refetchedCount = Array.isArray(values.messages) ? values.messages.length : 0;
+        const currentCount = streamMessageCountRef.current;
+        const merged = { ...valuesOverlayRef.current, ...values };
+        if (refetchedCount < currentCount && merged.messages) {
+          delete merged.messages;
+        }
+        valuesOverlayRef.current = merged;
+        setValuesOverlay({ ...valuesOverlayRef.current });
+      }
+    } catch (e) {
+      const isNetworkError =
+        e instanceof TypeError && e.message === "Failed to fetch" ||
+        (e as Error)?.message?.includes("Connection") ||
+        (e as Error)?.message?.includes("reset");
+      if (isNetworkError && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+        return refetchThreadState(attempt + 1);
+      }
+      if (attempt > 0 || !isNetworkError) {
+        console.warn("[Stream] refetchThreadState failed:", e);
+      }
+    }
+  }, [threadId, apiUrl, apiKey, orgContext]);
+
+  // Broad refresh after a decision is applied (KG, Artifacts, Workflow may have changed).
+  const [workbenchRefreshKey, setWorkbenchRefreshKey] = useState(0);
+  const triggerWorkbenchRefresh = useCallback(() => {
+    setWorkbenchRefreshKey((k) => k + 1);
+  }, []);
+
+  // Orphan proposals: from upload when proposals_injected=false; show in Decisions panel until approved/rejected.
+  const [orphanProposals, setOrphanProposals] = useState<Array<{ id: string; raw: Record<string, unknown> }>>([]);
+  const setOrphanProposalsFromUpload = useCallback(
+    (response: { proposals?: unknown[]; proposals_injected?: boolean }) => {
+      if (response.proposals_injected === false && Array.isArray(response.proposals) && response.proposals.length > 0) {
+        const withIds = response.proposals.map((p: any, i: number) => ({
+          id: `orphan-${p?.tool_call_id ?? `upload-${i}`}`,
+          raw: p as Record<string, unknown>,
+        }));
+        setOrphanProposals((prev) => [...prev, ...withIds]);
+      }
+    },
+    []
+  );
+  const removeOrphanProposal = useCallback((id: string) => {
+    setOrphanProposals((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
   // Dynamic Proxy Wrapper
   // This ensure ANY access to the context always gets the latest hook state 
   // but with forced null-safety for problematic fields.
@@ -155,6 +425,16 @@ const StreamSession = ({
         // Direct property overrides from Provider state
         if (prop === "setApiKey") return setApiKey;
         if (prop === "apiUrl") return apiUrl;
+        if (prop === "setWorkbenchView") return setWorkbenchView;
+        if (prop === "updateState") return updateState;
+        if (prop === "refetchThreadState") return refetchThreadState;
+        if (prop === "setActiveAgentDebug") return setActiveAgentDebug;
+        if (prop === "workbenchRefreshKey") return workbenchRefreshKey;
+        if (prop === "triggerWorkbenchRefresh") return triggerWorkbenchRefresh;
+        if (prop === "orphanProposals") return orphanProposals;
+        if (prop === "setOrphanProposalsFromUpload") return setOrphanProposalsFromUpload;
+        if (prop === "removeOrphanProposal") return removeOrphanProposal;
+        if (prop === "threadId") return threadId ?? (rawStream as any)?.[prop];
 
         // Safety check: if rawStream itself is null, provide safe defaults
         if (!rawStream) {
@@ -168,10 +448,34 @@ const StreamSession = ({
 
         // Dynamic property access from the raw hook state
         // We read from rawStream directly to ensure we have the absolute latest state
-        const value = (rawStream as any)[prop];
+        let value = (rawStream as any)[prop];
+
+        // Merge valuesOverlay so Mode and messages update. Prefer overlay when the user has set mode from the
+        // dropdown recently (USER_MODE_PRIORITY_MS) so the selector doesn't revert on refetch or stream updates.
+        if (prop === "values" && value && Object.keys(valuesOverlay).length > 0) {
+          const merged = { ...value, ...valuesOverlay };
+          const overlayHasMode =
+            valuesOverlay.active_mode !== undefined || valuesOverlay.active_agent !== undefined;
+          const userJustSetMode = Date.now() - userSetModeAtRef.current < USER_MODE_PRIORITY_MS;
+          const useOverlayForMode = overlayHasMode && userJustSetMode;
+          if (!useOverlayForMode) {
+            const streamModeVal = (value as any).active_mode ?? (value as any).active_agent;
+            if (streamModeVal != null) {
+              merged.active_mode = streamModeVal;
+              merged.active_agent = streamModeVal;
+            }
+          }
+          value = merged;
+        }
+        // Prefer overlay messages only while stream hasn't caught up (e.g. after Apply we appended; once run adds more, use stream)
+        if (prop === "messages") {
+          const raw = (value ?? []) as any[];
+          const overlay = valuesOverlay.messages as any[] | undefined;
+          if (Array.isArray(overlay) && overlay.length > raw.length) return overlay;
+          return value ?? [];
+        }
 
         // Safety Fallbacks
-        if (prop === "messages") return value ?? [];
         if (prop === "values") return value ?? { messages: [], ui: [] };
         if (prop === "error") return value ?? null;
         if (prop === "isLoading") return value ?? false;
@@ -182,16 +486,21 @@ const StreamSession = ({
         return value;
       }
     });
-  }, [rawStream, apiKey, apiUrl]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- setters/updateState stable, omitting avoids re-create
+  }, [rawStream, apiKey, apiUrl, threadId, orgContext, valuesOverlay, workbenchRefreshKey, triggerWorkbenchRefresh, refetchThreadState, orphanProposals, setOrphanProposalsFromUpload, removeOrphanProposal]);
 
   useEffect(() => {
-    checkGraphStatus(apiUrl, apiKey).then((ok) => {
+    // For relative paths (like /api), check via /api/info endpoint
+    // For absolute URLs, check directly
+    const checkUrl = apiUrl && !apiUrl.startsWith("/") ? apiUrl : "/api";
+    checkGraphStatus(checkUrl, apiKey).then((ok) => {
       if (!ok) {
         toast.error("Failed to connect to LangGraph server", {
           description: () => (
             <p>
-              Please ensure your graph is running at <code>{apiUrl}</code> and
-              your API key is correctly set (if connecting to a deployed graph).
+              {apiUrl && !apiUrl.startsWith("/") 
+                ? `Unable to connect to ${apiUrl}. Please ensure the backend is running and LANGGRAPH_API_URL is correctly configured.`
+                : "Unable to connect to the backend. Please check that the backend is running and that LANGGRAPH_API_URL is correctly configured in the Next.js API routes."}
             </p>
           ),
           duration: 10000,
@@ -210,8 +519,13 @@ const StreamSession = ({
 };
 
 // Default values for the form
-// Default values for the local stack (Proxy at 8080)
-const DEFAULT_API_URL = "http://localhost:8080";
+// In production, NEXT_PUBLIC_API_URL should be set to the frontend's own API proxy URL
+// (e.g., https://reflexion-ui-staging.up.railway.app/api)
+// For local development, the LangGraph SDK connects through Next.js API proxy at /api
+// which then forwards to the backend at localhost:8080
+const DEFAULT_API_URL = typeof window !== "undefined" && window.location.origin 
+  ? `${window.location.origin}/api` 
+  : "/api";
 const DEFAULT_ASSISTANT_ID = "reflexion";
 
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
@@ -222,13 +536,14 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const envAssistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID;
 
-  // Use URL params with env var fallbacks
-  const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
-    defaultValue: envApiUrl || "",
-  });
-  const [assistantId, setAssistantId] = useQueryState("assistantId", {
-    defaultValue: envAssistantId || "",
-  });
+  // Use URL params only for overrides (not defaults)
+  // Don't sync defaults to URL - only use query params when explicitly set and different from env vars
+  const [apiUrlParam, setApiUrlParam] = useQueryState("apiUrl");
+  const [assistantIdParam, setAssistantIdParam] = useQueryState("assistantId");
+
+  // Determine actual values: URL param > env var > default
+  const apiUrl = apiUrlParam || envApiUrl || DEFAULT_API_URL;
+  const assistantId = assistantIdParam || envAssistantId || DEFAULT_ASSISTANT_ID;
 
   // For API key, use localStorage with env var fallback
   const [apiKey, _setApiKey] = useState(() => {
@@ -241,10 +556,25 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     _setApiKey(key);
   };
 
-  // Determine final values to use, prioritizing URL params then env vars
-  const finalApiUrl = apiUrl || envApiUrl;
-  const finalAssistantId = assistantId || envAssistantId;
-  const { branding } = useBranding();
+  // Clean up URL params if they match defaults/env vars (to keep URLs clean)
+  useEffect(() => {
+    // Remove query params that match defaults/env vars to keep URLs clean
+    if (apiUrlParam) {
+      if (apiUrlParam === DEFAULT_API_URL || apiUrlParam === envApiUrl) {
+        setApiUrlParam(null, { history: 'replace', shallow: false });
+      }
+    }
+    if (assistantIdParam) {
+      if (assistantIdParam === DEFAULT_ASSISTANT_ID || assistantIdParam === envAssistantId) {
+        setAssistantIdParam(null, { history: 'replace', shallow: false });
+      }
+    }
+  }, [apiUrlParam, assistantIdParam, envApiUrl, envAssistantId, setApiUrlParam, setAssistantIdParam]);
+
+  // Determine final values to use, prioritizing URL params then env vars, then defaults
+  // Note: These are computed but not currently used - apiUrl and assistantId from context already have defaults
+  const _finalApiUrl = apiUrl || envApiUrl || DEFAULT_API_URL;
+  const _finalAssistantId = assistantId || envAssistantId || DEFAULT_ASSISTANT_ID;
 
   // Sync Session Token from NextAuth
   const { data: session } = useSession();
@@ -252,112 +582,13 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   useEffect(() => {
     if (session?.user?.idToken) {
       console.log("[StreamProvider] Syncing API Key from Google ID Token");
-      // Use the ID token from Google Auth
-      _setApiKey(session.user.idToken);
+      // Use the ID token from Google Auth - MUST persist to localStorage via setApiKey wrapper
+      setApiKey(session.user.idToken);
     }
   }, [session]);
 
-  // Show the form if we: don't have an API URL, or don't have an assistant ID
-  if (!finalApiUrl || !finalAssistantId) {
-    return (
-      <div className="flex min-h-screen w-full items-center justify-center p-4">
-        <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
-          <div className="mt-14 flex flex-col gap-2 border-b p-6">
-            <div className="flex flex-col items-start gap-2">
-              <LangGraphLogoSVG className="h-7 text-primary" />
-              <h1 className="text-xl font-semibold tracking-tight">
-                {branding.brand_title}
-              </h1>
-            </div>
-            <p className="text-muted-foreground">
-              Welcome to {branding.brand_title}! Before you get started, you need to enter
-              the URL of the deployment and the assistant / graph ID.
-            </p>
-          </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-
-              const form = e.target as HTMLFormElement;
-              const formData = new FormData(form);
-              const apiUrl = formData.get("apiUrl") as string;
-              const assistantId = formData.get("assistantId") as string;
-              const apiKey = formData.get("apiKey") as string;
-
-              setApiUrl(apiUrl);
-              setApiKey(apiKey);
-              setAssistantId(assistantId);
-
-              form.reset();
-            }}
-            className="bg-muted/50 flex flex-col gap-6 p-6"
-          >
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="apiUrl">
-                Deployment URL<span className="text-rose-500">*</span>
-              </Label>
-              <p className="text-muted-foreground text-sm">
-                This is the URL of your LangGraph deployment. Can be a local, or
-                production deployment.
-              </p>
-              <Input
-                id="apiUrl"
-                name="apiUrl"
-                className="bg-background"
-                defaultValue={apiUrl || DEFAULT_API_URL}
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="assistantId">
-                Assistant / Graph ID<span className="text-rose-500">*</span>
-              </Label>
-              <p className="text-muted-foreground text-sm">
-                This is the ID of the graph (can be the graph name), or
-                assistant to fetch threads from, and invoke when actions are
-                taken.
-              </p>
-              <Input
-                id="assistantId"
-                name="assistantId"
-                className="bg-background"
-                defaultValue={assistantId || DEFAULT_ASSISTANT_ID}
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="apiKey">LangSmith API Key</Label>
-              <p className="text-muted-foreground text-sm">
-                This is <strong>NOT</strong> required if using a local LangGraph
-                server. This value is stored in your browser's local storage and
-                is only used to authenticate requests sent to your LangGraph
-                server.
-              </p>
-              <PasswordInput
-                id="apiKey"
-                name="apiKey"
-                defaultValue={apiKey ?? ""}
-                className="bg-background"
-                placeholder="lsv2_pt_..."
-              />
-            </div>
-
-            <div className="mt-2 flex justify-end">
-              <Button
-                type="submit"
-                size="lg"
-              >
-                Continue
-                <ArrowRight className="size-5" />
-              </Button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
+  // Setup form has been removed - configuration is now handled via environment variables
+  // or URL parameters. Defaults are automatically applied if neither is present.
 
   return (
     <StreamSession

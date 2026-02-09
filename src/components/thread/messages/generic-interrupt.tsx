@@ -55,28 +55,20 @@ export function GenericInterruptView({
   const handleResume = async (decision: "approve" | "reject") => {
     try {
       setIsResuming(true);
+      console.log(`[GenericInterruptView] User clicked ${decision.toUpperCase()}`);
 
-      // For a standard LangGraph interrupt, we can resume by submitting the answer.
-      // If it's a simple breakpoint, an empty object or null is usually enough to continue.
-      // However, we'll try to follow the Decision pattern if possible.
+      // In the LangGraph SDK, you resume a run by sending a command with the resume value.
+      const payload = { action: decision };
+      console.log("[GenericInterruptView] Submitting Resume Payload:", payload);
 
-      if (decision === "approve") {
-        await stream.submit({}, {
-          command: {
-            resume: { action: "approve" }
-          }
-        });
-      } else {
-        // For reject, we might want to go to a specific node or just stop.
-        // For now, let's try to pass an error if it's a tool-related interrupt.
-        await stream.submit({}, {
-          command: {
-            resume: { error: "User rejected this tool call." }
-          }
-        });
-      }
+      await stream.submit({} as any, {
+        command: {
+          resume: payload
+        }
+      });
+      console.log("[GenericInterruptView] Resume submitted successfully");
     } catch (error) {
-      console.error("Error resuming graph:", error);
+      console.error("[GenericInterruptView] Error resuming graph:", error);
     } finally {
       setIsResuming(false);
     }

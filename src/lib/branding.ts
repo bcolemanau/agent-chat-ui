@@ -21,7 +21,7 @@ export interface BrandingConfig {
 }
 
 export const defaultBranding: ClientBranding = {
-  name: "Reflexion",
+  name: "NewCo",
   brand_title: "Reflexion Agent",
   colors: {
     primary: "#000000",
@@ -52,7 +52,23 @@ export const daikinBranding: ClientBranding = {
   }
 };
 
+export const umnMorrisBranding: ClientBranding = {
+  name: "University of Minnesota Morris",
+  brand_title: "Reflexion | UMN Morris",
+  colors: {
+    primary: "#7A0019", // UMN Maroon
+    secondary: "#FFB81C", // UMN Gold
+    text_primary: "#000000"
+  },
+  style: {
+    border_radius: "0.625rem",
+    button_radius: "0.625rem",
+    font_family: "Inter, sans-serif"
+  }
+};
+
 export function getBranding(clientName?: string): ClientBranding {
   if (clientName === "daikin") return daikinBranding;
+  if (clientName === "umn-morris") return umnMorrisBranding;
   return defaultBranding;
 }

@@ -85,6 +85,7 @@ export default function ThreadHistory() {
   const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
     useThreads();
 
+  // Run once on mount to load thread list
   useEffect(() => {
     if (typeof window === "undefined") return;
     setThreadsLoading(true);
@@ -92,6 +93,7 @@ export default function ThreadHistory() {
       .then(setThreads)
       .catch(console.error)
       .finally(() => setThreadsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only
   }, []);
 
   return (

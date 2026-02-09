@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Map legend — hierarchical mockup (Agent &gt; ArtifactTemplates &gt; NodeTypes)</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --muted: #64748b;
+      --fg: #e2e8f0;
+      /* Customer brand hue (e.g. 217 = blue); we use light→dark progression for start→finish */
+      --brand-hue: 217;
+      /* Agent-level colours: same hue, light (start) → dark (finish) */
+      --agent-concept:     hsl(var(--brand-hue), 45%, 72%);  /* lightest = start */
+      --agent-requirements: hsl(var(--brand-hue), 50%, 58%);
+      --agent-architecture: hsl(var(--brand-hue), 55%, 48%);
+      --agent-design:      hsl(var(--brand-hue), 55%, 38%);  /* darker = finish */
+      --agent-system:      hsl(215, 15%, 45%);                /* neutral (methodology) */
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      padding: 1.5rem;
+      margin: 0;
+    }
+    h1 {
+      font-size: 0.875rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin: 0 0 1rem 0;
+    }
+    .mockup-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      padding: 0.5rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      max-width: 900px;
+    }
+    .search-slot {
+      width: 11rem;
+      height: 1.75rem;
+      background: #334155;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .types-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+    /* Hierarchy: Agent > Template > NodeTypes — colour at Agent level only */
+    .legend-hierarchy {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: flex-start;
+    }
+    .agent-group {
+      border-radius: 6px;
+      overflow: hidden;
+      /* Border uses agent colour for clear grouping */
+    }
+    .agent-group[data-agent="concept"]     { border: 1px solid color-mix(in srgb, var(--agent-concept) 60%, transparent); }
+    .agent-group[data-agent="requirements"] { border: 1px solid color-mix(in srgb, var(--agent-requirements) 65%, transparent); }
+    .agent-group[data-agent="architecture"] { border: 1px solid color-mix(in srgb, var(--agent-architecture) 70%, transparent); }
+    .agent-group[data-agent="design"]      { border: 1px solid color-mix(in srgb, var(--agent-design) 75%, transparent); }
+    .agent-group[data-agent="system"]     { border: 1px solid var(--border); }
+    .agent-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.6rem;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      color: var(--fg);
+    }
+    .agent-group[data-agent="concept"] .agent-header     { background: color-mix(in srgb, var(--agent-concept) 22%, var(--surface)); }
+    .agent-group[data-agent="requirements"] .agent-header { background: color-mix(in srgb, var(--agent-requirements) 28%, var(--surface)); }
+    .agent-group[data-agent="architecture"] .agent-header { background: color-mix(in srgb, var(--agent-architecture) 32%, var(--surface)); }
+    .agent-group[data-agent="design"] .agent-header      { background: color-mix(in srgb, var(--agent-design) 28%, var(--surface)); }
+    .agent-group[data-agent="system"] .agent-header     { background: color-mix(in srgb, var(--agent-system) 18%, var(--surface)); }
+    .agent-header:hover { filter: brightness(1.08); }
+    .chevron { font-size: 10px; color: var(--muted); transition: transform 0.15s ease; }
+    .agent-group.collapsed .chevron { transform: rotate(-90deg); }
+    .agent-group.collapsed .template-group { display: none; }
+    .template-group {
+      padding: 0.25rem 0.5rem 0.5rem 0.5rem;
+      background: var(--surface);
+    }
+    .template-row { margin-bottom: 0.35rem; }
+    .template-header {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+      padding-left: 0.5rem;
+    }
+    .node-types {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      padding-left: 1rem;
+    }
+    /* Chips inherit agent colour for the dot only; rest is neutral */
+    .type-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      background: var(--surface);
+      transition: opacity 0.15s;
+    }
+    .type-chip.hidden { opacity: 0.45; }
+    .type-chip .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .agent-group[data-agent="concept"] .type-chip .dot     { background: var(--agent-concept); }
+    .agent-group[data-agent="requirements"] .type-chip .dot { background: var(--agent-requirements); }
+    .agent-group[data-agent="architecture"] .type-chip .dot { background: var(--agent-architecture); }
+    .agent-group[data-agent="design"] .type-chip .dot      { background: var(--agent-design); }
+    .agent-group[data-agent="system"] .type-chip .dot     { background: var(--agent-system); }
+    .note {
+      margin-top: 1rem;
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 560px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Map legend — hierarchical mockup</h1>
+  <p style="font-size: 12px; color: var(--muted); margin: 0 0 0.75rem 0;">Agent → ArtifactTemplates → NodeTypes. Colour is at <strong>Agent level</strong>: one brand hue with light (start) → dark (finish). Click agent to collapse/expand.</p>
+
+  <div class="mockup-bar">
+    <div class="search-slot" title="Search nodes..."></div>
+    <span class="types-label">Filter by type</span>
+    <div class="legend-hierarchy">
+      <!-- Concept (Agent) — lightest = start -->
+      <div class="agent-group" data-agent="concept" id="agent-concept">
+        <div class="agent-header">
+          <span class="chevron">▼</span>
+          <span>Concept</span>
+        </div>
+        <div class="template-group">
+          <div class="template-row">
+            <div class="template-header">Concept Brief</div>
+            <div class="node-types">
+              <span class="type-chip" title="Personas"><span class="dot"></span>Personas</span>
+              <span class="type-chip"><span class="dot"></span>Scenarios</span>
+              <span class="type-chip"><span class="dot"></span>Outcomes</span>
+              <span class="type-chip"><span class="dot"></span>Metrics</span>
+              <span class="type-chip"><span class="dot"></span>Decisions</span>
+              <span class="type-chip"><span class="dot"></span>Constraints</span>
+            </div>
+          </div>
+          <div class="template-row">
+            <div class="template-header">Feature Definition</div>
+            <div class="node-types">
+              <span class="type-chip"><span class="dot"></span>Features</span>
+              <span class="type-chip"><span class="dot"></span>JTBD</span>
+            </div>
+          </div>
+          <div class="template-row">
+            <div class="template-header">UX Brief</div>
+            <div class="node-types">
+              <span class="type-chip"><span class="dot"></span>UX Outcomes</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Requirements (Agent) -->
+      <div class="agent-group" data-agent="requirements" id="agent-requirements">
+        <div class="agent-header">
+          <span class="chevron">▼</span>
+          <span>Requirements</span>
+        </div>
+        <div class="template-group">
+          <div class="template-row">
+            <div class="template-header">Requirements Package</div>
+            <div class="node-types">
+              <span class="type-chip"><span class="dot"></span>Requirements</span>
+              <span class="type-chip"><span class="dot"></span>Scenarios (refined)</span>
+              <span class="type-chip"><span class="dot"></span>Lifecycle</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Architecture (Agent) -->
+      <div class="agent-group" data-agent="architecture" id="agent-architecture">
+        <div class="agent-header">
+          <span class="chevron">▼</span>
+          <span>Architecture</span>
+        </div>
+        <div class="template-group">
+          <div class="template-row">
+            <div class="template-header">Architecture</div>
+            <div class="node-types">
+              <span class="type-chip"><span class="dot"></span>Components</span>
+              <span class="type-chip"><span class="dot"></span>Interfaces</span>
+              <span class="type-chip"><span class="dot"></span>Views</span>
+              <span class="type-chip"><span class="dot"></span>Logical</span>
+              <span class="type-chip"><span class="dot"></span>Physical</span>
+              <span class="type-chip"><span class="dot"></span>Security</span>
+              <span class="type-chip"><span class="dot"></span>Data</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Design (Agent) — darkest = finish -->
+      <div class="agent-group" data-agent="design" id="agent-design">
+        <div class="agent-header">
+          <span class="chevron">▼</span>
+          <span>Design</span>
+        </div>
+        <div class="template-group">
+          <div class="template-row">
+            <div class="template-header">Design</div>
+            <div class="node-types">
+              <span class="type-chip"><span class="dot"></span>Components</span>
+              <span class="type-chip"><span class="dot"></span>Interfaces</span>
+              <span class="type-chip"><span class="dot"></span>Requirements</span>
+              <span class="type-chip"><span class="dot"></span>Decisions</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- System / Other (neutral) -->
+      <div class="agent-group" data-agent="system" id="agent-system">
+        <div class="agent-header">
+          <span class="chevron">▼</span>
+          <span>System</span>
+        </div>
+        <div class="template-group">
+          <div class="template-row">
+            <div class="template-header">Methodology / KG</div>
+            <div class="node-types">
+              <span class="type-chip"><span class="dot"></span>Domain</span>
+              <span class="type-chip"><span class="dot"></span>Trigger</span>
+              <span class="type-chip"><span class="dot"></span>Artifact</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">Colour is applied at <strong>Agent level</strong> only: one customer brand hue (<code>--brand-hue: 217</code> = blue) with light→dark variations for workflow progress (Concept = light/start → Design = dark/finish). System stays neutral. Leaf chips use the same agent colour for the dot so the map can show nodes in the same hue by agent. Change <code>--brand-hue</code> in CSS to match customer brand (e.g. 280 for purple, 142 for green).</p>
+
+  <script>
+    document.querySelectorAll('.agent-header').forEach(function (el) {
+      el.addEventListener('click', function () {
+        this.closest('.agent-group').classList.toggle('collapsed');
+      });
+    });
+    document.querySelectorAll('.type-chip').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        this.classList.toggle('hidden');
+      });
+    });
+  </script>
+</body>
+</html>

@@ -40,6 +40,18 @@
   --sidebar-ring: oklch(0.87 0 0);
 }
 
+/* Pulse animation for selected nodes in world map */
+@keyframes node-pulse {
+  0%, 100% { 
+    opacity: 0.6; 
+    transform: scale(1); 
+  }
+  50% { 
+    opacity: 0.9; 
+    transform: scale(1.1); 
+  }
+}
+
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
@@ -114,13 +126,27 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Workbench shell: cap height at visible viewport so only list/edit panes scroll, not the whole section */
+.workbench-root-height {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none; /* prevent wheel/touch from chaining to body */
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
 
+  html {
+    height: 100%;
+  }
+
   body {
     @apply bg-background text-foreground;
+    min-height: 100%;
   }
 
   :root {

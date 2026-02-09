@@ -33,17 +33,123 @@ function ArgsRenderer({ args }: { args: Record<string, unknown> }) {
         return (
           <div
             key={`args-${key}`}
-            className="flex flex-col items-start gap-1"
+            className="flex flex-col items-start gap-1 w-full"
           >
             <p className="text-sm leading-[18px] text-wrap text-gray-600">
               {prettifyText(key)}
             </p>
-            <span className="w-full max-w-full rounded-xl bg-zinc-100 p-3 text-[13px] leading-[18px] text-black">
+            <span className="w-full max-w-full rounded-xl bg-zinc-100 p-3 text-[13px] leading-[18px] text-black overflow-x-auto">
               <MarkdownText>{stringValue}</MarkdownText>
             </span>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function SummaryRenderer({ summary }: { summary: string }) {
+  return (
+    <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+      <p className="text-sm font-semibold text-blue-900 mb-1">Impact Summary</p>
+      <p className="text-sm text-blue-800 italic">"{summary}"</p>
+    </div>
+  );
+}
+
+function DiffRenderer({ diff, toolName }: { diff: string | any; toolName?: string }) {
+  // Handle structured diff objects (from preview_data.diff)
+  if (diff && typeof diff === "object") {
+    return <StructuredDiffRenderer diff={diff} toolName={toolName} />;
+  }
+  
+  // Handle string diffs (legacy format)
+  if (typeof diff === "string") {
+    return (
+      <div className="mb-4 w-full">
+        <p className="text-sm font-semibold text-gray-700 mb-2">Changes (Diff)</p>
+        <div className="rounded-lg bg-zinc-950 p-4 overflow-x-auto max-h-[300px] border border-zinc-800">
+          <MarkdownText>{`\`\`\`diff\n${diff}\n\`\`\``}</MarkdownText>
+        </div>
+      </div>
+    );
+  }
+  
+  return null;
+}
+
+function StructuredDiffRenderer({ diff, toolName }: { diff: any; toolName?: string }) {
+  // Render structured diff based on type (subset, progression, similarity)
+  if (!diff || !diff.type) {
+    return null;
+  }
+  
+  switch (diff.type) {
+    case "subset":
+      // Used by classify_intent
+      if (diff.metadata) {
+        const metadata = diff.metadata;
+        return (
+          <div className="mb-4 w-full rounded-lg border bg-muted/30 p-4">
+            <div className="text-sm font-semibold mb-2">{metadata.title || "Subset View"}</div>
+            {metadata.description && (
+              <div className="text-xs text-muted-foreground mb-3">{metadata.description}</div>
+            )}
+            {metadata.subset && (
+              <div className="flex gap-4 text-xs">
+                <span className="font-medium">Active: {metadata.subset.activeCount} nodes</span>
+                <span className="font-medium">Inactive: {metadata.subset.inactiveCount} nodes</span>
+                <span className="font-medium text-green-600">
+                  Reduction: {metadata.subset.reductionPercentage.toFixed(1)}%
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      }
+      break;
+      
+    case "progression":
+      // Used by propose_hydration_complete, enrichment
+      if (diff.metadata) {
+        const metadata = diff.metadata;
+        const progression = metadata.progression || {};
+        return (
+          <div className="mb-4 w-full rounded-lg border bg-muted/30 p-4">
+            <div className="text-sm font-semibold mb-2">{metadata.title || "Progression View"}</div>
+            {metadata.description && (
+              <div className="text-xs text-muted-foreground mb-3">{metadata.description}</div>
+            )}
+            {progression.completionPercentage !== undefined && (
+              <div className="text-xs text-muted-foreground">
+                Completion: {progression.completionPercentage.toFixed(0)}%
+              </div>
+            )}
+          </div>
+        );
+      }
+      break;
+      
+    case "similarity":
+      // Used by generate_concept_brief
+      if (diff.options && diff.options.length > 0) {
+        return (
+          <div className="mb-4 w-full rounded-lg border bg-muted/30 p-4">
+            <div className="text-sm font-semibold mb-2">Similarity Options</div>
+            <div className="text-xs text-muted-foreground">
+              {diff.options.length} option(s) available
+            </div>
+          </div>
+        );
+      }
+      break;
+  }
+  
+  // Fallback: show diff type
+  return (
+    <div className="mb-4 w-full rounded-lg border bg-muted/30 p-4">
+      <div className="text-sm font-semibold mb-2">Diff Preview</div>
+      <div className="text-xs text-muted-foreground">Type: {diff.type}</div>
     </div>
   );
 }
@@ -392,13 +498,13 @@ export function InboxItemInput({
       const newArgs =
         Array.isArray(change) && Array.isArray(key)
           ? {
-              ...response.edited_action.args,
-              ...Object.fromEntries(key.map((k, index) => [k, change[index]])),
-            }
+            ...response.edited_action.args,
+            ...Object.fromEntries(key.map((k, index) => [k, change[index]])),
+          }
           : {
-              ...response.edited_action.args,
-              [key as string]: change as string,
-            };
+            ...response.edited_action.args,
+            [key as string]: change as string,
+          };
 
       const newEdit: DecisionWithEdits = {
         type: "edit",
@@ -454,8 +560,14 @@ export function InboxItemInput({
     );
   };
 
+  // Extract diff from preview_data.diff (structured) or fallback to diff (string)
+  const diffData = actionRequest?.preview_data?.diff || actionRequest?.diff;
+  
   return (
     <div className="flex w-full max-w-full flex-col items-start justify-start gap-2">
+      {actionRequest?.summary && <SummaryRenderer summary={actionRequest.summary} />}
+      {diffData && <DiffRenderer diff={diffData} toolName={actionRequest?.name} />}
+
       {showArgsOutsideCards && <ArgsRenderer args={actionArgs} />}
 
       <div className="flex w-full flex-col items-stretch gap-2">

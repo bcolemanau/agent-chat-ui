@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- layout exports metadata + component */
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";
@@ -13,12 +14,22 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: process.env.NEXT_PUBLIC_CLIENT_NAME === "daikin" ? "Reflexion | Daikin" : "Reflexion Agent",
+  title: process.env.NEXT_PUBLIC_CLIENT_NAME === "daikin" 
+    ? "Reflexion | Daikin" 
+    : process.env.NEXT_PUBLIC_CLIENT_NAME === "umn-morris"
+    ? "Reflexion | UMN Morris"
+    : "Reflexion Agent",
   description: "Advanced Agentic Coding Environment",
 };
 
 import { BrandingProvider } from "@/providers/Branding";
 import { NextAuthProvider } from "@/providers/NextAuthProvider";
+import { ThreadProvider } from "@/providers/Thread";
+import { StreamProvider } from "@/providers/Stream";
+import { ArtifactProvider } from "@/components/thread/artifact";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { Toaster } from "@/components/ui/sonner";
+import { OtelInit } from "@/components/otel-init";
 
 export default function RootLayout({
   children,
@@ -28,14 +39,26 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
+        <OtelInit />
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <NextAuthProvider>
             <BrandingProvider>
-              <NuqsAdapter>
-                <TooltipProvider>
-                  {children}
-                </TooltipProvider>
-              </NuqsAdapter>
+              <React.Suspense fallback={<></>}>
+                <NuqsAdapter>
+                  <TooltipProvider>
+                    <Toaster />
+                    <ErrorBoundary name="Root">
+                      <ThreadProvider>
+                        <StreamProvider>
+                          <ArtifactProvider>
+                            {children}
+                          </ArtifactProvider>
+                        </StreamProvider>
+                      </ThreadProvider>
+                    </ErrorBoundary>
+                  </TooltipProvider>
+                </NuqsAdapter>
+              </React.Suspense>
             </BrandingProvider>
           </NextAuthProvider>
         </ThemeProvider>

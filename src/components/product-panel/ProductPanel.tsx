@@ -2,14 +2,16 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, FileText, MessageSquare, Lightbulb } from "lucide-react";
+import { X, FileText, MessageSquare, Lightbulb, ListTodo, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ReleaseNotesTab } from "./ReleaseNotesTab";
 import { FeatureRequestTab } from "./FeatureRequestTab";
+import { BacklogTab } from "./BacklogTab";
 import { SupportChatTab } from "./SupportChatTab";
+import { ArchitectureTab } from "./ArchitectureTab";
 import { cn } from "@/lib/utils";
 
-type TabType = "release-notes" | "feature-request" | "support";
+type TabType = "release-notes" | "feature-request" | "backlog" | "support" | "architecture";
 
 interface ProductPanelProps {
     open: boolean;
@@ -17,10 +19,14 @@ interface ProductPanelProps {
 }
 
 export function ProductPanel({ open, onClose }: ProductPanelProps) {
-    const [activeTab, setActiveTab] = useState<TabType>("release-notes");
+    const activeTabState = useState<TabType>("backlog");
+    const activeTab = activeTabState[0];
+    const setActiveTab = activeTabState[1];
 
     const tabs = [
+        { id: "backlog" as TabType, label: "Backlog", icon: ListTodo },
         { id: "release-notes" as TabType, label: "Release Notes", icon: FileText },
+        { id: "architecture" as TabType, label: "Architecture", icon: Network },
         { id: "feature-request" as TabType, label: "Request Feature", icon: Lightbulb },
         { id: "support" as TabType, label: "Support", icon: MessageSquare },
     ];
@@ -49,7 +55,7 @@ export function ProductPanel({ open, onClose }: ProductPanelProps) {
                     >
                         {/* Header */}
                         <div className="flex items-center justify-between p-4 border-b">
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 overflow-x-auto pb-1 -mb-1 hide-scrollbar">
                                 {tabs.map((tab) => {
                                     const Icon = tab.icon;
                                     return (
@@ -57,7 +63,7 @@ export function ProductPanel({ open, onClose }: ProductPanelProps) {
                                             key={tab.id}
                                             onClick={() => setActiveTab(tab.id)}
                                             className={cn(
-                                                "flex items-center gap-2 px-4 py-2 rounded-lg transition-colors",
+                                                "flex items-center gap-2 px-4 py-2 rounded-lg transition-colors whitespace-nowrap",
                                                 activeTab === tab.id
                                                     ? "bg-primary text-primary-foreground"
                                                     : "hover:bg-muted"
@@ -81,7 +87,9 @@ export function ProductPanel({ open, onClose }: ProductPanelProps) {
 
                         {/* Content */}
                         <div className="overflow-y-auto h-[calc(100%-73px)] p-6">
+                            {activeTab === "backlog" && <BacklogTab />}
                             {activeTab === "release-notes" && <ReleaseNotesTab />}
+                            {activeTab === "architecture" && <ArchitectureTab />}
                             {activeTab === "feature-request" && <FeatureRequestTab />}
                             {activeTab === "support" && <SupportChatTab />}
                         </div>
