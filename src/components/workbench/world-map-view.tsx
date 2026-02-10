@@ -228,6 +228,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     /** Map search: single match → select node; multiple → filtered view. */
     const [mapSearchQuery, setMapSearchQuery] = useState('');
+    /** Status filter: "active" (default) = approved only; "all" = show all; "pending" | "rejected" for decision lineage. */
+    const [statusFilter, setStatusFilter] = useState<'active' | 'all' | 'pending' | 'rejected'>('active');
     /** Type filter: record of node type → visible (false = hidden). Empty = all visible. */
     const [typeFilter, setTypeFilter] = useState<Record<string, boolean>>({});
     /** Collapsed agent groups in the hierarchical legend (agentId → true = collapsed). */
@@ -313,21 +315,27 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         } catch (e) { console.error('Decisions fetch error:', e); }
     };
 
+    /** Resolve "current" to latest commit SHA so diff API always receives commit refs (unified diff views = always refer to a commit). */
+    const latestVersionSha = (kgHistory?.versions as { id?: string }[])?.[0]?.id;
+    const resolveVersion = (v: string) => (v === "current" ? (latestVersionSha ?? v) : v);
+
     const fetchDiff = async (v1: string, v2: string) => {
         if (!v1 || !v2 || !threadId) return;
         try {
             setLoadingDiff(true);
+            const v1Resolved = resolveVersion(v1);
+            const v2Resolved = resolveVersion(v2);
             const orgContext = localStorage.getItem('reflexion_org_context');
             const headers: Record<string, string> = {};
             if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const url = `/api/project/diff?thread_id=${threadId}&version1=${v1}&version2=${v2}`;
+            const url = `/api/project/diff?thread_id=${threadId}&version1=${v1Resolved}&version2=${v2Resolved}`;
             const res = await fetch(url, { headers });
             if (res.ok) {
                 const diff = await res.json();
                 const apiSummary = diff.summary ?? diff.diff?.summary ?? {};
                 console.log('[WorldMapView] Fetched diff:', {
-                    version1: v1,
-                    version2: v2,
+                    version1: v1Resolved,
+                    version2: v2Resolved,
                     nodesInDiff: diff.diff?.nodes?.length ?? 0,
                     edgesInDiff: (diff.diff?.links ?? diff.diff?.edges)?.length ?? 0,
                     summary: { added: apiSummary.added, modified: apiSummary.modified, removed: apiSummary.removed, total_nodes_v1: apiSummary.total_nodes_v1, total_nodes_v2: apiSummary.total_nodes_v2, total_links_v1: apiSummary.total_links_v1, total_links_v2: apiSummary.total_links_v2 },
@@ -564,6 +572,27 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         } else {
             nodes = data.nodes.map(d => ({ ...d }));
             links = data.links.map((d: Link) => ({ ...d }));
+            // Status filter: every decision has an impact on the world (active = default)
+            if (statusFilter !== 'all') {
+                const nodeStatus = (n: Node) => (n.metadata?.status ?? 'active') as string;
+                const linkStatus = (l: Link) => {
+                    const m = (l as any).metadata;
+                    return (m?.status ?? 'active') as string;
+                };
+                const matchNode = (n: Node) =>
+                    statusFilter === 'active'
+                        ? [undefined, 'active', 'accepted'].includes(nodeStatus(n) as any)
+                        : nodeStatus(n) === statusFilter;
+                nodes = nodes.filter(matchNode);
+                const activeIds = new Set(nodes.map((n) => n.id));
+                links = links.filter((l: Link) => {
+                    const src = typeof l.source === 'object' && l.source && 'id' in l.source ? (l.source as Node).id : l.source;
+                    const tgt = typeof l.target === 'object' && l.target && 'id' in l.target ? (l.target as Node).id : l.target;
+                    if (!activeIds.has(String(src)) || !activeIds.has(String(tgt))) return false;
+                    if (statusFilter === 'active') return [undefined, 'active', 'accepted'].includes(linkStatus(l) as any);
+                    return linkStatus(l) === statusFilter;
+                });
+            }
         }
 
         // If we have diff data but didn't use diff payload (e.g. no edges), merge diff_status into nodes for coloring.
@@ -872,14 +901,23 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .force('collide', d3.forceCollide().radius(60));
         simulationRef.current = simulation;
 
+        const linkKgStatus = (d: Link) => ((d as any).metadata?.status ?? 'active') as string;
+        const linkIsPendingOrRejected = (d: Link) => statusFilter === 'all' && (linkKgStatus(d) === 'pending' || linkKgStatus(d) === 'rejected');
+
         const link = g.append('g')
             .attr('class', 'links')
             .selectAll('line')
             .data(effectiveValidLinks)
             .enter().append('line')
-            .attr('stroke', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? '#94a3b8' : '#888')
+            .attr('stroke', (d: Link) => {
+                if (linkIsPendingOrRejected(d)) return linkKgStatus(d) === 'pending' ? '#f59e0b' : '#ef4444';
+                return (d as Link & { is_anchor?: boolean }).is_anchor ? '#94a3b8' : '#888';
+            })
             .attr('stroke-width', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? 1 : 1.5)
-            .attr('stroke-dasharray', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? '4,4' : null)
+            .attr('stroke-dasharray', (d: Link) => {
+                if (linkIsPendingOrRejected(d)) return '4,2';
+                return (d as Link & { is_anchor?: boolean }).is_anchor ? '4,4' : null;
+            })
             .attr('marker-end', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? null : 'url(#arrowhead)')
             .style('opacity', (d: Link) => (d as Link & { is_anchor?: boolean }).is_anchor ? 0.35 : 0.5);
 
@@ -926,31 +964,41 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .style('filter', 'drop-shadow(0 0 8px #3b82f6)')
             .style('animation', d => selectedNode && d.id === selectedNode.id ? 'node-pulse 2s ease-in-out infinite' : 'none');
 
+        // When statusFilter === 'all', style pending/rejected by metadata.status (decision lineage)
+        const nodeKgStatus = (d: Node) => (d.metadata?.status ?? 'active') as string;
+        const isPendingOrRejected = (d: Node) => statusFilter === 'all' && (nodeKgStatus(d) === 'pending' || nodeKgStatus(d) === 'rejected');
+
         node.append('circle')
             .attr('r', d => {
                 if (selectedNode && d.id === selectedNode.id) return 20;
                 return d.id === data.metadata.active_trigger ? 18 : 12;
             })
             .attr('fill', d => {
-                // Selected node gets special color
                 if (selectedNode && d.id === selectedNode.id) return '#3b82f6';
-                // Color by diff status (KG-diff contract: diff_status or changeType)
+                if (isPendingOrRejected(d)) {
+                    return nodeKgStatus(d) === 'pending' ? '#fef3c7' : '#fecaca'; // amber-100 / red-200
+                }
                 const status = (d as any).diff_status ?? (d as any).changeType;
                 if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS];
                 return getAgentColorForNodeType(d.type);
             })
             .attr('stroke', d => {
                 if (selectedNode && d.id === selectedNode.id) return '#fff';
+                if (isPendingOrRejected(d)) {
+                    return nodeKgStatus(d) === 'pending' ? '#f59e0b' : '#ef4444'; // amber-500 / red-500
+                }
                 const status = (d as any).diff_status ?? (d as any).changeType;
                 if (status) return '#fff';
                 return d.id === data.metadata.active_trigger ? '#fff' : '#000';
             })
             .attr('stroke-width', d => {
                 if (selectedNode && d.id === selectedNode.id) return 4;
+                if (isPendingOrRejected(d)) return 2;
                 const status = (d as any).diff_status ?? (d as any).changeType;
                 if (status) return 2;
                 return d.id === data.metadata.active_trigger ? 3 : 1;
             })
+            .attr('stroke-dasharray', d => (isPendingOrRejected(d) ? '4,2' : null))
             .style('filter', d => {
                 if (selectedNode && d.id === selectedNode.id) return 'drop-shadow(0 0 12px #3b82f6)';
                 const status = (d as any).diff_status ?? (d as any).changeType;
@@ -1012,6 +1060,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             return '#3b82f6';
                         }
                     }
+                    if (linkIsPendingOrRejected(d)) return linkKgStatus(d) === 'pending' ? '#f59e0b' : '#ef4444';
                     return '#888';
                 });
 
@@ -1060,7 +1109,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 }
             }
         };
-    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode, mapSearchQuery, typeFilter]);
+    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode, mapSearchQuery, typeFilter, statusFilter]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -1635,6 +1684,29 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                 })}
                             </div>
                         )}
+                        <div className="h-4 w-px bg-border shrink-0" />
+                        {/* Status filter: every decision has an impact on the world. Default = Active (approved only). */}
+                        {data?.nodes?.length ? (
+                            <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Status</span>
+                                {(['active', 'all', 'pending', 'rejected'] as const).map((s) => (
+                                    <button
+                                        key={s}
+                                        type="button"
+                                        onClick={() => setStatusFilter(s)}
+                                        className={cn(
+                                            'inline-flex items-center rounded px-2 py-0.5 text-[10px] font-medium border transition-colors',
+                                            statusFilter === s
+                                                ? 'border-primary bg-primary/15 text-primary'
+                                                : 'border-border bg-muted/30 hover:bg-muted/50 text-muted-foreground'
+                                        )}
+                                        title={s === 'active' ? 'Approved only (default)' : s === 'all' ? 'Show all' : `Show ${s} only`}
+                                    >
+                                        {s === 'active' ? 'Active' : s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
                         <div className="h-4 w-px bg-border shrink-0" />
                         {/* Filter by type (hierarchy). Schema summary (entity_counts) from metadata shows counts; else derive presence from nodes. */}
                         {data?.nodes?.length ? (

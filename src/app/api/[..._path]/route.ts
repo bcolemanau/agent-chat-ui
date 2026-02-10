@@ -7,6 +7,10 @@ import { getSessionSafe } from "@/auth";
 
 const BACKEND_URL = (process.env.LANGGRAPH_API_URL ?? "https://reflexion-staging.up.railway.app").replace(/\/+$/, "");
 
+/** Last time we logged session size (throttle to ~once per minute). */
+let lastSessionSizeLog = 0;
+const SESSION_SIZE_LOG_INTERVAL_MS = 60_000;
+
 /** Unbuffered write so Docker/local logs show up (stdout can be buffered when not a TTY). */
 function debugLog(msg: string) {
   const line = `[DEBUG] ${msg}\n`;
@@ -49,6 +53,20 @@ async function proxyRequest(req: NextRequest, method: string) {
       if (session?.user?.idToken) {
         sessionToken = session.user.idToken;
         console.log("[PROXY] Middleware: Injected JWT from session");
+        // Log session size periodically (throttled) to help debug cookie/JWT_SESSION_ERROR
+        const authDebug = process.env.NODE_ENV !== "production" || process.env.AUTH_DEBUG === "true";
+        if (authDebug && Date.now() - lastSessionSizeLog >= SESSION_SIZE_LOG_INTERVAL_MS) {
+          lastSessionSizeLog = Date.now();
+          const idTokenBytes = new Blob([sessionToken]).size;
+          const sessionJsonBytes = new Blob([JSON.stringify(session)]).size;
+          const limit = 4096;
+          console.log(
+            "[PROXY] session size: idToken=%s bytes, session≈%s bytes, 4KB limit=%s",
+            idTokenBytes,
+            sessionJsonBytes,
+            sessionJsonBytes > limit ? "OVER" : "ok"
+          );
+        }
       }
     } else {
       console.debug(`[PROXY] Middleware: Skipping auth for public endpoint: ${path}`);
@@ -117,15 +135,42 @@ async function proxyRequest(req: NextRequest, method: string) {
       debugLog(`catch-all backend 404: ${method} ${backendUrl}`);
     }
 
-    // Create response with backend's response
-    const responseBody = await response.text();
+    // Stream-through: do not buffer streaming responses (e.g. POST /threads/{id}/runs/stream).
+    // Buffering with response.text() would wait for the entire LangGraph run to finish before
+    // returning, so the UI would appear stuck and time out; piping response.body returns chunks
+    // as they arrive so the frontend can show progress and complete when the run ends.
+    const contentType = response.headers.get("Content-Type") || "";
+    const isStream =
+      path.includes("/stream") ||
+      contentType.includes("text/event-stream") ||
+      contentType.includes("application/x-ndjson");
 
+    if (isStream && response.body != null) {
+      const responseHeaders: Record<string, string> = {
+        "Content-Type": contentType || "application/json",
+      };
+      if (response.headers.get("Cache-Control"))
+        responseHeaders["Cache-Control"] = response.headers.get("Cache-Control")!;
+      if (response.headers.get("Access-Control-Allow-Origin"))
+        responseHeaders["Access-Control-Allow-Origin"] = response.headers.get("Access-Control-Allow-Origin")!;
+      if (response.headers.get("Access-Control-Allow-Methods"))
+        responseHeaders["Access-Control-Allow-Methods"] = response.headers.get("Access-Control-Allow-Methods")!;
+      if (response.headers.get("Access-Control-Allow-Headers"))
+        responseHeaders["Access-Control-Allow-Headers"] = response.headers.get("Access-Control-Allow-Headers")!;
+      return new NextResponse(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
+    }
+
+    // Non-streaming: buffer and return (original behavior)
+    const responseBody = await response.text();
     return new NextResponse(responseBody, {
       status: response.status,
       statusText: response.statusText,
       headers: {
         "Content-Type": response.headers.get("Content-Type") || "application/json",
-        // Forward CORS headers if present
         ...(response.headers.get("Access-Control-Allow-Origin") && {
           "Access-Control-Allow-Origin": response.headers.get("Access-Control-Allow-Origin")!,
         }),

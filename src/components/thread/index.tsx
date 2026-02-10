@@ -145,6 +145,50 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   const [processedArtifactIds, setProcessedArtifactIds] = useState<Set<string>>(new Set());
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [messagesBoundaryKey, setMessagesBoundaryKey] = useState(0);
+
+  // Stuck-run detection: if loading for a long time with no progress, show a way out
+  const [runSeemsStuck, setRunSeemsStuck] = useState(false);
+  const loadingStartedAtRef = useRef<number | null>(null);
+  const lastMessageCountRef = useRef(0);
+  const stuckToastShownRef = useRef(false);
+  const STUCK_RUN_MS = 120_000; // 2 min
+  useEffect(() => {
+    if (isLoading) {
+      if (loadingStartedAtRef.current == null) {
+        loadingStartedAtRef.current = Date.now();
+        lastMessageCountRef.current = Array.isArray(messages) ? messages.length : 0;
+      }
+      const count = Array.isArray(messages) ? messages.length : 0;
+      if (count > lastMessageCountRef.current) lastMessageCountRef.current = count;
+    } else {
+      loadingStartedAtRef.current = null;
+      lastMessageCountRef.current = Array.isArray(messages) ? messages.length : 0;
+      setRunSeemsStuck(false);
+      stuckToastShownRef.current = false;
+    }
+  }, [isLoading, messages]);
+  useEffect(() => {
+    if (!isLoading) return;
+    const t = setInterval(() => {
+      const started = loadingStartedAtRef.current;
+      if (started == null) return;
+      const elapsed = Date.now() - started;
+      const count = Array.isArray(messages) ? messages.length : 0;
+      const hadProgress = count > lastMessageCountRef.current;
+      if (hadProgress) lastMessageCountRef.current = count;
+      if (elapsed >= STUCK_RUN_MS && !hadProgress) {
+        setRunSeemsStuck(true);
+        if (!stuckToastShownRef.current) {
+          stuckToastShownRef.current = true;
+          toast.warning("Run may be stuck", {
+            description: "The agent is taking too long. Try Cancel below or refresh the page.",
+            duration: 10_000,
+          });
+        }
+      }
+    }, 15_000);
+    return () => clearInterval(t);
+  }, [isLoading, messages]);
   
   // Use URL query params for pending artifacts (shared with workbench)
   const [_pendingArtifactIds, _setPendingArtifactIds] = useQueryState<string[]>("pendingArtifacts", {
@@ -766,14 +810,21 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                           </div>
                         )}
                         {isLoading ? (
-                          <Button
-                            key="stop"
-                            onClick={() => stream.stop()}
-                            className="ml-auto"
-                          >
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                            Cancel
-                          </Button>
+                          <div className="ml-auto flex flex-col items-end gap-1">
+                            {runSeemsStuck && (
+                              <span className="text-xs text-amber-600 dark:text-amber-400">
+                                Run seems stuck — cancel or refresh
+                              </span>
+                            )}
+                            <Button
+                              key="stop"
+                              onClick={() => stream.stop()}
+                              className={runSeemsStuck ? "border-amber-500 text-amber-700 dark:text-amber-400" : ""}
+                            >
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                              Cancel
+                            </Button>
+                          </div>
                         ) : (
                           <Button
                             type="submit"
