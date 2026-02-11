@@ -5,9 +5,12 @@
  * Resolves threadId to project id when it is a project name so GET/POST always use id.
  */
 import { useCallback, useEffect, useState } from "react";
+import { inferPhaseFromType } from "@/lib/decision-types";
 
 const STORAGE_KEY_PREFIX = "reflexion_processed_decisions_";
 const MAX_ITEMS = 500;
+/** Fewer items when storage quota exceeded; omit preview_data to reduce size. */
+const MAX_STORAGE_ITEMS = 100;
 
 export interface ProcessedDecision {
   id: string;
@@ -15,6 +18,8 @@ export interface ProcessedDecision {
   title: string;
   status: "approved" | "rejected";
   timestamp: number;
+  /** Phase from fork metadata: "Organization" | "Project" (backend stores on each decision) */
+  phase?: "Organization" | "Project";
   /** KG version (commit sha) produced by this decision; enables KG diff view and history navigation */
   kg_version_sha?: string;
   /** Short outcome text shown in Decisions pane (e.g. "Artifact edit applied, draft removed.") */
@@ -31,6 +36,7 @@ interface DecisionRecord {
   type: string;
   title: string;
   status: string;
+  phase?: "Organization" | "Project";
   created_at?: string;
   updated_at?: string;
   cache_key?: string;
@@ -91,22 +97,59 @@ function loadFromStorage(threadId: string | undefined): ProcessedDecision[] {
   }
 }
 
+/** Slim representation for localStorage to avoid QuotaExceededError (omit large preview_data). */
+function toStorageFormat(items: ProcessedDecision[]): ProcessedDecision[] {
+  return items.map(({ preview_data: _pd, ...rest }) => rest as ProcessedDecision);
+}
+
+function persistToStorage(keyId: string | undefined, items: ProcessedDecision[]): void {
+  if (typeof window === "undefined" || !keyId) return;
+  const key = getStorageKey(keyId);
+  const slim = toStorageFormat(items);
+  try {
+    localStorage.setItem(key, JSON.stringify(slim));
+  } catch (e) {
+    if ((e as DOMException)?.name === "QuotaExceededError" && slim.length > MAX_STORAGE_ITEMS) {
+      const trimmed = slim.slice(0, MAX_STORAGE_ITEMS);
+      try {
+        localStorage.setItem(key, JSON.stringify(trimmed));
+      } catch (e2) {
+        console.warn("[useProcessedDecisions] localStorage setItem failed after trim", e2);
+      }
+    } else {
+      console.warn("[useProcessedDecisions] localStorage setItem failed", e);
+    }
+  }
+}
+
+/** Phase from API when present; infer from type for legacy records (schema-driven fallback). */
 function mapRecordToProcessed(r: DecisionRecord): ProcessedDecision {
   const iso = r.updated_at ?? r.created_at;
   const timestamp = iso ? new Date(iso).getTime() : Date.now();
+  const phase =
+    (r.phase as "Organization" | "Project") ?? inferPhaseFromType(r.type || "");
   return {
     id: r.id,
     type: r.type,
     title: r.title,
     status: r.status === "approved" || r.status === "rejected" ? r.status : "rejected",
     timestamp,
+    phase,
     ...(r.kg_version_sha != null ? { kg_version_sha: r.kg_version_sha } : {}),
     ...(r.args?.preview_data != null ? { preview_data: r.args.preview_data as Record<string, unknown> } : {}),
     ...(r.args != null ? { args: r.args } : {}),
   };
 }
 
-async function loadFromApi(projectId: string | undefined): Promise<ProcessedDecision[] | null> {
+/** Org-phase lineage snapshot (decisions that produced OrgKG at fork time). Epic #139 §0.8 */
+export interface OrgPhaseLineage {
+  organization_kg_version?: string;
+  decisions?: Array<{ id: string; type: string; title: string; status: string; phase?: "Organization" | "Project" }>;
+}
+
+async function loadFromApi(
+  projectId: string | undefined
+): Promise<{ processed: ProcessedDecision[]; orgPhase: OrgPhaseLineage | null } | null> {
   if (typeof window === "undefined" || !projectId) return null;
   try {
     const params = new URLSearchParams({ thread_id: projectId });
@@ -116,13 +159,21 @@ async function loadFromApi(projectId: string | undefined): Promise<ProcessedDeci
     const res = await fetchWithTimeout(`/api/decisions?${params}`, { headers });
     if (!res.ok) return null;
     const data = await res.json();
-    const list = Array.isArray(data) ? data : [];
+    const list = Array.isArray(data) ? data : (data?.decisions ?? []);
+    const orgPhase = data?.org_phase ?? null;
     // Only include approved/rejected; pending decisions belong in the pending list, not processed (they were wrongly shown as "rejected" before)
     const processedOnly = list.filter(
-      (r): r is DecisionRecord =>
-        r && typeof r.id === "string" && (r.status === "approved" || r.status === "rejected")
+      (r: unknown): r is DecisionRecord =>
+        r != null &&
+        typeof r === "object" &&
+        "id" in r &&
+        typeof (r as DecisionRecord).id === "string" &&
+        ((r as DecisionRecord).status === "approved" || (r as DecisionRecord).status === "rejected")
     );
-    return processedOnly.map(mapRecordToProcessed);
+    return {
+      processed: processedOnly.map(mapRecordToProcessed),
+      orgPhase: orgPhase as OrgPhaseLineage | null,
+    };
   } catch (e) {
     if ((e as Error)?.name === "AbortError") {
       console.warn("[useProcessedDecisions] Decisions request timed out");
@@ -135,12 +186,14 @@ async function loadFromApi(projectId: string | undefined): Promise<ProcessedDeci
 
 export function useProcessedDecisions(threadId: string | undefined): {
   processed: ProcessedDecision[];
+  orgPhase: OrgPhaseLineage | null;
   addProcessed: (decision: ProcessedDecision) => void;
   clearProcessed: () => void;
   isLoading: boolean;
   refetch: () => Promise<void>;
 } {
   const [processed, setProcessed] = useState<ProcessedDecision[]>([]);
+  const [orgPhase, setOrgPhase] = useState<OrgPhaseLineage | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [resolvedId, setResolvedId] = useState<string | undefined>(undefined);
 
@@ -148,6 +201,7 @@ export function useProcessedDecisions(threadId: string | undefined): {
     if (!threadId) {
       setResolvedId(undefined);
       setProcessed(loadFromStorage(undefined));
+      setOrgPhase(null);
       setIsLoading(false);
       return;
     }
@@ -156,9 +210,11 @@ export function useProcessedDecisions(threadId: string | undefined): {
     setResolvedId(projectId);
     const fromApi = await loadFromApi(projectId);
     if (fromApi !== null) {
-      setProcessed(fromApi);
+      setProcessed(fromApi.processed);
+      setOrgPhase(fromApi.orgPhase);
     } else {
       setProcessed(loadFromStorage(projectId));
+      setOrgPhase(null);
     }
     setIsLoading(false);
   }, [threadId]);
@@ -175,12 +231,7 @@ export function useProcessedDecisions(threadId: string | undefined): {
       };
       setProcessed((prev) => {
         const next = [entry, ...prev.filter((p) => p.id !== entry.id)].slice(0, MAX_ITEMS);
-        try {
-          const keyId = resolvedId ?? threadId;
-          localStorage.setItem(getStorageKey(keyId), JSON.stringify(next));
-        } catch (e) {
-          console.warn("[useProcessedDecisions] localStorage setItem failed", e);
-        }
+        persistToStorage(resolvedId ?? threadId, next);
         return next;
       });
     },
@@ -197,5 +248,5 @@ export function useProcessedDecisions(threadId: string | undefined): {
     }
   }, [resolvedId, threadId]);
 
-  return { processed, addProcessed, clearProcessed, isLoading, refetch: load };
+  return { processed, orgPhase, addProcessed, clearProcessed, isLoading, refetch: load };
 }

@@ -11,8 +11,13 @@ export async function GET(req: Request) {
 
         const { searchParams } = new URL(req.url);
         const threadId = searchParams.get("thread_id") || "default";
+        const version = searchParams.get("version");
+        const versionSource = searchParams.get("version_source");
+        const params = new URLSearchParams({ thread_id: threadId });
+        if (version) params.set("version", version);
+        if (versionSource) params.set("version_source", versionSource);
         const baseUrl = getBackendBaseUrl();
-        const targetUrl = `${baseUrl}/kg/data?thread_id=${threadId}`;
+        const targetUrl = `${baseUrl}/kg/data?${params.toString()}`;
         const headers = getProxyHeaders(session, req);
 
         const resp = await fetch(targetUrl, { headers });

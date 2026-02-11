@@ -13,6 +13,7 @@ interface DecisionRecord {
   type: string;
   title: string;
   status: string;
+  phase?: "Organization" | "Project";
   args?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
@@ -27,6 +28,7 @@ function recordToPreviewItem(record: DecisionRecord, threadId: string | undefine
     title: record.title,
     summary: (args.model_summary as string) || `${record.type} ready to apply`,
     status: "pending",
+    phase: record.phase,
     data: {
       name: record.type,
       args,
@@ -67,7 +69,7 @@ export function usePendingDecisions(threadId: string | undefined): {
         return;
       }
       const data = await res.json();
-      const list = Array.isArray(data) ? data : [];
+      const list = Array.isArray(data) ? data : (data?.decisions ?? []);
       // Only show current version of each logical decision (exclude superseded old versions)
       const pendingRecords = list.filter(
         (r: DecisionRecord) =>

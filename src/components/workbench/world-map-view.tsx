@@ -326,10 +326,20 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             setLoadingDiff(true);
             const v1Resolved = resolveVersion(v1);
             const v2Resolved = resolveVersion(v2);
+            const versions = (kgHistory?.versions ?? []) as { id?: string; source?: string }[];
+            const v1Source = v1 === "current" ? undefined : versions.find((x) => x.id === v1Resolved)?.source;
+            const v2Source = v2 === "current" ? undefined : versions.find((x) => x.id === v2Resolved)?.source;
+            const params = new URLSearchParams({
+                thread_id: threadId,
+                version1: v1Resolved,
+                version2: v2Resolved,
+            });
+            if (v1Source === "organization") params.set("version1_source", "organization");
+            if (v2Source === "organization") params.set("version2_source", "organization");
             const orgContext = localStorage.getItem('reflexion_org_context');
             const headers: Record<string, string> = {};
             if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const url = `/api/project/diff?thread_id=${threadId}&version1=${v1Resolved}&version2=${v2Resolved}`;
+            const url = `/api/project/diff?${params.toString()}`;
             const res = await fetch(url, { headers });
             if (res.ok) {
                 const diff = await res.json();
@@ -345,8 +355,9 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 setCompareMode(true);
                 setViewMode('map'); // Compare always shows map/diff view (workflow tab removed)
                 setActiveVersion(v2 === "current" ? null : v2);
+                const v2Source = v2 === "current" ? undefined : (kgHistory?.versions as { id?: string; source?: string }[] | undefined)?.find((x) => x.id === v2Resolved)?.source;
                 // Load v2 graph first so diff is applied to correct data (avoids race where diff showed on stale graph).
-                await fetchData(v2 === "current" ? undefined : v2, true);
+                await fetchData(v2 === "current" ? undefined : v2, true, false, v2Source);
                 setDiffData(diff);
             } else {
                 console.error('Diff fetch failed:', await res.text());
@@ -364,14 +375,23 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             console.log('[WorldMapView] Timeline diff fetch skipped: no threadId or kgHistory', { threadId: !!threadId, versionsLength: kgHistory?.versions?.length ?? 0 });
             return;
         }
-        const versions = kgHistory.versions as { id?: string }[];
+        const versions = kgHistory.versions as { id?: string; source?: string }[];
         const idx = versions.findIndex((v) => v.id === versionId);
         const versionBefore = idx >= 0 && idx < versions.length - 1 ? versions[idx + 1]?.id : undefined;
         if (!versionBefore) {
             console.log('[WorldMapView] Timeline diff fetch skipped: no versionBefore', { versionId, idx, versionsLength: versions.length });
             return;
         }
-        const url = `/api/project/diff?thread_id=${threadId}&version1=${versionBefore}&version2=${versionId}`;
+        const params = new URLSearchParams({
+            thread_id: threadId,
+            version1: versionBefore,
+            version2: versionId,
+        });
+        const v1Source = versions.find((v) => v.id === versionBefore)?.source;
+        const v2Source = versions.find((v) => v.id === versionId)?.source;
+        if (v1Source === "organization") params.set("version1_source", "organization");
+        if (v2Source === "organization") params.set("version2_source", "organization");
+        const url = `/api/project/diff?${params.toString()}`;
         console.log('[WorldMapView] Timeline diff fetch start', { versionId, versionBefore, url });
         try {
             setLoadingTimelineDiff(true);
@@ -401,7 +421,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     /** Poll interval so KG updates from other users (same project) appear without refresh. */
     const KG_POLL_INTERVAL_MS = 15_000;
 
-    const fetchData = async (version?: string, preserveDiff: boolean = false, silent: boolean = false) => {
+    const fetchData = async (version?: string, preserveDiff: boolean = false, silent: boolean = false, versionSource?: string) => {
         try {
             if (!silent) {
                 setLoading(true);
@@ -411,15 +431,18 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             const headers: Record<string, string> = {};
             if (orgContext) headers['X-Organization-Context'] = orgContext;
 
-            let url = threadId ? `/api/kg-data?thread_id=${threadId}` : '/api/kg-data';
+            const params = new URLSearchParams();
+            if (threadId) params.set('thread_id', threadId);
             if (version) {
-                url += `&version=${version}`;
+                params.set('version', version);
                 setActiveVersion(version);
             } else {
                 setActiveVersion(null);
             }
+            if (versionSource === 'organization') params.set('version_source', 'organization');
+            const url = `/api/kg-data?${params.toString()}`;
 
-            console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version });
+            console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version, versionSource });
             const res = await fetch(url, { headers });
             if (!res.ok) throw new Error('Failed to fetch graph data');
             const json = await res.json();
@@ -1279,9 +1302,17 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                     <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                                 )}
                                             </div>
-                                            {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
-                                                <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
-                                            )}
+                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                {v.source === "organization" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Organization</span>
+                                                )}
+                                                {v.source === "project" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
+                                                )}
+                                                {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                    <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
+                                                )}
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -1322,9 +1353,17 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                     <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                                 )}
                                             </div>
-                                            {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
-                                                <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
-                                            )}
+                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                {v.source === "organization" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Organization</span>
+                                                )}
+                                                {v.source === "project" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
+                                                )}
+                                                {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                    <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
+                                                )}
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -1400,7 +1439,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                         )}
                                         onClick={() => {
                                             setActiveVersion(v.id);
-                                            fetchData(v.id);
+                                            fetchData(v.id, false, false, v.source);
                                             if (isDecision) {
                                                 setSelectedTimelineVersionId(v.id);
                                                 console.log('[WorldMapView] Timeline: selected decision version', { versionId: v.id });
@@ -1420,9 +1459,17 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                 <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                             )}
                                         </div>
-                                        {isDecision && (
-                                            <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
-                                        )}
+                                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                            {v.source === "organization" && (
+                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Organization</span>
+                                            )}
+                                            {v.source === "project" && (
+                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
+                                            )}
+                                            {isDecision && (
+                                                <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
+                                            )}
+                                        </div>
                                     </div>
                                 );
                             })}

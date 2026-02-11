@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
 import { useUnifiedPreviews, UnifiedPreviewItem } from "./hooks/use-unified-previews";
 import { usePendingDecisions } from "./hooks/use-pending-decisions";
-import { useProcessedDecisions, ProcessedDecision } from "./hooks/use-processed-decisions";
+import { useProcessedDecisions, ProcessedDecision, type OrgPhaseLineage } from "./hooks/use-processed-decisions";
+import { useDecisionTypesConfig } from "./hooks/use-decision-types-config";
 import { useThreadUpdates } from "./hooks/use-thread-updates";
 import { ApprovalCard } from "./approval-card";
 import { KgDiffDiagramView } from "./kg-diff-diagram-view";
@@ -15,6 +16,7 @@ import { WorldMapView } from "./world-map-view";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { useStreamContext } from "@/providers/Stream";
 import type { DecisionSummary } from "@/lib/diff-types";
+import { inferPhaseFromType } from "@/lib/decision-types";
 import { AlertCircle, PanelRight, ArrowLeft, GitCompare, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -41,11 +43,14 @@ function setStoredView(mode: ViewMode) {
 
 function getTypeLabel(type: string): string {
   const labels: Record<string, string> = {
-    classify_intent: "Project Classification",
-    propose_project: "Project Template",
+    organization_onboarding: "Organization Onboarding",
+    propose_project: "Project Proposal",
+    classify_intent: "Project Classification",  // legacy; kept for backward compat
     project_from_upload: "Project from Document",
     generate_project_configuration_summary: "Project Configuration",
     propose_hydration_complete: "Hydration Complete",
+    hydration_complete_trim: "Hydration Complete",
+    hydration_complete_prune: "Hydration Complete",
     generate_concept_brief: "Concept Brief",
     generate_ux_brief: "UX Brief",
     generate_requirements_proposal: "Requirements",
@@ -68,12 +73,15 @@ function relativeTime(ts: number): string {
   return `${Math.floor(d / 86400_000)} d ago`;
 }
 
+type Phase = "Organization" | "Project";
+
 type DecisionRow = {
   id: string;
   type: string;
   title: string;
   status: "pending" | "approved" | "rejected";
   time: number;
+  phase: Phase;
   item?: UnifiedPreviewItem;
   kg_version_sha?: string;
   args?: Record<string, unknown>;
@@ -88,6 +96,44 @@ function getArtifactDisplayName(row: DecisionRow): string | undefined {
   if (filename) return filename;
   if (row.type === "link_uploaded_document") return (args.document_id as string) || undefined;
   return undefined;
+}
+
+/** Read-only detail for phase decisions from fork lineage (e.g. org onboarding). */
+function PhaseRowDetail({ row }: { row: DecisionRow }) {
+  const phase = (row.phase ?? inferPhaseFromType(row.type)) as string;
+  const phaseLabel = phase === "Organization" ? "Organization phase (from fork)" : `${phase} phase (from fork)`;
+  const description =
+    phase === "Organization"
+      ? "This decision was made during organization onboarding and is included with the project fork."
+      : `This decision was made during the ${phase.toLowerCase()} phase and is included with the fork.`;
+
+  return (
+    <div className="rounded-lg border bg-muted/20 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 text-sm">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium shrink-0">
+            {getTypeLabel(row.type)}
+          </span>
+          <span className="truncate" title={row.title}>
+            {row.title}
+          </span>
+        </div>
+        <span className="text-xs text-muted-foreground shrink-0">{phaseLabel}</span>
+      </div>
+      <p className="px-4 pb-4 text-sm text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+/** Minimal header when project was forked from org — decisions are now in the unified table. */
+function OrgForkBadge({ orgPhase }: { orgPhase: OrgPhaseLineage }) {
+  const version = orgPhase.organization_kg_version;
+  if (!version) return null;
+  return (
+    <div className="mt-2 text-xs text-muted-foreground">
+      Forked from Org KG • {version.length > 12 ? version.slice(0, 8) + "…" : version}
+    </div>
+  );
 }
 
 function getDecisionDisplayTitle(row: DecisionRow): string {
@@ -123,7 +169,8 @@ export function DecisionsPanel() {
 
   const allPreviews = useUnifiedPreviews();
   const { pending: pendingFromApi, isLoading: pendingApiLoading, refetch: refetchPending } = usePendingDecisions(threadId);
-  const { processed, addProcessed, isLoading, refetch: refetchProcessed } = useProcessedDecisions(threadId);
+  const { processed, orgPhase, addProcessed, isLoading, refetch: refetchProcessed } = useProcessedDecisions(threadId);
+  const { inferPhase } = useDecisionTypesConfig();
   const { connected: sseConnected } = useThreadUpdates(threadId, {
     onDecisionsUpdate: () => {
       refetchPending();
@@ -199,12 +246,14 @@ export function DecisionsPanel() {
       status: "approved" | "rejected",
       extra?: { kg_version_sha?: string; artifact_id?: string; outcome_description?: string }
     ) => {
+      const phase = (item.phase ?? inferPhase(item.type)) as Phase;
       addProcessed({
         id: item.id,
         type: item.type,
         title: item.title,
         status,
         timestamp: Date.now(),
+        phase,
         ...(extra?.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
         ...(extra?.outcome_description != null ? { outcome_description: extra.outcome_description } : {}),
         ...(item.data?.preview_data != null ? { preview_data: item.data.preview_data as Record<string, unknown> } : {}),
@@ -212,16 +261,26 @@ export function DecisionsPanel() {
       });
       refetchPending();
     },
-    [addProcessed, refetchPending]
+    [addProcessed, refetchPending, inferPhase]
   );
 
   const allRows = useMemo((): DecisionRow[] => {
+    const orgDecisions = orgPhase?.decisions ?? [];
+    const orgRows: DecisionRow[] = orgDecisions.map((d) => ({
+      id: d.id,
+      type: d.type,
+      title: d.title,
+      status: (d.status === "approved" ? "approved" : "rejected") as "approved" | "rejected",
+      time: 0,
+      phase: "Organization" as Phase,
+    }));
     const pendingRows: DecisionRow[] = pending.map((item) => ({
       id: item.id,
       type: item.type,
       title: item.title,
       status: "pending" as const,
       time: Date.now(),
+      phase: (item.phase ?? inferPhase(item.type)) as Phase,
       item,
       args: item.data?.args as Record<string, unknown> | undefined,
     }));
@@ -231,11 +290,12 @@ export function DecisionsPanel() {
       title: p.title,
       status: p.status,
       time: p.timestamp,
+      phase: (p.phase as Phase) ?? (inferPhase(p.type) as Phase),
       kg_version_sha: p.kg_version_sha,
       args: p.args,
     }));
-    return [...pendingRows, ...processedRows];
-  }, [pending, processed]);
+    return [...orgRows, ...pendingRows, ...processedRows];
+  }, [orgPhase?.decisions, pending, processed, inferPhase]);
 
   // In map layout, sync selected row from URL version (e.g. opened via "Compare on map" from a decision)
   const prevVersionParam = React.useRef<string | null>(null);
@@ -247,14 +307,16 @@ export function DecisionsPanel() {
     if (row) setSelectedId(row.id);
   }, [viewMode, versionParam, allRows]);
 
+  const selectedRow = useMemo(() => allRows.find((r) => r.id === selectedId) ?? null, [allRows, selectedId]);
   const selectedItem = useMemo(() => pending.find((p) => p.id === selectedId) ?? null, [pending, selectedId]);
   const selectedProcessed = useMemo(
     () => processed.find((p) => p.id === selectedId) ?? null,
     [processed, selectedId]
   );
 
-  const _hasAny = pending.length > 0 || processed.length > 0;
-  const emptyMessage = !isLoading && !pendingApiLoading && pending.length === 0 && processed.length === 0;
+  const orgDecCount = orgPhase?.decisions?.length ?? 0;
+  const hasAny = orgDecCount > 0 || pending.length > 0 || processed.length > 0;
+  const emptyMessage = !isLoading && !pendingApiLoading && !hasAny;
 
   return (
     <div className="flex flex-col h-full min-h-0 p-6">
@@ -264,6 +326,9 @@ export function DecisionsPanel() {
           <p className="text-sm text-muted-foreground mt-1">
             Review and approve pending actions; view processed decisions below.
           </p>
+          {orgPhase && (
+            <OrgForkBadge orgPhase={orgPhase} />
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -332,6 +397,7 @@ export function DecisionsPanel() {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-muted/80 backdrop-blur border-b">
                     <tr>
+                      <th className="text-left py-2 px-3 font-medium w-24">Phase</th>
                       <th className="text-left py-2 px-3 font-medium">Type</th>
                       <th className="text-left py-2 px-3 font-medium">Title</th>
                       <th className="text-left py-2 px-3 font-medium">Subject</th>
@@ -362,6 +428,17 @@ export function DecisionsPanel() {
                         }}
                       >
                         <td className="py-2 px-3">
+                          <span
+                            className={cn(
+                              "text-xs font-medium",
+                              row.phase === "Organization" && "text-muted-foreground",
+                              row.phase === "Project" && "text-foreground"
+                            )}
+                          >
+                            {row.phase}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3">
                           <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium">
                             {getTypeLabel(row.type)}
                           </span>
@@ -385,7 +462,7 @@ export function DecisionsPanel() {
                           </span>
                         </td>
                         <td className="py-2 px-3 text-muted-foreground text-xs">
-                          {relativeTime(row.time)}
+                          {row.time > 0 ? relativeTime(row.time) : "—"}
                         </td>
                         <td className="py-2 px-1">
                           {selectedId === row.id && (
@@ -420,7 +497,11 @@ export function DecisionsPanel() {
           {viewMode === "split" && (
             <div className="min-h-0 flex flex-col overflow-hidden w-1/2 min-w-[320px] flex-1">
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden border rounded-lg bg-card">
-                  {proposalViewActive && selectedItem ? (
+                  {selectedRow && !selectedItem && !selectedProcessed ? (
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                      <PhaseRowDetail row={selectedRow} />
+                    </div>
+                  ) : proposalViewActive && selectedItem ? (
                     <>
                       <div className="shrink-0 flex items-center gap-2 border-b px-4 py-2 bg-muted/30">
                         <Button
@@ -460,6 +541,7 @@ export function DecisionsPanel() {
                           ...selectedProcessed,
                           time: selectedProcessed.timestamp,
                           args: selectedProcessed.args,
+                          phase: (selectedProcessed.phase as Phase) ?? (inferPhase(selectedProcessed.type) as Phase),
                         })}
                       />
                     </div>
