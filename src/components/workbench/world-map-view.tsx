@@ -13,6 +13,7 @@ import { getWorkflowNodeColor } from '@/lib/workflow-agent-colors';
 import { NodeDetailPanel } from './node-detail-panel';
 import { ArtifactsListView } from './artifacts-list-view';
 import { useUnifiedPreviews } from './hooks/use-unified-previews';
+import { useThreadUpdates } from './hooks/use-thread-updates';
 import { KgDiffDiagramView } from './kg-diff-diagram-view';
 
 interface Node extends d3.SimulationNodeDatum {
@@ -397,10 +398,15 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
     };
 
-    const fetchData = async (version?: string, preserveDiff: boolean = false) => {
+    /** Poll interval so KG updates from other users (same project) appear without refresh. */
+    const KG_POLL_INTERVAL_MS = 15_000;
+
+    const fetchData = async (version?: string, preserveDiff: boolean = false, silent: boolean = false) => {
         try {
-            setLoading(true);
-            setError(null);
+            if (!silent) {
+                setLoading(true);
+                setError(null);
+            }
             const orgContext = localStorage.getItem('reflexion_org_context');
             const headers: Record<string, string> = {};
             if (orgContext) headers['X-Organization-Context'] = orgContext;
@@ -430,14 +436,26 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 setDiffData(null);
             }
         } catch (err: any) {
-            console.error('[WorldMapView] Fetch error:', err);
-            setError(err.message);
+            if (!silent) {
+                console.error('[WorldMapView] Fetch error:', err);
+                setError(err.message);
+            }
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     };
 
     const workbenchRefreshKey = (stream as any)?.workbenchRefreshKey ?? 0;
+    const { connected: sseConnected } = useThreadUpdates(threadId ?? undefined, {
+        onKgUpdate: () => fetchData(undefined, false, true),
+    });
+
+    // Multi-user: poll KG when SSE not connected and viewing current map so updates from other users appear
+    useEffect(() => {
+        if (!threadId || sseConnected || activeVersion || (compareMode && diffData)) return;
+        const intervalId = setInterval(() => fetchData(undefined, false, true), KG_POLL_INTERVAL_MS);
+        return () => clearInterval(intervalId);
+    }, [threadId, sseConnected, activeVersion, compareMode, diffData]);
 
     // When we have a project (threadId), always fetch from API so map/artifacts show persisted KG
     // (uploaded/enriched). When no threadId, use filtered_kg if streamed or fallback to fetch.

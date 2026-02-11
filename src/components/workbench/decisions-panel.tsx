@@ -6,6 +6,7 @@ import { useQueryState } from "nuqs";
 import { useUnifiedPreviews, UnifiedPreviewItem } from "./hooks/use-unified-previews";
 import { usePendingDecisions } from "./hooks/use-pending-decisions";
 import { useProcessedDecisions, ProcessedDecision } from "./hooks/use-processed-decisions";
+import { useThreadUpdates } from "./hooks/use-thread-updates";
 import { ApprovalCard } from "./approval-card";
 import { KgDiffDiagramView } from "./kg-diff-diagram-view";
 import { DecisionSummaryView } from "./decision-summary-view";
@@ -19,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const VIEW_STORAGE_KEY = "reflexion_decisions_view";
+/** Poll interval so decisions from other users (same project) appear without refresh. */
+const DECISIONS_POLL_INTERVAL_MS = 15_000;
 type ViewMode = "split" | "map";
 
 function getStoredView(): ViewMode {
@@ -118,13 +121,29 @@ export function DecisionsPanel() {
 
   const allPreviews = useUnifiedPreviews();
   const { pending: pendingFromApi, isLoading: pendingApiLoading, refetch: refetchPending } = usePendingDecisions(threadId);
-  const { processed, addProcessed, isLoading } = useProcessedDecisions(threadId);
+  const { processed, addProcessed, isLoading, refetch: refetchProcessed } = useProcessedDecisions(threadId);
+  const { connected: sseConnected } = useThreadUpdates(threadId, {
+    onDecisionsUpdate: () => {
+      refetchPending();
+      refetchProcessed();
+    },
+  });
 
   // When thread/upload triggers a workbench refresh, refetch persisted pending so we see new decisions from GET /decisions
   const workbenchRefreshKey = (stream as any)?.workbenchRefreshKey ?? 0;
   useEffect(() => {
     if (threadId && workbenchRefreshKey > 0) refetchPending();
   }, [threadId, workbenchRefreshKey, refetchPending]);
+
+  // Multi-user: poll decisions when SSE is not connected so updates from other users appear
+  useEffect(() => {
+    if (!threadId || sseConnected) return;
+    const intervalId = setInterval(() => {
+      refetchPending();
+      refetchProcessed();
+    }, DECISIONS_POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [threadId, sseConnected, refetchPending, refetchProcessed]);
 
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
   // Logical key for link/enrich so one upload = one link + one enrich (dedupe API vs stream proposals)

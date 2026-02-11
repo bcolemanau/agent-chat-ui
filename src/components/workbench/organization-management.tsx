@@ -21,6 +21,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
 interface Organization {
@@ -53,7 +54,24 @@ export function OrganizationManagement() {
     const [isBrandingDialogOpen, setIsBrandingDialogOpen] = useState(false);
     const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
     const [editingBranding, setEditingBranding] = useState<{ orgId: string; branding: Branding | null } | null>(null);
-    const [formData, setFormData] = useState({ id: "", name: "", workflow_id: "" });
+    const emptyOrgForm = () => ({
+        id: "",
+        name: "",
+        workflow_id: "",
+        organizationContent: "",
+        iati_org_id: "",
+        org_type_code: "",
+        strategy_summary: "",
+        env_type: "",
+        governance_type: "",
+        authority_limits: "",
+        flow_type: "",
+        sector_vocabulary: "",
+        kg_version: "",
+        org_root_id: "",
+        provisioning_state: "",
+    });
+    const [formData, setFormData] = useState(emptyOrgForm());
     const [workflows, setWorkflows] = useState<{ id: string; name: string }[]>([]);
     const [brandingFormData, setBrandingFormData] = useState<Branding>({
         name: "",
@@ -122,16 +140,23 @@ export function OrganizationManagement() {
 
         try {
             setSubmitting(true);
+            const body: Record<string, string | undefined> = {
+                id: formData.id,
+                name: formData.name,
+                workflow_id: formData.workflow_id || undefined,
+            };
+            const orgMdKeys = ["iati_org_id", "org_type_code", "strategy_summary", "env_type", "governance_type", "authority_limits", "flow_type", "sector_vocabulary", "kg_version", "org_root_id", "provisioning_state"];
+            orgMdKeys.forEach((k) => { if (formData[k as keyof typeof formData]) body[k] = formData[k as keyof typeof formData]; });
             const resp = await fetch("/api/organizations", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(formData),
+                body: JSON.stringify(body),
             });
 
             if (resp.ok) {
                 toast.success("Organization created successfully");
                 setIsCreateDialogOpen(false);
-                setFormData({ id: "", name: "", workflow_id: "" });
+                setFormData(emptyOrgForm());
                 await loadData();
                 // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
@@ -156,10 +181,11 @@ export function OrganizationManagement() {
 
         try {
             setSubmitting(true);
-            const body: { name: string; workflow_id: string } = {
+            const body: { name: string; workflow_id?: string; organization_content?: string } = {
                 name: formData.name,
-                workflow_id: formData.workflow_id || "default",
+                workflow_id: formData.workflow_id || undefined,
             };
+            body.organization_content = formData.organizationContent;
             const resp = await fetch(`/api/organizations/${editingOrg.id}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
@@ -170,7 +196,7 @@ export function OrganizationManagement() {
                 toast.success("Organization updated successfully");
                 setIsEditDialogOpen(false);
                 setEditingOrg(null);
-                setFormData({ id: "", name: "", workflow_id: "" });
+                setFormData(emptyOrgForm());
                 await loadData();
                 // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
@@ -213,14 +239,20 @@ export function OrganizationManagement() {
         }
     };
 
-    const handleOpenEdit = (org: Organization) => {
+    const handleOpenEdit = async (org: Organization) => {
         setEditingOrg(org);
-        setFormData({
-            id: org.id,
-            name: org.name,
-            workflow_id: org.workflow_id ?? "",
-        });
+        setFormData({ ...emptyOrgForm(), id: org.id, name: org.name, workflow_id: org.workflow_id ?? "" });
         setIsEditDialogOpen(true);
+        try {
+            const resp = await fetch(`/api/organizations/${org.id}/content`);
+            if (resp.ok) {
+                const data = await resp.json();
+                const content = data.content ?? "";
+                setFormData((prev) => ({ ...prev, organizationContent: content }));
+            }
+        } catch {
+            // Leave organizationContent empty if fetch fails
+        }
     };
 
     const handleOpenBranding = async (orgId: string) => {
@@ -386,6 +418,73 @@ export function OrganizationManagement() {
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             />
                         </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="create-workflow">Default workflow</Label>
+                            <Select
+                                value={formData.workflow_id || "default"}
+                                onValueChange={(v) => setFormData({ ...formData, workflow_id: v === "default" ? "" : v })}
+                            >
+                                <SelectTrigger id="create-workflow">
+                                    <SelectValue placeholder="Default (system)" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {workflows.map((wf) => (
+                                        <SelectItem key={wf.id} value={wf.id}>
+                                            {wf.id === "default" ? "Default (system)" : (wf.name ?? wf.id)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="border-t pt-4 space-y-3">
+                            <p className="text-sm font-medium text-muted-foreground">Organization details (optional — saved to organization.md)</p>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-iati">IATI Organisation ID</Label>
+                                    <Input id="create-iati" value={formData.iati_org_id} onChange={(e) => setFormData({ ...formData, iati_org_id: e.target.value })} placeholder="e.g. acme-corp" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-org-type">Organisation type code</Label>
+                                    <Input id="create-org-type" value={formData.org_type_code} onChange={(e) => setFormData({ ...formData, org_type_code: e.target.value })} placeholder="e.g. 40" />
+                                </div>
+                                <div className="col-span-2 space-y-1">
+                                    <Label htmlFor="create-strategy">Organizational strategy</Label>
+                                    <Input id="create-strategy" value={formData.strategy_summary} onChange={(e) => setFormData({ ...formData, strategy_summary: e.target.value })} placeholder="Brief strategy summary" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-env">Environment type</Label>
+                                    <Input id="create-env" value={formData.env_type} onChange={(e) => setFormData({ ...formData, env_type: e.target.value })} placeholder="e.g. external" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-gov">Governance type</Label>
+                                    <Input id="create-gov" value={formData.governance_type} onChange={(e) => setFormData({ ...formData, governance_type: e.target.value })} placeholder="e.g. hybrid" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-authority">Decision authority limits</Label>
+                                    <Input id="create-authority" value={formData.authority_limits} onChange={(e) => setFormData({ ...formData, authority_limits: e.target.value })} placeholder="e.g. standard" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-flow">Primary aid/value type</Label>
+                                    <Input id="create-flow" value={formData.flow_type} onChange={(e) => setFormData({ ...formData, flow_type: e.target.value })} placeholder="e.g. 110" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-sector">Sector vocabulary</Label>
+                                    <Input id="create-sector" value={formData.sector_vocabulary} onChange={(e) => setFormData({ ...formData, sector_vocabulary: e.target.value })} placeholder="e.g. DAC" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-kg">Base world version</Label>
+                                    <Input id="create-kg" value={formData.kg_version} onChange={(e) => setFormData({ ...formData, kg_version: e.target.value })} placeholder="e.g. v1" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-root">Organization root UUID</Label>
+                                    <Input id="create-root" value={formData.org_root_id} onChange={(e) => setFormData({ ...formData, org_root_id: e.target.value })} placeholder="Optional" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="create-provisioning">Provisioning status</Label>
+                                    <Input id="create-provisioning" value={formData.provisioning_state} onChange={(e) => setFormData({ ...formData, provisioning_state: e.target.value })} placeholder="e.g. created" />
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -439,6 +538,19 @@ export function OrganizationManagement() {
                             </Select>
                             <p className="text-xs text-muted-foreground">
                                 New chat threads and projects use this workflow for this organization.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="edit-org-content">Organization document (organization.md)</Label>
+                            <Textarea
+                                id="edit-org-content"
+                                className="min-h-[200px] font-mono text-sm"
+                                placeholder="Markdown content for this organization (IATI, governance, provisioning, etc.). Leave empty to keep existing or leave unset."
+                                value={formData.organizationContent}
+                                onChange={(e) => setFormData({ ...formData, organizationContent: e.target.value })}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Edit the full organization.md content. Saved when you click Save.
                             </p>
                         </div>
                     </div>
