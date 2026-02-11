@@ -43,6 +43,21 @@ export const authOptions: NextAuthOptions = {
     }),
     // Use REFLEXION_JWT_SECRET as the primary secret for NextAuth
     secret: authSecret,
+    logger: {
+        error(code: string, metadata?: unknown) {
+            if (code === "JWT_SESSION_ERROR" || (metadata && typeof metadata === "object" && "message" in metadata && String((metadata as { message?: string }).message).includes("decryption"))) {
+                console.warn("[AUTH] Session cookie invalid (secret changed or expired). User should sign in again.");
+                return;
+            }
+            console.error("[next-auth][error]", code, metadata);
+        },
+        warn(code: string) {
+            console.warn("[next-auth][warn]", code);
+        },
+        debug(code: string, metadata?: unknown) {
+            if (authDebug) console.debug("[next-auth][debug]", code, metadata);
+        },
+    },
     providers: [
         GoogleProvider({
             clientId: process.env.AUTH_GOOGLE_ID!,
@@ -175,11 +190,13 @@ export const authOptions: NextAuthOptions = {
 
 /**
  * Get session without throwing on JWT decryption failure.
- * When NEXTAUTH_SECRET (or auth secret) changes after a user has signed in, NextAuth throws
- * JWT_SESSION_ERROR "decryption operation failed". This wrapper returns null in that case
- * so API routes can return 401 instead of 500. User should sign in again.
- * In deployment (e.g. Railway): set NEXTAUTH_SECRET and REFLEXION_JWT_SECRET to the same
- * value and do not change it; if you do, existing session cookies become invalid.
+ * When NEXTAUTH_SECRET (or auth secret) changes after a user has signed in (e.g. redeploy or
+ * long-running container restarts with a different env), NextAuth throws JWT_SESSION_ERROR
+ * "decryption operation failed". This wrapper returns null so API routes return 401 and the
+ * user can sign in again. We also use a custom logger above to avoid noisy stack traces.
+ *
+ * Deployment: set REFLEXION_JWT_SECRET (and NEXTAUTH_SECRET if used) to the same value
+ * in the frontend and backend, and keep it stable across deploys so existing cookies stay valid.
  */
 export async function getSessionSafe(): Promise<Session | null> {
     try {
@@ -187,7 +204,6 @@ export async function getSessionSafe(): Promise<Session | null> {
     } catch (e) {
         const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "";
         if (msg.includes("decryption") || msg.includes("JWT_SESSION_ERROR") || msg.includes("JWEDecryptionFailed")) {
-            console.warn("[AUTH] Session cookie invalid (wrong or changed NEXTAUTH_SECRET). User should sign in again.");
             return null;
         }
         throw e;
