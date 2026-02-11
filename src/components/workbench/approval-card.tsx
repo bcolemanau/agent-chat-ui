@@ -614,6 +614,82 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       }
     }
 
+    // Admin proposals: propose_organization, organization_from_upload, propose_user_add, propose_user_edit, propose_user_remove
+    const adminTypes = ["propose_organization", "organization_from_upload", "propose_user_add", "propose_user_edit", "propose_user_remove"] as const;
+    if (adminTypes.includes(item.type as (typeof adminTypes)[number])) {
+      if (decisionType === "reject") {
+        setStatus("rejected");
+        onDecisionProcessed?.(item, "rejected");
+        await persistDecision(item, "rejected", item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined);
+        toast.info("Proposal rejected");
+        setIsLoading(false);
+        return;
+      }
+      if (decisionType === "approve") {
+        const args = item.data?.args ?? {};
+        const proposalType =
+          item.type === "propose_organization"
+            ? "create_organization"
+            : item.type === "organization_from_upload"
+              ? "organization_from_upload"
+              : item.type === "propose_user_add"
+                ? "add_user"
+                : item.type === "propose_user_edit"
+                  ? "update_user_roles"
+                  : "remove_user";
+        const payload: Record<string, unknown> =
+          proposalType === "create_organization" || proposalType === "organization_from_upload"
+            ? {
+                org_id: args.org_id ?? args.id,
+                name: args.name,
+                description: args.description,
+                organization_content: args.organization_content,
+                provisioning_state: args.provisioning_state,
+              }
+            : proposalType === "add_user"
+              ? { org_id: args.org_id, email: args.email, roles: args.roles ?? [] }
+              : proposalType === "update_user_roles"
+                ? { org_id: args.org_id, user_email: args.user_email, roles: args.roles ?? [] }
+                : { org_id: args.org_id, user_email: args.user_email };
+        const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+        try {
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+          if (orgContext) headers["X-Organization-Context"] = orgContext;
+          const res = await fetch("/api/admin/apply", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ proposal_type: proposalType, payload }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error((err as any).detail || "Failed to apply admin proposal");
+          }
+          setStatus("approved");
+          onDecisionProcessed?.(item, "approved");
+          await persistDecision(item, "approved", threadId);
+          toast.success("Applied", {
+            description:
+              proposalType === "create_organization" || proposalType === "organization_from_upload"
+                ? `Organization ${args.name ?? args.org_id} created.`
+                : proposalType === "add_user"
+                  ? `User added to ${args.org_id}.`
+                  : proposalType === "update_user_roles"
+                    ? `User roles updated in ${args.org_id}.`
+                    : `User removed from ${args.org_id}.`,
+          });
+          (stream as any).triggerWorkbenchRefresh?.();
+        } catch (error: any) {
+          console.error("[ApprovalCard] Error applying admin proposal:", error);
+          setStatus("pending");
+          toast.error("Error", { description: error.message || "Failed to apply admin proposal" });
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+    }
+
     // Preview-only: no interrupt path. All proposals are applied via API branches above.
     setStatus("pending");
     toast.info("Apply not available", {
@@ -640,6 +716,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       case "artifact_edit":
         return "bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200";
       case "propose_organization":
+      case "organization_from_upload":
       case "propose_user_add":
       case "propose_user_edit":
       case "propose_user_remove":

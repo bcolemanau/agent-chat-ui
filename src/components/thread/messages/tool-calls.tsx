@@ -29,6 +29,8 @@ function getProposalTitle(toolName: string, proposal: Record<string, any>): stri
       return `Link Artifact: ${args.filename || preview.filename || args.document_id || "Unknown"}`;
     case "propose_organization":
       return `Create organization: ${args.name || preview.name || args.org_id || "Unknown"}`;
+    case "organization_from_upload":
+      return `Create organization from document: ${args.name || preview.name || args.org_id || "Unknown"}`;
     case "propose_user_add":
       return `Add user: ${args.email || preview.email || "Unknown"} to ${args.org_id || preview.org_id || "org"}`;
     case "propose_user_edit":

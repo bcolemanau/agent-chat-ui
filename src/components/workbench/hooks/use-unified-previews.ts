@@ -132,6 +132,8 @@ function getPreviewTitle(toolName: string, request: any): string {
       return `Link Artifact: ${request.args?.filename || request.preview_data?.filename || request.args?.document_id || "Unknown"}`;
     case "propose_organization":
       return `Create organization: ${request.args?.name || request.preview_data?.name || request.args?.org_id || "Unknown"}`;
+    case "organization_from_upload":
+      return `Create organization from document: ${request.args?.name || request.preview_data?.name || request.args?.org_id || "Unknown"}`;
     case "propose_user_add":
       return `Add user: ${request.args?.email || request.preview_data?.email || "Unknown"} to ${request.args?.org_id || request.preview_data?.org_id || "org"}`;
     case "propose_user_edit":
