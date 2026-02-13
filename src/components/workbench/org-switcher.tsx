@@ -91,6 +91,7 @@ export function OrgSwitcher() {
         return () => window.removeEventListener('organizationsUpdated', handleCustomEvent);
     }, [fetchOrganizations]);
 
+    // Selecting an org = work in that existing cloned branch (no clone; branch already exists).
     const handleValueChange = (orgId: string) => {
         setSelectedOrgId(orgId);
         if (orgId && orgId !== HOME_VALUE) {
@@ -98,6 +99,8 @@ export function OrgSwitcher() {
         } else {
             localStorage.removeItem('reflexion_org_context');
         }
+        // So Stream provider clears threadId on next load (thread from previous org is invalid)
+        sessionStorage.setItem('reflexion_clear_thread_for_org_switch', '1');
         window.dispatchEvent(new CustomEvent('orgContextChanged'));
         window.location.reload();
     };

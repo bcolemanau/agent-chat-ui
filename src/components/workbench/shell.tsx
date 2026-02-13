@@ -44,7 +44,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 : "supervisor");
 
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
-    const [threadId] = useQueryState("threadId");
+    const [threadId, setThreadId] = useQueryState("threadId");
 
     // Preserve threadId when navigating so autoroute doesn't lose project context
     const workbenchHref = (path: string) =>
@@ -110,6 +110,13 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 : [],
         [workflowStrip?.nodes, isAdmin]
     );
+
+    // When thread returns 404 (deleted, backend restarted), clear URL so user can start fresh
+    useEffect(() => {
+        const onNotFound = () => setThreadId(null);
+        window.addEventListener("threadNotFound", onNotFound);
+        return () => window.removeEventListener("threadNotFound", onNotFound);
+    }, [setThreadId]);
 
     // Auth guard: redirect unauthenticated users to login
     useEffect(() => {

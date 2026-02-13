@@ -9,10 +9,12 @@ import { useStreamContext } from "@/providers/Stream";
 
 export interface UnifiedPreviewItem {
   id: string;
-  type: string; // tool_name (e.g., "classify_intent", "generate_project_configuration_summary")
+  type: string; // tool_name (e.g., "propose_project", "generate_project_configuration_summary")
   title: string;
   summary: string;
   status: "pending" | "processing" | "approved" | "rejected";
+  /** Phase from API when present; otherwise inferred from config (schema-driven) */
+  phase?: "Organization" | "Project";
   data: {
     name: string;
     args: Record<string, unknown>;
@@ -58,8 +60,8 @@ export function useUnifiedPreviews(): UnifiedPreviewItem[] {
           const diff = preview_data.diff ?? parsed.diff;
 
           // Filter out already-applied proposals
-          // classify_intent: if active_agent is "project_configurator" and current_trigger_id matches, it's already applied
-          if (toolName === "classify_intent") {
+          // propose_project/classify_intent: if active_agent is "project_configurator" and current_trigger_id matches, it's already applied
+          if (toolName === "propose_project" || toolName === "classify_intent") {
             const proposalTriggerId = args.trigger_id;
             if (
               activeAgent === "project_configurator" &&
@@ -104,6 +106,8 @@ export function useUnifiedPreviews(): UnifiedPreviewItem[] {
 
 function getPreviewTitle(toolName: string, request: any): string {
   switch (toolName) {
+    case "propose_project":
+      return `Project Proposal: ${request.args?.project_name || request.args?.trigger_id || "New Project"}`;
     case "classify_intent":
       return `Project Classification: ${request.args?.trigger_id || "Unknown Trigger"}`;
     case "generate_project_configuration_summary":

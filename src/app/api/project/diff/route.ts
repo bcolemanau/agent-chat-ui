@@ -13,6 +13,8 @@ export async function GET(req: Request) {
         const threadId = searchParams.get("thread_id");
         const version1 = searchParams.get("version1");
         const version2 = searchParams.get("version2");
+        const version1Source = searchParams.get("version1_source");
+        const version2Source = searchParams.get("version2_source");
 
         if (!threadId || !version1 || !version2) {
             return NextResponse.json(
@@ -21,11 +23,18 @@ export async function GET(req: Request) {
             );
         }
 
-        // Build the backend URL
+        const params = new URLSearchParams({
+            thread_id: threadId,
+            version1,
+            version2,
+        });
+        if (version1Source) params.set("version1_source", version1Source);
+        if (version2Source) params.set("version2_source", version2Source);
+
         let backendUrl = process.env.LANGGRAPH_API_URL || "https://reflexion-staging.up.railway.app";
         if (backendUrl.endsWith("/")) backendUrl = backendUrl.slice(0, -1);
 
-        const targetUrl = `${backendUrl}/project/diff?thread_id=${threadId}&version1=${version1}&version2=${version2}`;
+        const targetUrl = `${backendUrl}/project/diff?${params.toString()}`;
 
         // Extract organization context from headers
         const orgContext = req.headers.get("X-Organization-Context");

@@ -91,6 +91,8 @@ type StreamContextType = UseStream<StateType, {
   orphanProposals: Array<{ id: string; raw: Record<string, unknown> }>;
   setOrphanProposalsFromUpload: (response: { proposals?: unknown[]; proposals_injected?: boolean }) => void;
   removeOrphanProposal: (id: string) => void;
+  /** Create a new cloned branch + thread (clone only on create). Use for "New Project" or "Create Organization"—not when selecting an existing org/project. Optional orgId = create in that org and set as current. */
+  createNewThreadWithContext?: (orgId?: string) => Promise<string | null>;
 };
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
@@ -135,6 +137,7 @@ const StreamSession = ({
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
   const prevThreadIdRef = useRef<string | null>(null);
+  const reconnectProjectToNewThreadRef = useRef<() => void | Promise<void>>(() => {});
 
   // Load Org Context for Headers
   const [orgContext, setOrgContext] = useState<string | null>(null);
@@ -143,6 +146,27 @@ const StreamSession = ({
       setOrgContext(localStorage.getItem("reflexion_org_context"));
     }
   }, []);
+
+  // When user switches organization, clear threadId so we don't keep using a project/thread from the
+  // previous org. (Org switcher reloads after change; we clear threadId on next load via session flag.)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (sessionStorage.getItem("reflexion_clear_thread_for_org_switch") === "1") {
+      sessionStorage.removeItem("reflexion_clear_thread_for_org_switch");
+      setThreadId(null);
+    }
+  }, [setThreadId]);
+
+  // Sync org context when it changes without reload (e.g. from shell or another component)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleOrgContextChanged = () => {
+      setOrgContext(localStorage.getItem("reflexion_org_context"));
+      setThreadId(null);
+    };
+    window.addEventListener("orgContextChanged", handleOrgContextChanged);
+    return () => window.removeEventListener("orgContextChanged", handleOrgContextChanged);
+  }, [setThreadId]);
 
   const rawStream = useTypedStream({
     apiUrl,
@@ -162,6 +186,15 @@ const StreamSession = ({
     },
     onError: (error) => {
       console.error("[Stream] SDK Error:", error);
+      const msg = String((error as Error)?.message ?? "");
+      if (msg.includes("404") || msg.includes("Not Found")) {
+        toast.error("Conversation state for this project isn’t available (e.g. after a server restart). You can still browse the map and decisions.", {
+          duration: 8000,
+          action: threadId && apiUrl ? { label: "Reconnect to this project", onClick: () => reconnectProjectToNewThreadRef.current?.() } : undefined,
+        });
+        setThreadId(null);
+        window.dispatchEvent(new CustomEvent("threadNotFound", { detail: { threadId } }));
+      }
     },
     onThreadId: (id) => {
       if (!id) return;
@@ -235,6 +268,16 @@ const StreamSession = ({
         if (is409(e)) {
           console.warn("[Stream] Thread busy; workbench view will update when the run finishes.");
           toast.info("Thread is busy. View will update when the run finishes.", { duration: 4000 });
+          return;
+        }
+        const is404 = (x: unknown) =>
+          (x as Error)?.message?.includes?.("404") || (x as { status?: number })?.status === 404;
+        if (is404(e)) {
+          toast.error("Conversation state for this project isn’t available (e.g. after a server restart). You can still browse the map and decisions.", {
+            duration: 8000,
+            action: threadId && apiUrl ? { label: "Reconnect to this project", onClick: () => reconnectProjectToNewThreadRef.current?.() } : undefined,
+          });
+          window.dispatchEvent(new CustomEvent("threadNotFound", { detail: { threadId } }));
           return;
         }
         console.error("[Stream] Failed to update workbench view:", e);
@@ -347,8 +390,8 @@ const StreamSession = ({
   // Handles 409 (thread busy) and connection resets with retries; 409 is expected while a run is in progress.
   const refetchThreadState = useCallback(async (attempt = 0) => {
     if (!threadId || !apiUrl) return;
-    const maxRetries = 2;
-    const retryDelayMs = 2000;
+    const maxRetries = 1;
+    const retryDelayMs = 3000;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (apiKey) headers["X-Api-Key"] = apiKey;
     if (orgContext) headers["X-Organization-Context"] = orgContext;
@@ -357,12 +400,22 @@ const StreamSession = ({
     try {
       const res = await fetch(url, { headers });
       if (res.status === 409 && attempt < maxRetries) {
-        if (attempt > 0) console.debug("[Stream] refetchThreadState: thread busy (409), retrying…");
         await new Promise((r) => setTimeout(r, retryDelayMs));
         return refetchThreadState(attempt + 1);
       }
       if (!res.ok) {
-        if (res.status === 409) console.warn("[Stream] refetchThreadState: thread still busy after retries.");
+        if (res.status === 409) {
+          // Thread busy is expected while a run is in progress; workbench will update when run finishes
+          console.debug("[Stream] Thread busy; workbench view will update when the run finishes.");
+        }
+        if (res.status === 404) {
+          // Don't clear threadId: map and decisions still work via backend (project resolved by thread_id).
+          toast.error("Conversation state for this project isn’t available (e.g. after a server restart). You can still browse the map and decisions.", {
+            duration: 8000,
+            action: threadId && apiUrl ? { label: "Reconnect to this project", onClick: () => reconnectProjectToNewThreadRef.current?.() } : undefined,
+          });
+          window.dispatchEvent(new CustomEvent("threadNotFound", { detail: { threadId } }));
+        }
         return;
       }
       const data = (await res.json()) as { values?: Record<string, unknown> };
@@ -390,13 +443,112 @@ const StreamSession = ({
         console.warn("[Stream] refetchThreadState failed:", e);
       }
     }
-  }, [threadId, apiUrl, apiKey, orgContext]);
+  }, [threadId, apiUrl, apiKey, orgContext, setThreadId]);
+
+  // Reconnect current project to a new LangGraph thread (e.g. after server restart). Keeps project KG/decisions; only conversation is new.
+  const reconnectProjectToNewThread = useCallback(async () => {
+    if (!threadId || !apiUrl) return;
+    const base = apiUrl.replace(/\/+$/, "");
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["X-Api-Key"] = apiKey;
+    if (orgContext) headers["X-Organization-Context"] = orgContext;
+    try {
+      const listRes = await fetch(`${base}/kg/projects`, { headers });
+      let project_id: string = threadId;
+      if (listRes.ok) {
+        const list = (await listRes.json()) as Array<{ id?: string; thread_id?: string }>;
+        const byThread = list?.find((p) => p.thread_id === threadId);
+        if (byThread?.id) project_id = byThread.id;
+      }
+      const newId = crypto.randomUUID();
+      const createRes = await fetch(`${base}/threads`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ thread_id: newId }),
+      });
+      if (createRes.status !== 200 && createRes.status !== 201) {
+        const fallback = await fetch(`${base}/threads`, { method: "POST", headers });
+        if (!fallback.ok) {
+          toast.error("Could not create new thread. Try “New Project” instead.");
+          return;
+        }
+        const fallbackData = (await fallback.json()) as { thread_id?: string };
+        if (fallbackData?.thread_id) {
+          const reconnectRes = await fetch(`${base}/kg/projects/${encodeURIComponent(project_id)}/reconnect`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ thread_id: fallbackData.thread_id }),
+          });
+          if (reconnectRes.ok) {
+            setThreadId(fallbackData.thread_id);
+            toast.success("Project reconnected. You can continue in this project.");
+            window.dispatchEvent(new CustomEvent("orgContextChanged"));
+            return;
+          }
+        }
+        toast.error("Could not reconnect project. Try “New Project” instead.");
+        return;
+      }
+      const reconnectRes = await fetch(`${base}/kg/projects/${encodeURIComponent(project_id)}/reconnect`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ thread_id: newId }),
+      });
+      if (!reconnectRes.ok) {
+        const err = await reconnectRes.json().catch(() => ({})) as { detail?: string };
+        toast.error(err?.detail ?? "Failed to reconnect project. Try “New Project” instead.");
+        return;
+      }
+      setThreadId(newId);
+      toast.success("Project reconnected. You can continue in this project.");
+      window.dispatchEvent(new CustomEvent("orgContextChanged"));
+    } catch (e) {
+      console.warn("[Stream] reconnectProjectToNewThread failed:", e);
+      toast.error("Could not reconnect. Try “New Project” instead.");
+    }
+  }, [threadId, apiUrl, apiKey, orgContext, setThreadId]);
+
+  reconnectProjectToNewThreadRef.current = reconnectProjectToNewThread;
 
   // Broad refresh after a decision is applied (KG, Artifacts, Workflow may have changed).
   const [workbenchRefreshKey, setWorkbenchRefreshKey] = useState(0);
   const triggerWorkbenchRefresh = useCallback(() => {
     setWorkbenchRefreshKey((k) => k + 1);
   }, []);
+
+  // Create a new org/project branch (clone) + thread. Only for create flows (New Project, Create Organization). Selecting an existing org/project = work in that branch, no clone.
+  const createNewThreadWithContext = useCallback(async (orgId?: string): Promise<string | null> => {
+    const base = apiUrl?.replace(/\/+$/, "") ?? "";
+    if (!base) return null;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["X-Api-Key"] = apiKey;
+    const effectiveOrg = orgId ?? (typeof window !== "undefined" ? orgContext : null);
+    if (effectiveOrg) headers["X-Organization-Context"] = effectiveOrg;
+    try {
+      const res = await fetch(`${base}/kg/threads/create-with-context`, { method: "POST", headers });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { detail?: string };
+        toast.error(err?.detail ?? "Could not create new thread.");
+        return null;
+      }
+      const data = (await res.json()) as { thread_id?: string; project_id?: string };
+      const tid = data?.thread_id ?? null;
+      if (tid) {
+        setThreadId(tid);
+        triggerWorkbenchRefresh();
+        // When creating a thread for a specific org (e.g. after Create Organization), set that org as current without dispatching orgContextChanged (which would clear threadId).
+        if (orgId && typeof window !== "undefined") {
+          localStorage.setItem("reflexion_org_context", orgId);
+          setOrgContext(orgId);
+        }
+      }
+      return tid;
+    } catch (e) {
+      console.warn("[Stream] createNewThreadWithContext failed:", e);
+      toast.error("Could not create new thread.");
+      return null;
+    }
+  }, [apiUrl, apiKey, orgContext, setThreadId, triggerWorkbenchRefresh]);
 
   // Orphan proposals: from upload when proposals_injected=false; show in Decisions panel until approved/rejected.
   const [orphanProposals, setOrphanProposals] = useState<Array<{ id: string; raw: Record<string, unknown> }>>([]);
@@ -431,6 +583,7 @@ const StreamSession = ({
         if (prop === "setActiveAgentDebug") return setActiveAgentDebug;
         if (prop === "workbenchRefreshKey") return workbenchRefreshKey;
         if (prop === "triggerWorkbenchRefresh") return triggerWorkbenchRefresh;
+        if (prop === "createNewThreadWithContext") return createNewThreadWithContext;
         if (prop === "orphanProposals") return orphanProposals;
         if (prop === "setOrphanProposalsFromUpload") return setOrphanProposalsFromUpload;
         if (prop === "removeOrphanProposal") return removeOrphanProposal;
@@ -487,7 +640,7 @@ const StreamSession = ({
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- setters/updateState stable, omitting avoids re-create
-  }, [rawStream, apiKey, apiUrl, threadId, orgContext, valuesOverlay, workbenchRefreshKey, triggerWorkbenchRefresh, refetchThreadState, orphanProposals, setOrphanProposalsFromUpload, removeOrphanProposal]);
+  }, [rawStream, apiKey, apiUrl, threadId, orgContext, valuesOverlay, workbenchRefreshKey, triggerWorkbenchRefresh, createNewThreadWithContext, refetchThreadState, orphanProposals, setOrphanProposalsFromUpload, removeOrphanProposal]);
 
   useEffect(() => {
     // For relative paths (like /api), check via /api/info endpoint

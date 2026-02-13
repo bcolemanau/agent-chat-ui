@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { useQueryState } from "nuqs";
 import { useSession } from "next-auth/react";
+import { useStreamContext } from "@/providers/Stream";
 
 interface Project {
     id: string;
@@ -32,6 +33,9 @@ export function ProjectSwitcher() {
     const [projects, setProjects] = React.useState<Project[]>([]);
     const [threadId, setThreadId] = useQueryState("threadId");
     const [_loading, setLoading] = React.useState(false);
+    const [creatingProject, setCreatingProject] = React.useState(false);
+    const stream = useStreamContext();
+    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: () => Promise<string | null> })?.createNewThreadWithContext;
 
     const fetchProjects = React.useCallback(async () => {
         try {
@@ -70,10 +74,29 @@ export function ProjectSwitcher() {
     const currentLabel = currentProject ? formatProjectLabel(currentProject) : null;
     const triggerTitle = currentProject ? (currentProject.name || currentProject.id) : undefined;
 
+    const handleValueChange = React.useCallback(async (val: string) => {
+        if (val === "new") {
+            if (createNewThreadWithContext && !creatingProject) {
+                setCreatingProject(true);
+                try {
+                    await createNewThreadWithContext();
+                    window.dispatchEvent(new CustomEvent("orgContextChanged"));
+                } finally {
+                    setCreatingProject(false);
+                }
+            } else {
+                setThreadId(null);
+            }
+        } else {
+            setThreadId(val);
+        }
+    }, [createNewThreadWithContext, creatingProject, setThreadId]);
+
     return (
         <Select
             value={threadId || "new"}
-            onValueChange={(val) => setThreadId(val === "new" ? null : val)}
+            onValueChange={handleValueChange}
+            disabled={creatingProject}
         >
             <SelectTrigger
                 title={triggerTitle}

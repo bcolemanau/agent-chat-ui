@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, Search as SearchIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import { useStreamContext } from "@/providers/Stream";
 
 interface Project {
     id: string;
@@ -57,6 +58,9 @@ export function Sidebar() {
     const [threadId, setThreadId] = useQueryState("threadId");
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(false);
+    const [creatingProject, setCreatingProject] = useState(false);
+    const stream = useStreamContext();
+    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: () => Promise<string | null> })?.createNewThreadWithContext;
     const [searchQuery, setSearchQuery] = useState("");
     const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState("");
@@ -220,7 +224,20 @@ export function Sidebar() {
                             variant="ghost"
                             size="icon"
                             className="h-5 w-5 hover:bg-muted"
-                            onClick={() => setThreadId(null)}
+                            disabled={creatingProject}
+                            onClick={async () => {
+                                if (createNewThreadWithContext) {
+                                    setCreatingProject(true);
+                                    try {
+                                        await createNewThreadWithContext();
+                                        window.dispatchEvent(new CustomEvent("orgContextChanged"));
+                                    } finally {
+                                        setCreatingProject(false);
+                                    }
+                                } else {
+                                    setThreadId(null);
+                                }
+                            }}
                         >
                             <Plus className="h-3 w-3" />
                             <span className="sr-only">New Project</span>
@@ -240,6 +257,7 @@ export function Sidebar() {
                                 const isEditing = editingProjectId === project.id;
                                 return (
                                     <div key={project.id} className="group relative">
+                                        {/* Select existing project = work in that already-cloned branch (no API, no clone). */}
                                         <button
                                             onClick={() => !isEditing && setThreadId(project.id)}
                                             className={cn(
@@ -308,7 +326,20 @@ export function Sidebar() {
                         <Button
                             variant="ghost"
                             className="w-full justify-start text-muted-foreground hover:text-foreground px-3 py-2 h-auto font-normal mt-2"
-                            onClick={() => setThreadId(null)}
+                            disabled={creatingProject}
+                            onClick={async () => {
+                                if (createNewThreadWithContext) {
+                                    setCreatingProject(true);
+                                    try {
+                                        await createNewThreadWithContext();
+                                        window.dispatchEvent(new CustomEvent("orgContextChanged"));
+                                    } finally {
+                                        setCreatingProject(false);
+                                    }
+                                } else {
+                                    setThreadId(null);
+                                }
+                            }}
                         >
                             <Plus className="mr-3 h-4 w-4" />
                             New Project

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { useStreamContext } from "@/providers/Stream";
 
 interface Organization {
     id: string;
@@ -46,6 +47,8 @@ interface Branding {
 }
 
 export function OrganizationManagement() {
+    const stream = useStreamContext();
+    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: (orgId?: string) => Promise<string | null> })?.createNewThreadWithContext;
     const [organizations, setOrganizations] = useState<Organization[]>([]);
     const [branding, setBranding] = useState<Record<string, Branding>>({});
     const [loading, setLoading] = useState(true);
@@ -156,11 +159,19 @@ export function OrganizationManagement() {
             if (resp.ok) {
                 toast.success("Organization created successfully");
                 setIsCreateDialogOpen(false);
+                const newOrgId = formData.id;
                 setFormData(emptyOrgForm());
                 await loadData();
-                // Notify org switcher to refresh
                 window.dispatchEvent(new Event('organizationsUpdated'));
                 localStorage.setItem('reflexion_orgs_updated', Date.now().toString());
+                // Same as New Project: create a thread with NPDModel context so we never have a thread without context. Switches to the new org and sets the new thread in the URL.
+                if (createNewThreadWithContext) {
+                    try {
+                        await createNewThreadWithContext(newOrgId);
+                    } catch (e) {
+                        console.warn("Create thread for new org failed:", e);
+                    }
+                }
             } else {
                 const error = await resp.json();
                 toast.error(error.error || "Failed to create organization");

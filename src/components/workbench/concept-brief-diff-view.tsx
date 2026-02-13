@@ -72,6 +72,16 @@ export function ConceptBriefDiffView({
     }
     setDraftError(null);
 
+    async function getErrorMessage(res: Response): Promise<string> {
+      try {
+        const body = await res.json();
+        const detail = typeof body?.detail === "string" ? body.detail : "";
+        return detail || `Failed to load draft (${res.status})`;
+      } catch {
+        return res.ok ? "Failed to load draft" : `Failed to load draft (${res.status})`;
+      }
+    }
+
     if (artifactId) {
       let cancelled = false;
       setDraftLoading(true);
@@ -83,7 +93,7 @@ export function ConceptBriefDiffView({
           let url = `/api/artifact/content?node_id=${encodeURIComponent(artifactId)}`;
           if (threadId) url += `&thread_id=${encodeURIComponent(threadId)}`;
           const res = await fetch(url, { headers });
-          if (!res.ok) throw new Error("Failed to load draft");
+          if (!res.ok) throw new Error(await getErrorMessage(res));
           const data = await res.json();
           if (!cancelled) {
             const next = { content: data.content ?? "", content_type: data.content_type ?? "text" };
@@ -91,7 +101,10 @@ export function ConceptBriefDiffView({
             setEditorContent(next.content);
           }
         } catch (e: unknown) {
-          if (!cancelled) setDraftError(e instanceof Error ? e.message : "Failed to load draft");
+          if (!cancelled) {
+            setDraftError(e instanceof Error ? e.message : "Failed to load draft");
+            if (summaryFallback) setDraftContent({ content: summaryFallback, content_type: "text" });
+          }
         } finally {
           if (!cancelled) setDraftLoading(false);
         }
@@ -111,7 +124,7 @@ export function ConceptBriefDiffView({
           if (threadId) params.set("thread_id", threadId);
           const url = `/api/artifact/draft-content?${params.toString()}`;
           const res = await fetch(url, { headers });
-          if (!res.ok) throw new Error("Failed to load draft");
+          if (!res.ok) throw new Error(await getErrorMessage(res));
           const data = await res.json();
           if (!cancelled) {
             const next = { content: data.content ?? "", content_type: data.content_type ?? "markdown" };
@@ -119,7 +132,10 @@ export function ConceptBriefDiffView({
             setEditorContent(next.content);
           }
         } catch (e: unknown) {
-          if (!cancelled) setDraftError(e instanceof Error ? e.message : "Failed to load draft");
+          if (!cancelled) {
+            setDraftError(e instanceof Error ? e.message : "Failed to load draft");
+            if (summaryFallback) setDraftContent({ content: summaryFallback, content_type: "text" });
+          }
         } finally {
           if (!cancelled) setDraftLoading(false);
         }
@@ -311,9 +327,14 @@ export function ConceptBriefDiffView({
               </div>
             )}
             {draftError && (
-              <p className="text-sm text-destructive py-4">{draftError}</p>
+              <div className="space-y-1 py-4">
+                <p className="text-sm text-destructive">{draftError}</p>
+                {draftContent && (
+                  <p className="text-xs text-muted-foreground">Showing summary below; you can still approve this option from the list.</p>
+                )}
+              </div>
             )}
-            {!draftLoading && !draftError && draftContent && draftViewState.cacheKey && (draftContent.content_type === "markdown" || draftContent.content_type === "text") && (
+            {!draftLoading && draftContent && draftViewState.cacheKey && !draftError && (draftContent.content_type === "markdown" || draftContent.content_type === "text") && (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">Editable draft — changes are saved automatically.</p>
                 <textarea
@@ -330,7 +351,7 @@ export function ConceptBriefDiffView({
                 )}
               </div>
             )}
-            {!draftLoading && !draftError && draftContent && !(draftViewState.cacheKey && (draftContent.content_type === "markdown" || draftContent.content_type === "text")) && (
+            {!draftLoading && draftContent && (draftError || !(draftViewState.cacheKey && (draftContent.content_type === "markdown" || draftContent.content_type === "text"))) && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 {(draftContent.content_type === "markdown" || draftContent.content_type === "text") ? (
                   <MarkdownText>{draftContent.content}</MarkdownText>

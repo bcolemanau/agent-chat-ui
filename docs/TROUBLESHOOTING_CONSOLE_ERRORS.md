@@ -72,11 +72,29 @@
 
 ---
 
+## 5. `/api/threads/{id}/state` and `/api/threads/{id}/history` 404 (Not Found)
+
+**Symptom:** Toast: *"Conversation state for this project isn't available (e.g. after a server restart)..."*, or console: `Failed to load resource: 404`, `[Stream] Failed to update workbench view: HTTP 404`, or `SDK Error: HTTP 404`.
+
+**Cause:** The LangGraph backend has no conversation state for this thread (e.g. `?threadId=...`). Common reasons:
+- LangGraph server was restarted (in-memory checkpointer loses threads)
+- Thread was deleted or never created
+- Stale URL from a previous session
+
+**Behaviour:** When state refetch gets 404, the app no longer clears the thread from the URL, so you can still **browse the map and decisions** (they load from the Reflexion backend by project/thread_id). Only the chat/conversation state is missing.
+
+**Fix:**
+1. To **keep browsing:** Stay on the page — map and decisions should still load.
+2. To **start a new conversation:** Click **"New Project"** in the project switcher, or go to `/workbench/map` without `?threadId=`. The first message will create a new thread.
+
+---
+
 ## Summary
 
 | Error | Likely cause | Action |
 |-------|----------------|--------|
 | OTEL 403 | No/invalid LangSmith API key | Unset key or set `remove-me` to disable; or set a valid key to enable tracing. |
+| threads/{id}/state or /history 404 | Conversation state missing (restart, deleted, stale URL) | Map/decisions still work; use "New Project" to start a new conversation if needed |
 | link/apply 404 | Backend does not expose `/artifact/link/apply` | Deploy Reflexion proxy_server routes on the same backend or add a separate Reflexion API URL. |
 | classification/apply 422 | Missing `trigger_id` (or other required field) | Ensure decision has `trigger_id` in args or preview_data; UI now falls back to preview_data. |
 | project/diff 500/502 | Backend exception, or ECONNRESET/timeout (connection closed or too slow) | Proxy now returns 502 with clear message; increase backend timeout or retry; check backend logs and storage. |
