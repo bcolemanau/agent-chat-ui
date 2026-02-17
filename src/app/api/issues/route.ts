@@ -11,19 +11,18 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const token = process.env.GITHUB_TOKEN;
-        // Try GITHUB_REPO first, then fall back to GITHUB_REPO_NAME (used by backend)
-        const repoUrl = process.env.GITHUB_REPO || process.env.GITHUB_REPO_NAME; // Expected format: owner/repo
+        const token = process.env.PRODUCT_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+        const repoUrl = process.env.PRODUCT_GITHUB_REPO_NAME || process.env.GITHUB_REPO || process.env.GITHUB_REPO_NAME; // Expected format: owner/repo
 
         if (!token || !repoUrl) {
-            console.error("Missing GITHUB_TOKEN or GITHUB_REPO env vars", {
+            console.error("Missing PRODUCT_GITHUB_TOKEN/GITHUB_TOKEN or PRODUCT_GITHUB_REPO_NAME/GITHUB_REPO env vars", {
                 hasToken: !!token,
                 hasRepo: !!repoUrl,
                 envKeys: Object.keys(process.env).filter(k => k.includes('GITHUB'))
             });
             return NextResponse.json({ 
                 error: "Server configuration error: Missing GitHub credentials",
-                details: "GITHUB_TOKEN and GITHUB_REPO (or GITHUB_REPO_NAME) must be configured"
+                details: "PRODUCT_GITHUB_TOKEN (or GITHUB_TOKEN) and PRODUCT_GITHUB_REPO_NAME (or GITHUB_REPO/GITHUB_REPO_NAME) must be configured"
             }, { status: 500 });
         }
 
