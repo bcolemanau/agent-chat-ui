@@ -319,6 +319,105 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       }
     }
 
+    // artifact_apply: single decision for link + enrichment (apply both in one call)
+    if (item.type === "artifact_apply") {
+      const args = item.data?.args ?? {};
+      const artifactId = args.artifact_id ?? item.data?.preview_data?.artifact_id;
+      const artifactType = args.artifact_type ?? item.data?.preview_data?.artifact_type ?? args.primary_artifact_type;
+      const cycleId = args.cycle_id ?? item.data?.preview_data?.cycle_id;
+      const enrichmentData = args.enrichment_data ?? item.data?.preview_data?.enrichment_data;
+      const artifactTypes = enrichmentData?.artifact_types ?? args.artifact_types ?? (artifactType ? [artifactType] : []);
+
+      if (decisionType === "reject") {
+        if (cycleId && artifactId) {
+          try {
+            const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+            if (orgContext) headers["X-Organization-Context"] = orgContext;
+            const res = await fetch(
+              `/api/artifacts/${encodeURIComponent(artifactId)}/enrichment/${encodeURIComponent(cycleId)}/reject`,
+              { method: "POST", headers, body: JSON.stringify({ thread_id: threadId }) }
+            );
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({ detail: res.statusText }));
+              throw new Error((err as any).detail || "Failed to reject");
+            }
+          } catch (error: any) {
+            console.error("[ApprovalCard] Error rejecting artifact_apply:", error);
+            setStatus("pending");
+            toast.error("Error", { description: error.message || "Failed to reject" });
+            setIsLoading(false);
+            return;
+          }
+        }
+        setStatus("rejected");
+        onDecisionProcessed?.(item, "rejected");
+        await persistAndMaybeSwitchThread(
+          item,
+          "rejected",
+          item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined
+        );
+        toast.info("Link and enrichment not applied");
+        setIsLoading(false);
+        return;
+      }
+      if (decisionType === "approve") {
+        if (!artifactId || !artifactType) {
+          toast.error("Error", { description: "Missing artifact_id or artifact_type for this decision" });
+          setIsLoading(false);
+          return;
+        }
+        try {
+          const threadId = item.threadId ?? (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
+          if (orgContext) headers["X-Organization-Context"] = orgContext;
+          const res = await fetch("/api/artifact/link-and-enrich/apply", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              decision_id: item.id,
+              artifact_id: artifactId,
+              artifact_type: artifactType,
+              cycle_id: cycleId ?? undefined,
+              artifact_types: Array.isArray(artifactTypes) && artifactTypes.length ? artifactTypes : undefined,
+              project_id: threadId,
+              thread_id: threadId,
+              trigger_id: args.trigger_id ?? item.data?.preview_data?.trigger_id,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            const detail = typeof (err as any).detail === "string" ? (err as any).detail : (err as any).detail?.message;
+            const message =
+              res.status === 404
+                ? "Link and enrichment apply is not available. The backend may not support this action—check deployment."
+                : detail || "Failed to apply link and enrichment";
+            throw new Error(message);
+          }
+          const data = await res.json();
+          setStatus("approved");
+          const kg_version_sha = (data as any).kg_version_sha;
+          onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
+          await persistAndMaybeSwitchThread(item, "approved", threadId, { ...(kg_version_sha != null ? { kg_version_sha } : {}) });
+          toast.success("Artifact linked and enriched", {
+            description: data.enrichment_applied
+              ? "Artifact linked to KG and entities added."
+              : "Artifact linked to KG.",
+          });
+          (stream as any).triggerWorkbenchRefresh?.();
+        } catch (error: any) {
+          console.error("[ApprovalCard] Error applying artifact_apply:", error);
+          setStatus("pending");
+          toast.error("Artifact link and enrichment failed", { description: error.message || "Failed to apply" });
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
+    }
+
     // link_uploaded_document is preview-only; apply via API (persist KG changes), not graph resume
     if (item.type === "link_uploaded_document") {
       if (decisionType === "reject") {
@@ -744,6 +843,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
       case "enrichment":
         return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200";
       case "link_uploaded_document":
+      case "artifact_apply":
         return "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200";
       case "artifact_edit":
         return "bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200";

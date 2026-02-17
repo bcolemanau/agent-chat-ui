@@ -60,6 +60,7 @@ function getTypeLabel(type: string): string {
     approve_enrichment: "Enrichment",
     enrichment: "Enrichment",
     link_uploaded_document: "Link Artifact",
+    artifact_apply: "Link + Enrich",
   };
   return labels[type] || type.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 }
@@ -96,6 +97,7 @@ function getArtifactDisplayName(row: DecisionRow): string | undefined {
     (args.filename as string | undefined);
   if (filename) return filename;
   if (row.type === "link_uploaded_document") return (args.document_id as string) || undefined;
+  if (row.type === "artifact_apply") return (args.artifact_id as string) || undefined;
   return undefined;
 }
 
@@ -143,6 +145,7 @@ function getDecisionDisplayTitle(row: DecisionRow): string {
   const isEnrichment =
     row.type === "enrichment" || row.type === "approve_enrichment" || row.type === "propose_enrichment";
   const isLink = row.type === "link_uploaded_document";
+  const isArtifactApply = row.type === "artifact_apply";
 
   if (isEnrichment && artifactName) {
     const cycleId = (args as Record<string, unknown> | undefined)?.cycle_id as string | undefined;
@@ -153,7 +156,8 @@ function getDecisionDisplayTitle(row: DecisionRow): string {
     return `Enrichment${cycleSuffix}: ${artifactName}`;
   }
   if (isLink && artifactName) return `Link: ${artifactName}`;
-  if (artifactName && (isEnrichment || isLink)) return artifactName;
+  if (isArtifactApply && artifactName) return `Link + Enrich: ${artifactName}`;
+  if (artifactName && (isEnrichment || isLink || isArtifactApply)) return artifactName;
   return row.title;
 }
 
@@ -189,34 +193,38 @@ export function DecisionsPanel() {
   }, [threadId, workbenchRefreshKey, refetchPending]);
 
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
-  // Logical key for link/enrich so one upload = one link + one enrich (dedupe API vs stream proposals)
-  const linkEnrichKey = (item: UnifiedPreviewItem): string | null => {
+  // Logical keys for link/enrich/artifact_apply so one upload = one combined decision (dedupe API vs stream)
+  const linkEnrichKeys = (item: UnifiedPreviewItem): string[] => {
     const args = item.data?.args;
-    if (!args) return null;
+    if (!args) return [];
     const artifactId = (args.artifact_id as string) ?? (args.document_id as string);
-    if (!artifactId) return null;
-    if (item.type === "link_uploaded_document") return `link:${artifactId}`;
+    if (!artifactId) return [];
+    if (item.type === "link_uploaded_document") return [`link:${artifactId}`];
     if (item.type === "enrichment" || item.type === "approve_enrichment") {
       const cycleId = args.cycle_id as string | undefined;
-      return `enrich:${artifactId}:${cycleId ?? ""}`;
+      return [`enrich:${artifactId}:${cycleId ?? ""}`];
     }
-    return null;
+    if (item.type === "artifact_apply") {
+      const cycleId = args.cycle_id as string | undefined;
+      return [`link:${artifactId}`, `enrich:${artifactId}:${cycleId ?? ""}`];
+    }
+    return [];
   };
   // Merge persisted pending (GET /decisions) with stream-based pending; dedupe by id and by link/enrich key
   const pending = useMemo(() => {
     const byId = new Map<string, UnifiedPreviewItem>();
-    const linkEnrichKeys = new Set<string>();
+    const linkEnrichKeySet = new Set<string>();
     pendingFromApi.forEach((p) => {
       byId.set(p.id, p);
-      const key = linkEnrichKey(p);
-      if (key) linkEnrichKeys.add(key);
+      linkEnrichKeys(p).forEach((k) => linkEnrichKeySet.add(k));
     });
     allPreviews.forEach((p) => {
       if (byId.has(p.id)) return;
-      const key = linkEnrichKey(p);
-      if (key && linkEnrichKeys.has(key)) return; // already have a pending link/enrich for this artifact (and cycle)
+      const keys = linkEnrichKeys(p);
+      if (keys.length > 0 && keys.some((k) => linkEnrichKeySet.has(k)))
+        return; // already have a pending link/enrich/artifact_apply for this artifact (and cycle)
       byId.set(p.id, p);
-      if (key) linkEnrichKeys.add(key);
+      keys.forEach((k) => linkEnrichKeySet.add(k));
     });
     return Array.from(byId.values()).filter((p) => !processedIds.has(p.id));
   }, [pendingFromApi, allPreviews, processedIds]);
