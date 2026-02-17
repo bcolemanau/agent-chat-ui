@@ -21,9 +21,9 @@ except ImportError:
     sys.exit(1)
 
 def get_github_client():
-    token = os.getenv("GITHUB_TOKEN")
+    token = os.getenv("PRODUCT_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN")
     if not token:
-        raise ValueError("GITHUB_TOKEN not found in environment variables")
+        raise ValueError("PRODUCT_GITHUB_TOKEN or GITHUB_TOKEN not found in environment variables")
     return Github(token)
 
 def create_pull_request(
