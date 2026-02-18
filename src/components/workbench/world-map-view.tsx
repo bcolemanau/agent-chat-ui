@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitCompare, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
@@ -365,6 +365,22 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
         return map;
     }, [data?.links]);
+
+    /** For a template, pick the best ART to focus: prefer one that only CONTRIBUTES_TO this template (avoids focusing "Concept Brief" when user chose "Requirements Package"). */
+    const getFocusArtIdForTemplate = useCallback(
+        (templateId: string): string | undefined => {
+            const artIds = artNodeIdsByTemplateId[templateId] ?? [];
+            if (artIds.length === 0) return undefined;
+            const otherTemplateIds = Object.keys(artNodeIdsByTemplateId).filter((t) => t !== templateId);
+            const artIdsInOther = new Set<string>();
+            for (const t of otherTemplateIds) {
+                for (const id of artNodeIdsByTemplateId[t] ?? []) artIdsInOther.add(id);
+            }
+            const exclusive = artIds.find((id) => !artIdsInOther.has(id));
+            return exclusive ?? artIds[0];
+        },
+        [artNodeIdsByTemplateId]
+    );
 
     const unifiedPreviews = useUnifiedPreviews();
     const draftArtifactNodes = useMemo(() => {
@@ -1431,6 +1447,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                 {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
                                                     <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
                                                 )}
+                                                <span className="text-[9px] text-muted-foreground">Clone: {v.source === "organization" ? "Org" : "—"}</span>
                                                 {(() => {
                                                     const parsed = parseDecisionCommitMessage(v.message_full);
                                                     const label = decisionStatusLabel(parsed.status);
@@ -1498,6 +1515,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                 {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
                                                     <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
                                                 )}
+                                                <span className="text-[9px] text-muted-foreground">Clone: {v.source === "organization" ? "Org" : "—"}</span>
                                                 {(() => {
                                                     const parsed = parseDecisionCommitMessage(v.message_full);
                                                     const label = decisionStatusLabel(parsed.status);
@@ -1568,6 +1586,12 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                         </div>
                     ) : (
                         <div className="flex-1 overflow-y-auto p-2 space-y-1 flex flex-col">
+                            {/* Data view header: Phase and Clone */}
+                            <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-2 py-1 text-[10px] font-bold text-muted-foreground uppercase border-b border-border/50">
+                                <span>Version</span>
+                                <span>Phase</span>
+                                <span>Clone</span>
+                            </div>
                             <div
                                 className={cn(
                                     "p-3 rounded-md cursor-pointer transition-colors flex flex-col gap-1",
@@ -1588,6 +1612,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
                             {kgHistory.versions.map((v: any) => {
                                 const isDecision = kgDecisions.some((d: any) => d.kg_version_sha === v.id);
+                                const phase = v.source === "organization" ? "Organization" : (v.source === "project" ? "Project" : (v.source ?? "Project"));
+                                const cloneLabel = v.source === "organization" ? "Org" : "—";
                                 return (
                                     <div
                                         key={v.id}
@@ -1622,12 +1648,13 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                 <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                            {v.source === "organization" && (
-                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Organization</span>
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                            {phase === "Organization" && (
+                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200" title="Phase">Organization</span>
                                             )}
-                                            {v.source === "project" && (
-                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
+                                            {phase === "Project" && (
+                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200" title="Phase">Project</span>
                                             )}
                                             {isDecision && (
                                                 <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
@@ -1648,6 +1675,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                     </span>
                                                 );
                                             })()}
+                                            </div>
+                                            <span className="text-[9px] text-muted-foreground shrink-0" title="Clone">{cloneLabel}</span>
                                         </div>
                                     </div>
                                 );
@@ -2025,8 +2054,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                         {agent.templates.map((tpl) => {
                                                             const present = tpl.types.filter((ty) => typesInData.has(ty));
                                                             if (present.length === 0) return null;
-                                                            const artIds = tpl.templateId ? (artNodeIdsByTemplateId[tpl.templateId] ?? []) : [];
-                                                            const firstArtId = artIds[0];
+                                                            const firstArtId = tpl.templateId ? getFocusArtIdForTemplate(tpl.templateId) : undefined;
                                                             const isFocused = firstArtId != null && focusedNodeId === firstArtId;
                                                             const risksAddressed = tpl.templateId ? (() => {
                                                                 const arts = (riskSummary?.artifact_aggregates ?? []).filter((a) => a.template_id === tpl.templateId);

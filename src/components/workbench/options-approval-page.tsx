@@ -5,14 +5,26 @@ import { useStreamContext } from "@/providers/Stream";
 import { useEffect, useState } from "react";
 import type { ConceptBriefDiffView as ConceptBriefDiffViewType } from "@/lib/diff-types";
 
-/** Tool names that use the options/similarity diff view and approve with selected_option_index */
-const _OPTIONS_APPROVAL_TOOLS = ["generate_concept_brief", "generate_ux_brief"] as const;
+/** Tool names that can use the options/similarity diff view (any artifact generate that returns options). */
+const _OPTIONS_APPROVAL_TOOLS = [
+  "generate_concept_brief",
+  "generate_ux_brief",
+  "generate_requirements_proposal",
+  "generate_architecture_proposal",
+  "generate_design_proposal",
+  "generate_manufacturing_ops_proposal",
+  "generate_software_ops_proposal",
+] as const;
 export type OptionsApprovalToolName = (typeof _OPTIONS_APPROVAL_TOOLS)[number];
 
+export function isOptionsApprovalTool(name: string): name is OptionsApprovalToolName {
+  return (_OPTIONS_APPROVAL_TOOLS as readonly string[]).includes(name);
+}
+
 export interface OptionsApprovalPageProps {
-  /** Tool name to look for in stream interrupt (e.g. generate_concept_brief, generate_ux_brief) */
-  toolName: OptionsApprovalToolName;
-  /** Message shown when user rejects (e.g. "Concept brief options rejected") */
+  /** Tool name to look for in stream interrupt (any artifact generate that can return options) */
+  toolName: OptionsApprovalToolName | string;
+  /** Message shown when user rejects (e.g. "Options rejected") */
   rejectMessage: string;
 }
 
@@ -42,8 +54,8 @@ function getPreviewFromInterrupt(int: any): Record<string, unknown> | undefined 
 }
 
 /**
- * Shared page content for option-style proposals (Concept Brief, UX Brief, etc.).
- * Finds the interrupt for the given tool, shows the options diff, and submits approve/reject.
+ * Shared page content for option-style proposals (any artifact type that returns multiple options).
+ * Finds the interrupt for the given tool, shows the options/similarity diff, and submits approve/reject.
  */
 export function OptionsApprovalPage({ toolName, rejectMessage }: OptionsApprovalPageProps) {
   const stream = useStreamContext();

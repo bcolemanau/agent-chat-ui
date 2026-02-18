@@ -323,7 +323,7 @@ export function NodeDetailPanel({
     if (t.includes("requirements")) return "requirements_package";
     if (t.includes("architecture")) return "architecture";
     if (t.includes("design")) return "design";
-    return "concept_brief";
+    return "concept_brief"; // fallback when type cannot be inferred from node
   };
 
   const handleApplyEdit = async () => {

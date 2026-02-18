@@ -84,6 +84,8 @@ type DecisionRow = {
   phase: Phase;
   item?: UnifiedPreviewItem;
   kg_version_sha?: string;
+  /** Proposal KG commit SHA (Phase 2); use for diff when pending/rejected */
+  proposed_kg_version_sha?: string;
   args?: Record<string, unknown>;
   /** Phase boundary (thread concluded); show badge */
   is_phase_change?: boolean;
@@ -286,6 +288,7 @@ export function DecisionsPanel() {
       phase: (item.phase ?? inferPhase(item.type)) as Phase,
       item,
       args: item.data?.args as Record<string, unknown> | undefined,
+      proposed_kg_version_sha: (item.data as { proposed_kg_version_sha?: string } | undefined)?.proposed_kg_version_sha,
       is_phase_change: isPhaseChangeDecisionType(item.type),
     }));
     const processedRows: DecisionRow[] = processed.map((p) => ({
@@ -296,6 +299,7 @@ export function DecisionsPanel() {
       time: p.timestamp,
       phase: (p.phase as Phase) ?? (inferPhase(p.type) as Phase),
       kg_version_sha: p.kg_version_sha,
+      proposed_kg_version_sha: (p as { proposed_kg_version_sha?: string }).proposed_kg_version_sha,
       args: p.args,
       is_phase_change: p.is_phase_change ?? isPhaseChangeDecisionType(p.type),
     }));
@@ -308,7 +312,9 @@ export function DecisionsPanel() {
     if (viewMode !== "map" || !versionParam) return;
     if (prevVersionParam.current === versionParam) return;
     prevVersionParam.current = versionParam;
-    const row = allRows.find((r) => "kg_version_sha" in r && (r as { kg_version_sha?: string }).kg_version_sha === versionParam);
+    const row = allRows.find(
+    (r) => (r.kg_version_sha ?? r.proposed_kg_version_sha) === versionParam
+  );
     if (row) setSelectedId(row.id);
   }, [viewMode, versionParam, allRows]);
 
@@ -426,7 +432,7 @@ export function DecisionsPanel() {
                           if (viewMode === "map") {
                             if (isDeselecting) setVersionParam(null);
                             else {
-                              const sha = "kg_version_sha" in row ? (row as { kg_version_sha?: string }).kg_version_sha : undefined;
+                              const sha = row.kg_version_sha ?? row.proposed_kg_version_sha;
                               setVersionParam(sha ?? null);
                             }
                           }
@@ -536,13 +542,19 @@ export function DecisionsPanel() {
                       </div>
                     </>
                   ) : selectedItem ? (
-                    <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
                       <ApprovalCard
                         item={selectedItem}
                         stream={stream}
                         onDecisionProcessed={onDecisionProcessed}
                         onViewFullProposal={() => setProposalViewActive(true)}
                       />
+                      {(selectedItem.data as { proposed_kg_version_sha?: string } | undefined)?.proposed_kg_version_sha && threadId && (
+                        <DecisionKgDiffView
+                          threadId={threadId}
+                          kgVersionSha={(selectedItem.data as { proposed_kg_version_sha: string }).proposed_kg_version_sha}
+                        />
+                      )}
                     </div>
                   ) : selectedProcessed ? (
                     <div className="flex-1 min-h-0 overflow-y-auto p-4">
@@ -571,13 +583,15 @@ export function DecisionsPanel() {
   );
 }
 
-/** Fetches and shows KG diff for a decision that produced a KG version (kg_version_sha). */
+/** Fetches and shows KG diff for a decision (kg_version_sha or proposed_kg_version_sha). */
 function DecisionKgDiffView({
   threadId,
   kgVersionSha,
+  label,
 }: {
   threadId: string | undefined;
   kgVersionSha: string;
+  label?: string;
 }) {
   const [payload, setPayload] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -629,7 +643,9 @@ function DecisionKgDiffView({
   if (!payload) return null;
   return (
     <div className="mt-4 border rounded-lg p-4 bg-muted/30">
-      <div className="text-[10px] font-bold text-muted-foreground uppercase mb-2">KG diff (this decision)</div>
+      <div className="text-[10px] font-bold text-muted-foreground uppercase mb-2">
+        {label ?? "KG diff (this decision)"}
+      </div>
       <KgDiffDiagramView payload={payload} isLoading={false} />
     </div>
   );
@@ -640,21 +656,22 @@ function ProcessedRow({
   threadId,
   displayTitle,
 }: {
-  decision: ProcessedDecision;
+  decision: ProcessedDecision & { proposed_kg_version_sha?: string };
   threadId: string | undefined;
   displayTitle?: string;
 }) {
   const router = useRouter();
   const title = displayTitle ?? decision.title;
+  const versionSha = decision.kg_version_sha ?? decision.proposed_kg_version_sha;
 
   const openCompareOnMap = useCallback(() => {
-    if (!threadId || !decision.kg_version_sha) return;
+    if (!threadId || !versionSha) return;
     const params = new URLSearchParams({
       threadId,
-      version: decision.kg_version_sha,
+      version: versionSha,
     });
     router.push(`/map?${params.toString()}`);
-  }, [threadId, decision.kg_version_sha, router]);
+  }, [threadId, versionSha, router]);
 
   return (
     <div className="rounded-lg border bg-muted/20 overflow-hidden">
@@ -692,7 +709,7 @@ function ProcessedRow({
           />
         </div>
       ) : null}
-      {decision.kg_version_sha && threadId && (
+      {versionSha && threadId && (
         <div className="px-4 pb-4 space-y-2">
           <div className="flex items-center gap-2">
             <Button
@@ -706,7 +723,11 @@ function ProcessedRow({
               Compare on map
             </Button>
           </div>
-          <DecisionKgDiffView threadId={threadId} kgVersionSha={decision.kg_version_sha} />
+          <DecisionKgDiffView
+            threadId={threadId}
+            kgVersionSha={versionSha}
+            label={decision.proposed_kg_version_sha && !decision.kg_version_sha ? "KG diff (proposed)" : undefined}
+          />
         </div>
       )}
     </div>

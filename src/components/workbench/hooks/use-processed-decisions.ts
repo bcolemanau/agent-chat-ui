@@ -24,6 +24,8 @@ export interface ProcessedDecision {
   phase?: "Organization" | "Project";
   /** KG version (commit sha) produced by this decision; enables KG diff view and history navigation */
   kg_version_sha?: string;
+  /** Proposal KG commit SHA when decision was rejected or still pending; use for diff view */
+  proposed_kg_version_sha?: string;
   /** Short outcome text shown in Decisions pane (e.g. "Artifact edit applied, draft removed.") */
   outcome_description?: string;
   /** Preview data (diff, decision_summary, impact_forecast, etc.) for decision context on processed decisions (approved or rejected) */
@@ -49,6 +51,7 @@ interface DecisionRecord {
   artifact_id?: string;
   args?: Record<string, unknown>;
   kg_version_sha?: string;
+  proposed_kg_version_sha?: string;
   is_phase_change?: boolean;
 }
 
@@ -145,6 +148,7 @@ function mapRecordToProcessed(r: DecisionRecord): ProcessedDecision {
     timestamp,
     phase,
     ...(r.kg_version_sha != null ? { kg_version_sha: r.kg_version_sha } : {}),
+    ...(r.proposed_kg_version_sha != null ? { proposed_kg_version_sha: r.proposed_kg_version_sha } : {}),
     ...(r.args?.preview_data != null ? { preview_data: r.args.preview_data as Record<string, unknown> } : {}),
     ...(r.args != null ? { args: r.args } : {}),
     ...(r.is_phase_change != null ? { is_phase_change: r.is_phase_change } : {}),

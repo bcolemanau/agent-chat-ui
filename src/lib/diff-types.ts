@@ -114,7 +114,7 @@ export interface GraphDiffData {
   links: Link[];
 }
 
-// Concept brief diff types (for generate_concept_brief approval view)
+// Artifact options diff types (shared by any template that returns multiple options / similarity diff)
 export interface Section {
   name: string;
   level: number;
@@ -131,7 +131,7 @@ export interface ConceptBriefDiffData {
   fields: Field[];
 }
 
-/** Option summary from backend for similarity diff (generate_concept_brief) */
+/** Option summary from backend for similarity/options diff (any artifact proposal with options) */
 export interface ConceptBriefOptionSummary {
   index: number;
   summary: string;
@@ -141,7 +141,7 @@ export interface ConceptBriefOptionSummary {
   artifact_id?: string;
 }
 
-/** View payload for concept brief options approval (similarity diff) */
+/** View payload for artifact options approval (similarity diff; same shape for all template types) */
 export interface ConceptBriefDiffView {
   type: 'similarity';
   options: ConceptBriefOptionSummary[];

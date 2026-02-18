@@ -134,6 +134,19 @@ export function SingleProposalApprovalPage({
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       const orgContext = localStorage.getItem("reflexion_org_context");
       if (orgContext) headers["X-Organization-Context"] = orgContext;
+      // Phase 3.3: fetch draft_content for all artifact types when cache_key present (same as approval-card).
+      let draftContent: string | undefined;
+      try {
+        const draftParams = new URLSearchParams({ cache_key: cacheKey, option_index: "-1" });
+        draftParams.set("thread_id", threadId);
+        const draftRes = await fetch(`/api/artifact/draft-content?${draftParams.toString()}`, { headers });
+        if (draftRes.ok) {
+          const draftData = (await draftRes.json()) as { content?: string };
+          if (typeof draftData?.content === "string" && draftData.content.trim()) draftContent = draftData.content.trim();
+        }
+      } catch {
+        /* optional: backend falls back to KG or GitHub */
+      }
       const res = await fetch("/api/artifact/apply", {
         method: "POST",
         headers,
@@ -143,6 +156,7 @@ export function SingleProposalApprovalPage({
           option_index: -1,
           thread_id: threadId,
           artifact_type: artifactType,
+          ...(draftContent != null ? { draft_content: draftContent } : {}),
         }),
       });
       if (!res.ok) {

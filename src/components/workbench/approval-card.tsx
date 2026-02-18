@@ -604,7 +604,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
               option_index: 0,
               thread_id: threadId,
               project_id: projectId,
-              artifact_type: artifactType ?? "concept_brief",
+              artifact_type: artifactType ?? "concept_brief", // fallback when type missing; apply accepts any artifact_type
               source_node_id: sourceNodeId,
               draft_content: draftContent,
             }),
@@ -672,8 +672,9 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
+          // Phase 3.3: fetch draft_content for all artifact types when cache_key present (backend uses it for extraction/apply).
           let draftContent: string | undefined;
-          if (artifactType === "concept_brief" || artifactType === "ux_brief") {
+          if (cacheKey && artifactType) {
             try {
               const draftParams = new URLSearchParams({ cache_key: cacheKey, option_index: String(typeof optionIndex === "number" ? optionIndex : 0) });
               if (threadId) draftParams.set("thread_id", threadId);
@@ -683,7 +684,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
                 if (typeof draftData?.content === "string" && draftData.content.trim()) draftContent = draftData.content.trim();
               }
             } catch (_e) {
-              /* optional: use cached/generated content on apply */
+              /* optional: backend falls back to KG or GitHub when draft_content missing */
             }
           }
           const res = await fetch("/api/artifact/apply", {
