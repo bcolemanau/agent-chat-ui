@@ -26,8 +26,9 @@ async function proxyRequest(req: NextRequest, method: string) {
     // Debug: always log so we see output on every catch-all request (Docker/local)
     debugLog(`catch-all proxyRequest ${method} ${path}`);
 
-    // Construct backend URL (no double slash: BACKEND_URL has no trailing slash, path has leading slash)
-    const backendUrl = `${BACKEND_URL}${path}${req.nextUrl.search}`;
+    // Construct backend URL (no double slash; getBackendBaseUrl normalizes hostname-only env to https://).
+    const baseUrl = getBackendBaseUrl();
+    const backendUrl = `${baseUrl}${path}${req.nextUrl.search}`;
     
     // List of endpoints that don't require auth (matches backend proxy_server.py exclusions)
     const publicEndpoints = [

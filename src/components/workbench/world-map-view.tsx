@@ -69,6 +69,9 @@ function decisionStatusLabel(status: string | undefined): string | null {
     return status;
 }
 
+/** Content-level trace link types to emphasize when a node is focused (primary over ART–ART links). */
+const CONTENT_TRACE_LINK_TYPES = new Set(['DERIVED_FROM', 'SATISFIES', 'REALIZES', 'VALIDATES', 'TRACES_TO']);
+
 /** Type → display label (for legend and fallback). */
 const typeConfig: Record<string, { color: string; label: string }> = {
     DOMAIN: { color: '#64748b', label: 'Domain' },
@@ -98,40 +101,40 @@ const typeConfig: Record<string, { color: string; label: string }> = {
     TEMPLATE: { color: '#64748b', label: 'Template' },
 };
 
-/** Agent → Template → NodeTypes hierarchy (aligns with ArtifactTemplates_kg). Colour is at Agent level. */
+/** Agent → Template → NodeTypes hierarchy (aligns with ArtifactTemplates_kg). Colour is at Agent level. templateId matches backend CONTRIBUTES_TO (T-*) for artifact risk aggregates. */
 const MAP_LEGEND_AGENT_HIERARCHY: {
     agentId: string;
     agentName: string;
-    templates: { templateName: string; types: string[] }[];
+    templates: { templateName: string; templateId?: string; types: string[] }[];
 }[] = [
     {
         agentId: 'concept',
         agentName: 'Concept',
         templates: [
-            { templateName: 'Concept Brief', types: ['PERSONA', 'PERS', 'SCENARIO', 'OUTCOME', 'OUT', 'METRIC', 'MET', 'DECISION', 'CONSTRAINT', 'CONST'] },
-            { templateName: 'Feature Definition', types: ['FEATURE', 'FEAT', 'JTBD'] },
-            { templateName: 'UX Brief', types: ['UXO'] },
+            { templateName: 'Concept Brief', templateId: 'T-CONCEPT', types: ['PERSONA', 'PERS', 'SCENARIO', 'OUTCOME', 'OUT', 'METRIC', 'MET', 'DECISION', 'CONSTRAINT', 'CONST'] },
+            { templateName: 'Feature Definition', templateId: 'T-FEATDEF', types: ['FEATURE', 'FEAT', 'JTBD'] },
+            { templateName: 'UX Brief', templateId: 'T-UX', types: ['UXO'] },
         ],
     },
     {
         agentId: 'requirements',
         agentName: 'Requirements',
         templates: [
-            { templateName: 'Requirements Package', types: ['REQUIREMENT', 'LIFECYCLE', 'SCENARIO'] },
+            { templateName: 'Requirements Package', templateId: 'T-REQPKG', types: ['REQUIREMENT', 'LIFECYCLE', 'SCENARIO'] },
         ],
     },
     {
         agentId: 'architecture',
         agentName: 'Architecture',
         templates: [
-            { templateName: 'Architecture', types: ['COMPONENT', 'INTERFACE', 'VIEW'] },
+            { templateName: 'Architecture', templateId: 'T-ARCH', types: ['COMPONENT', 'INTERFACE', 'VIEW'] },
         ],
     },
     {
         agentId: 'design',
         agentName: 'Design',
         templates: [
-            { templateName: 'Design', types: ['COMPONENT', 'INTERFACE', 'REQUIREMENT', 'DECISION'] },
+            { templateName: 'Design', templateId: 'T-DESIGN', types: ['COMPONENT', 'INTERFACE', 'REQUIREMENT', 'DECISION'] },
         ],
     },
     {
@@ -260,13 +263,27 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const [legendCollapsed, setLegendCollapsed] = useState<Record<string, boolean>>({});
     /** Workflow strip for bottom panel (same left-to-right as header). */
     const [workflowStrip, setWorkflowStrip] = useState<{ nodes: { id: string; label: string }[]; active_node?: string } | null>(null);
-    /** Project risk summary (in-scope, covered, uncovered) for map context pane. */
-    const [riskSummary, setRiskSummary] = useState<{ in_scope: number; covered: number; uncovered: number } | null>(null);
+    /** Project risk summary (in-scope, covered, uncovered, artifact_aggregates) for map context pane. */
+    const [riskSummary, setRiskSummary] = useState<{
+        in_scope: number;
+        covered: number;
+        uncovered: number;
+        artifact_aggregates: { art_node_id: string; template_id?: string; covered: number; covered_crit_ids: string[] }[];
+    } | null>(null);
     /** Phase-level risk aggregates (phase_id, in_scope, covered, uncovered) for map hierarchy. */
     const [phaseRiskAggregates, setPhaseRiskAggregates] = useState<{ phase_id: string; in_scope: number; covered: number; uncovered: number }[]>([]);
     const [loadingRiskSummary, setLoadingRiskSummary] = useState(false);
     /** Bottom panel (workflow | filter | search | zoom) collapsed. */
     const [bottomPanelCollapsed, setBottomPanelCollapsed] = useState(false);
+    /** Focused node (ART or content). Map emphasizes this node + its contained nodes + content-level trace links. Clicking a node moves focus. */
+    const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+
+    // Clear focus when graph data changes and the focused node is no longer present
+    useEffect(() => {
+        if (focusedNodeId && data?.nodes && !data.nodes.some((n: Node) => n.id === focusedNodeId)) {
+            setFocusedNodeId(null);
+        }
+    }, [data?.nodes, focusedNodeId]);
 
     // Fetch workflow strip for bottom panel (same as header, left-to-right flow)
     useEffect(() => {
@@ -285,7 +302,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         return () => { cancelled = true; };
     }, [threadId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
 
-    // Fetch project risk summary for map context pane (Phase 1 — project-level risk)
+    // Fetch project risk summary (project + phase + artifact aggregates) for map context pane
     useEffect(() => {
         if (!threadId || embeddedInDecisions) {
             setRiskSummary(null);
@@ -293,18 +310,20 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
         let cancelled = false;
         setLoadingRiskSummary(true);
-        const orgContext = localStorage.getItem('reflexion_org_context');
+        const params = new URLSearchParams({ thread_id: threadId });
         const headers: Record<string, string> = {};
+        const orgContext = localStorage.getItem('reflexion_org_context');
         if (orgContext) headers['X-Organization-Context'] = orgContext;
-        fetch(`/api/project/risk-summary?thread_id=${encodeURIComponent(threadId)}`, { headers })
+        fetch(`/api/project/risk-summary?${params.toString()}`, { headers })
             .then((r) => (r.ok ? r.json() : null))
-            .then((data: { in_scope?: number; covered?: number; uncovered?: number; phase_aggregates?: { phase_id: string; in_scope: number; covered: number; uncovered: number }[] } | null) => {
+            .then((data: { in_scope?: number; covered?: number; uncovered?: number; phase_aggregates?: { phase_id: string; in_scope: number; covered: number; uncovered: number }[]; artifact_aggregates?: { art_node_id: string; template_id?: string; covered: number; covered_crit_ids: string[] }[] } | null) => {
                 if (cancelled) return;
                 if (data && typeof data.in_scope === 'number') {
                     setRiskSummary({
                         in_scope: data.in_scope,
                         covered: data.covered ?? 0,
                         uncovered: data.uncovered ?? 0,
+                        artifact_aggregates: Array.isArray(data.artifact_aggregates) ? data.artifact_aggregates : [],
                     });
                     setPhaseRiskAggregates(Array.isArray(data.phase_aggregates) ? data.phase_aggregates : []);
                     if (process.env.NODE_ENV === 'development') {
@@ -331,6 +350,21 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             });
         }
     }, [selectedTimelineVersionId, timelineVersionDiff, loadingTimelineDiff]);
+
+    /** ART node ids by template id (CONTRIBUTES_TO: ART → T-*) for focus-from-hierarchy. */
+    const artNodeIdsByTemplateId = useMemo(() => {
+        const map: Record<string, string[]> = {};
+        for (const l of data?.links ?? []) {
+            const typ = (l.type ?? '').toString().trim();
+            if (typ !== 'CONTRIBUTES_TO') continue;
+            const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+            const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+            if (!src || !tgt || !String(tgt).startsWith('T-')) continue;
+            if (!map[tgt]) map[tgt] = [];
+            map[tgt].push(src);
+        }
+        return map;
+    }, [data?.links]);
 
     const unifiedPreviews = useUnifiedPreviews();
     const draftArtifactNodes = useMemo(() => {
@@ -914,6 +948,18 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             validLinks = resolvedLinks;
         }
 
+        // In-focus set: focused node + contained nodes (REFERENCES from that node). Same logic for ART or content node.
+        const inFocusNodeIds = new Set<string>();
+        if (focusedNodeId) {
+            inFocusNodeIds.add(focusedNodeId);
+            for (const l of resolvedLinks) {
+                const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+                const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+                const linkType = (l.type ?? '').toString().trim();
+                if (linkType === 'REFERENCES' && src === focusedNodeId && tgt) inFocusNodeIds.add(tgt);
+            }
+        }
+
         // Unconditional logging so console always shows resolution result (filter by "WorldMapView").
         const addedNodeIds = new Set(nodes.filter((n: Node) => (n as any).diff_status === 'added').map((n: Node) => n.id));
         const endpointSet = allSourceTargets;
@@ -1028,6 +1074,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .style('opacity', 1)
             .style('filter', 'none')
             .on('click', (event, d) => {
+                setFocusedNodeId(d.id);
                 setSelectedNode(d);
                 event.stopPropagation();
             })
@@ -1126,38 +1173,43 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .style('pointer-events', 'none');
 
         simulation.on('tick', () => {
+            const linkType = (d: Link) => (d.type ?? '').toString().trim();
+            const isContentTraceLink = (d: Link) => CONTENT_TRACE_LINK_TYPES.has(linkType(d));
+            const isReferencesFromFocus = (d: Link) => linkType(d) === 'REFERENCES' && (typeof d.source === 'string' ? d.source : (d.source as Node)?.id) === focusedNodeId;
+            const sourceId = (d: Link) => typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+            const targetId = (d: Link) => typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
+            const linkTouchesFocus = (d: Link) => inFocusNodeIds.has(sourceId(d)) || inFocusNodeIds.has(targetId(d));
+            const linkHighlighted = (d: Link) => focusedNodeId && linkTouchesFocus(d) && (isContentTraceLink(d) || isReferencesFromFocus(d));
+
             link
                 .attr('x1', d => (d.source as Node).x!)
                 .attr('y1', d => (d.source as Node).y!)
                 .attr('x2', d => (d.target as Node).x!)
                 .attr('y2', d => (d.target as Node).y!)
                 .style('opacity', d => {
-                    // Highlight links connected to selected node
+                    if (focusedNodeId) {
+                        if (linkHighlighted(d)) return 1;
+                        return 0.2;
+                    }
                     if (selectedNode) {
-                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
-                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-                        if (sourceId === selectedNode.id || targetId === selectedNode.id) return 1;
+                        if (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id) return 1;
                     }
                     return 0.5;
                 })
                 .style('stroke-width', d => {
-                    if (selectedNode) {
-                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
-                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-                        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
-                            return 2.5;
-                        }
+                    if (focusedNodeId) {
+                        if (linkHighlighted(d)) return 2.5;
+                        return 1;
                     }
+                    if (selectedNode && (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id)) return 2.5;
                     return 1.5;
                 })
                 .style('stroke', d => {
-                    if (selectedNode) {
-                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
-                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-                        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
-                            return '#3b82f6';
-                        }
+                    if (focusedNodeId) {
+                        if (linkHighlighted(d)) return '#3b82f6';
+                        return '#888';
                     }
+                    if (selectedNode && (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id)) return '#3b82f6';
                     if (linkIsPendingOrRejected(d)) return linkKgStatus(d) === 'pending' ? '#f59e0b' : '#ef4444';
                     return '#888';
                 });
@@ -1165,7 +1217,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             node
                 .attr('transform', d => `translate(${d.x},${d.y})`)
                 .style('opacity', d => {
-                    // Dim non-selected nodes when a node is selected
+                    if (focusedNodeId) return inFocusNodeIds.has(d.id) ? 1 : 0.35;
                     if (selectedNode && d.id !== selectedNode.id) return 0.4;
                     return 1;
                 });
@@ -1207,7 +1259,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 }
             }
         };
-    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode, mapSearchQuery, typeFilter, statusFilter]);
+    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, focusedNodeId, compareViewMode, mapSearchQuery, typeFilter, statusFilter]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -1797,7 +1849,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                     </div>
                 </div>
             ) : (
-                <div ref={containerRef} className="flex-1 min-h-0 flex flex-col relative overflow-hidden" onClick={() => setSelectedNode(null)}>
+                <div ref={containerRef} className="flex-1 min-h-0 flex flex-col relative overflow-hidden" onClick={() => { setSelectedNode(null); setFocusedNodeId(null); }}>
                     {viewMode === 'artifacts' ? (
                         <ArtifactsView />
                     ) : (
@@ -1931,10 +1983,23 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
                         ) : null}
                         <div className="h-4 w-px bg-border shrink-0" />
-                        {/* Filter by type (hierarchy). Schema summary (entity_counts) from metadata shows counts; else derive presence from nodes. */}
+                        {/* Project risk summary (in scope, covered, uncovered). Not affected by map filters. */}
+                        {riskSummary ? (
+                            <div className="flex items-center gap-1.5 flex-wrap shrink-0" title="Risks in scope for this project; covered = addressed by artifact content.">
+                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Risks</span>
+                                <span className="text-[10px] text-foreground">
+                                    {riskSummary.in_scope} in scope · {riskSummary.covered} covered · {riskSummary.uncovered} uncovered
+                                </span>
+                            </div>
+                        ) : null}
+                        <div className="h-4 w-px bg-border shrink-0" />
+                        {/* Focus: click template to focus that artifact on the map (contained nodes + content trace links). Clear to show all. */}
                         {data?.nodes?.length ? (
                             <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Filter</span>
+                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Focus</span>
+                                {focusedNodeId ? (
+                                    <button type="button" onClick={() => { setFocusedNodeId(null); }} className="inline-flex items-center rounded px-2 py-0.5 text-[10px] font-medium border border-border bg-primary/15 text-primary hover:bg-primary/25" title="Show all nodes and links">Clear focus</button>
+                                ) : null}
                                 {(() => {
                                     const entityCounts = data.metadata?.entity_counts ?? {};
                                     const typesInData = new Set(data.nodes.map((n) => n.type));
@@ -1960,17 +2025,35 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                         {agent.templates.map((tpl) => {
                                                             const present = tpl.types.filter((ty) => typesInData.has(ty));
                                                             if (present.length === 0) return null;
+                                                            const artIds = tpl.templateId ? (artNodeIdsByTemplateId[tpl.templateId] ?? []) : [];
+                                                            const firstArtId = artIds[0];
+                                                            const isFocused = firstArtId != null && focusedNodeId === firstArtId;
+                                                            const risksAddressed = tpl.templateId ? (() => {
+                                                                const arts = (riskSummary?.artifact_aggregates ?? []).filter((a) => a.template_id === tpl.templateId);
+                                                                const union = new Set<string>();
+                                                                arts.forEach((a) => (a.covered_crit_ids ?? []).forEach((id) => union.add(id)));
+                                                                return union.size;
+                                                            })() : 0;
                                                             return (
                                                                 <div key={tpl.templateName} className="pl-1">
-                                                                    <div className="text-[9px] font-medium text-muted-foreground mb-0.5">{tpl.templateName}</div>
-                                                                    <div className="flex flex-wrap gap-1">
+                                                                    <div className="flex items-center gap-1 mb-0.5">
+                                                                        <span className="text-[9px] font-medium text-muted-foreground">{tpl.templateName}</span>
+                                                                        {firstArtId != null ? (
+                                                                            <button type="button" onClick={(e) => { e.stopPropagation(); setFocusedNodeId(firstArtId); const node = data?.nodes?.find((n: Node) => n.id === firstArtId); if (node) setSelectedNode(node); }} className={cn("rounded px-1 py-0.5 text-[8px] font-medium border transition-colors", isFocused ? "border-primary bg-primary/20 text-primary" : "border-border bg-muted/30 hover:bg-muted/50 text-muted-foreground")} title="Focus map on this artifact (contained nodes + trace links)">Focus</button>
+                                                                        ) : null}
+                                                                    </div>
+                                                                    {risksAddressed > 0 ? (
+                                                                        <div className="text-[9px] text-muted-foreground/90 mb-0.5" title="Risks addressed by artifacts of this type">Risks addressed: {risksAddressed}</div>
+                                                                    ) : null}
+                                                                    <div className="flex flex-wrap gap-1 opacity-75">
+                                                                        <span className="text-[8px] text-muted-foreground/80 uppercase tracking-wider">Type</span>
                                                                         {present.map((t) => {
                                                                             const cfg = typeConfig[t] ?? { label: t };
                                                                             const count = entityCounts[t];
                                                                             const visible = typeFilter[t] !== false;
                                                                             return (
-                                                                                <button key={t} type="button" onClick={(e) => { e.stopPropagation(); setTypeFilter((prev) => ({ ...prev, [t]: !(prev[t] !== false) })); }} className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors", visible ? "border-border bg-muted/50 hover:bg-muted text-foreground" : "border-transparent bg-muted/20 text-muted-foreground opacity-60")} title={visible ? `Hide ${cfg.label}` : `Show ${cfg.label}`}>
-                                                                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                                                                <button key={t} type="button" onClick={(e) => { e.stopPropagation(); setTypeFilter((prev) => ({ ...prev, [t]: !(prev[t] !== false) })); }} className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium border transition-colors", visible ? "border-border bg-muted/50 hover:bg-muted text-foreground" : "border-transparent bg-muted/20 text-muted-foreground opacity-60")} title={visible ? `Hide ${cfg.label}` : `Show ${cfg.label}`}>
+                                                                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                                                                                     {cfg.label}
                                                                                     {typeof count === "number" && <span className="text-muted-foreground tabular-nums">({count})</span>}
                                                                                 </button>
