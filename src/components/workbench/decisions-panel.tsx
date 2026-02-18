@@ -549,12 +549,11 @@ export function DecisionsPanel() {
                         onDecisionProcessed={onDecisionProcessed}
                         onViewFullProposal={() => setProposalViewActive(true)}
                       />
-                      {(selectedItem.data as { proposed_kg_version_sha?: string } | undefined)?.proposed_kg_version_sha && threadId && (
-                        <DecisionKgDiffView
-                          threadId={threadId}
-                          kgVersionSha={(selectedItem.data as { proposed_kg_version_sha: string }).proposed_kg_version_sha}
-                        />
-                      )}
+                      {(() => {
+                        const sha = (selectedItem.data as { proposed_kg_version_sha?: string } | undefined)?.proposed_kg_version_sha;
+                        if (!sha || !threadId) return null;
+                        return <DecisionKgDiffView threadId={threadId} kgVersionSha={sha} />;
+                      })()}
                     </div>
                   ) : selectedProcessed ? (
                     <div className="flex-1 min-h-0 overflow-y-auto p-4">

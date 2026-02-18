@@ -22,6 +22,8 @@ export interface UnifiedPreviewItem {
     diff?: any;
     description?: string;
     summary?: string;
+    /** Commit SHA of the proposal KG (Phase 2); use for diff view when pending/rejected */
+    proposed_kg_version_sha?: string;
   };
   threadId?: string;
   fromMessages?: boolean; // True = from ToolMessage (apply via API)
