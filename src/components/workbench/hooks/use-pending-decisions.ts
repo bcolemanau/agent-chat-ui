@@ -17,6 +17,8 @@ interface DecisionRecord {
   args?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
+  /** Commit SHA of the proposal KG (Phase 2); use for diff view when pending/rejected */
+  proposed_kg_version_sha?: string;
 }
 
 function recordToPreviewItem(record: DecisionRecord, threadId: string | undefined): UnifiedPreviewItem {
@@ -34,6 +36,7 @@ function recordToPreviewItem(record: DecisionRecord, threadId: string | undefine
       args,
       preview_data,
       diff: preview_data?.diff,
+      proposed_kg_version_sha: record.proposed_kg_version_sha,
     },
     threadId,
     fromMessages: true,

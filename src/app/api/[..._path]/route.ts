@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionSafe } from "@/auth";
+import { getBackendBaseUrl } from "@/lib/backend-proxy";
 
 // This file acts as a proxy for requests to your LangGraph server.
 // We use a custom implementation to ensure the client's JWT token is forwarded correctly.
@@ -26,8 +27,9 @@ async function proxyRequest(req: NextRequest, method: string) {
     // Debug: always log so we see output on every catch-all request (Docker/local)
     debugLog(`catch-all proxyRequest ${method} ${path}`);
 
-    // Construct backend URL (no double slash: BACKEND_URL has no trailing slash, path has leading slash)
-    const backendUrl = `${BACKEND_URL}${path}${req.nextUrl.search}`;
+    // Construct backend URL (no double slash; getBackendBaseUrl normalizes hostname-only env to https://).
+    const baseUrl = getBackendBaseUrl();
+    const backendUrl = `${baseUrl}${path}${req.nextUrl.search}`;
     
     // List of endpoints that don't require auth (matches backend proxy_server.py exclusions)
     const publicEndpoints = [

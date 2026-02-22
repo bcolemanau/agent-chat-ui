@@ -434,7 +434,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
-          const res = await fetch("/api/artifact/link/apply", {
+          const res = await fetch("/api/artifact/proposal/apply", {
             method: "POST",
             headers,
             body: JSON.stringify({
@@ -444,6 +444,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
               project_id: threadId,
               thread_id: threadId,
               trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
+              ...(item.data?.args?.proposal_data != null && { proposal_data: item.data.args.proposal_data }),
             }),
           });
           if (!res.ok) {
@@ -451,8 +452,8 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             const detail = typeof (err as any).detail === "string" ? (err as any).detail : (err as any).detail?.message;
             const message =
               res.status === 404
-                ? "Artifact link is not available. The backend may not support this action—check deployment."
-                : detail || "Failed to apply artifact link";
+                ? "Artifact proposal apply is not available. The backend may not support this action—check deployment."
+                : detail || "Failed to apply artifact proposal";
             throw new Error(message);
           }
           const data = await res.json();
@@ -460,14 +461,14 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const kg_version_sha = (data as any).kg_version_sha;
           onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
           await persistAndMaybeSwitchThread(item, "approved", threadId, { ...(kg_version_sha != null ? { kg_version_sha } : {}) });
-          toast.success("Artifact Linked", {
-            description: `Successfully linked ${data.filename || "artifact"} to ${data.artifact_type || "KG"}`,
+          toast.success("Artifact applied", {
+            description: `Successfully applied ${data.filename || "artifact"} to ${data.artifact_type || "KG"}`,
           });
           (stream as any).triggerWorkbenchRefresh?.();
         } catch (error: any) {
-          console.error("[ApprovalCard] Error applying artifact link:", error);
+          console.error("[ApprovalCard] Error applying artifact proposal:", error);
           setStatus("pending");
-          toast.error("Artifact link failed", { description: error.message || "Failed to apply artifact link" });
+          toast.error("Artifact proposal failed", { description: error.message || "Failed to apply artifact proposal" });
         } finally {
           setIsLoading(false);
         }
@@ -604,7 +605,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
               option_index: 0,
               thread_id: threadId,
               project_id: projectId,
-              artifact_type: artifactType ?? "concept_brief",
+              artifact_type: artifactType ?? "concept_brief", // fallback when type missing; apply accepts any artifact_type
               source_node_id: sourceNodeId,
               draft_content: draftContent,
             }),
@@ -672,8 +673,9 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
+          // Phase 3.3: fetch draft_content for all artifact types when cache_key present (backend uses it for extraction/apply).
           let draftContent: string | undefined;
-          if (artifactType === "concept_brief" || artifactType === "ux_brief") {
+          if (cacheKey && artifactType) {
             try {
               const draftParams = new URLSearchParams({ cache_key: cacheKey, option_index: String(typeof optionIndex === "number" ? optionIndex : 0) });
               if (threadId) draftParams.set("thread_id", threadId);
@@ -683,7 +685,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
                 if (typeof draftData?.content === "string" && draftData.content.trim()) draftContent = draftData.content.trim();
               }
             } catch (_e) {
-              /* optional: use cached/generated content on apply */
+              /* optional: backend falls back to KG or GitHub when draft_content missing */
             }
           }
           const res = await fetch("/api/artifact/apply", {
@@ -712,8 +714,19 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             artifact_id: (data as any).artifact_id,
             ...(kg_version_sha != null ? { kg_version_sha } : {}),
           });
+          const recPhase = (data as any).recommended_next_phase as string | undefined;
+          const recReason = (data as any).recommended_next_reason as string | undefined;
+          const recLine =
+            recPhase != null || (recReason != null && recReason.trim() !== "")
+              ? `Recommended next: ${recPhase ?? "—"} — ${(recReason ?? "").trim() || "—"}`
+              : "";
+          if (process.env.NODE_ENV === "development" && recLine) {
+            console.info("[Decisions] Recommended next:", recLine);
+          }
           toast.success("Artifact applied", {
-            description: `Saved ${artifactType.replace(/_/g, " ")}.`,
+            description: recLine
+              ? `Saved ${artifactType.replace(/_/g, " ")}. ${recLine}`
+              : `Saved ${artifactType.replace(/_/g, " ")}.`,
           });
           if (typeof (stream as any).updateState === "function" && (data as any).active_agent) {
             await (stream as any).updateState({ values: { active_agent: (data as any).active_agent } });
