@@ -1,0 +1,15 @@
+API & UI: single artifact proposal apply endpoint and extract-nodes/create-edges terminology
+
+- Add POST /artifact/proposal/apply as the single endpoint for applying artifact proposals
+  (generate and upload). Request body: ArtifactProposalApplyBody (decision_id, artifact_type,
+  artifact_id | cache_key, optional proposal_data, cycle_id, artifact_types).
+- Align naming on "extract nodes and create edges" (drop link/enrichment in docs and API surface).
+- Persist decision as approved (KG+decision pair) when apply succeeds; backend is source of truth.
+- Refactor tools to harmonize on common schema-driven approach across upload, generate, and refine.
+- Add optional local LLM server configuration to .env for development.
+- Change default log level from INFO to DEBUG in .env; update start.sh so LOG_LEVEL is respected in Docker.
+- Improve markdown replacement guidelines in docs for Unicode handling.
+- Add artifact types and prompts in artifact_markdown_schema.json for LLM integration.
+- Update docs (artifact flows, decision persist, upload vs generate) to match new endpoint and terminology.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
