@@ -1,6 +1,6 @@
 /**
  * Subscribe to decisions/KG updates for a thread via SSE.
- * When connected, events trigger refetch callbacks; when disconnected or 503, rely on polling.
+ * Events trigger refetch callbacks when the backend pushes decisions_updated or kg_updated.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 

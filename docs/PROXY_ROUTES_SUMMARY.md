@@ -19,6 +19,7 @@ All UI API routes under `/api/*` either (1) **proxy** to the Reflexion/LangGraph
 | UI path | Method | Backend path | Backend (proxy_server.py) | OK? |
 |--------|--------|--------------|---------------------------|-----|
 | /api/artifact/link/apply | POST | /artifact/link/apply | `@app.post("/artifact/link/apply")` | ✓ |
+| /api/artifact/link-and-enrich/apply | POST | /artifact/link-and-enrich/apply | `@app.post("/artifact/link-and-enrich/apply")` | ✓ |
 | /api/artifact/apply | POST | /artifact/apply | `@app.post("/artifact/apply")` | ✓ |
 | /api/hydration/apply | POST | /hydration/apply | `@app.post("/hydration/apply")` | ✓ |
 | /api/decisions | GET, POST | /decisions | `@app.get`, `@app.post("/decisions")` | ✓ |
@@ -67,7 +68,6 @@ These use `getBackendBaseUrl()` from `@/lib/backend-proxy` (or `LANGGRAPH_API_UR
 | UI route | Purpose |
 |----------|---------|
 | /api/health | Next.js app health; returns `{ status: "ok" }`. Does **not** call backend /health. |
-| /api/langsmith-config | Returns LangSmith config (API key, endpoint, project) for client OTEL. |
 | /api/auth/[...nextauth] | NextAuth.js (session, sign-in, etc.). |
 
 ---

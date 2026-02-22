@@ -88,8 +88,8 @@ function TraceabilityPreviewBlock({ previewData }: { previewData: any }): ReactN
 /**
  * Diff Content Renderer
  * Renders diff previews by dispatching on diff.type (progression | similarity | subset | kg_diff)
- * and optional proposalType for subset variants (classify_intent, link_uploaded_document).
- * Issue #56: kg_diff type renders KgDiffDiagramView (diagram + summary over same payload).
+ * and optional proposalType for subset variants (propose_project, link_uploaded_document).
+ * similarity = artifact options (any template type with multiple options); kg_diff = KgDiffDiagramView.
  */
 export class DiffRenderer implements ContentRenderer {
   render(content: string, metadata?: Record<string, any>): ReactNode {
@@ -206,7 +206,7 @@ export class DiffRenderer implements ContentRenderer {
       case "subset": {
         if (!diff.metadata) break;
         const subsetMeta = diff.metadata;
-        if (proposalType === "classify_intent") {
+        if (proposalType === "classify_intent" || proposalType === "propose_project") {
           return (
             <div className="space-y-2">
               <div className="text-sm font-medium">{subsetMeta.title}</div>

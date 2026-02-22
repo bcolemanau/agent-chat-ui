@@ -3,9 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
+import { useRouteScope } from "@/hooks/use-route-scope";
 import { useUnifiedPreviews, UnifiedPreviewItem } from "./hooks/use-unified-previews";
 import { usePendingDecisions } from "./hooks/use-pending-decisions";
-import { useProcessedDecisions, ProcessedDecision } from "./hooks/use-processed-decisions";
+import { useProcessedDecisions, ProcessedDecision, type OrgPhaseLineage } from "./hooks/use-processed-decisions";
+import { useDecisionTypesConfig } from "./hooks/use-decision-types-config";
 import { useThreadUpdates } from "./hooks/use-thread-updates";
 import { ApprovalCard } from "./approval-card";
 import { KgDiffDiagramView } from "./kg-diff-diagram-view";
@@ -15,13 +17,12 @@ import { WorldMapView } from "./world-map-view";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { useStreamContext } from "@/providers/Stream";
 import type { DecisionSummary } from "@/lib/diff-types";
+import { inferPhaseFromType, isPhaseChangeDecisionType } from "@/lib/decision-types";
 import { AlertCircle, PanelRight, ArrowLeft, GitCompare, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const VIEW_STORAGE_KEY = "reflexion_decisions_view";
-/** Poll interval so decisions from other users (same project) appear without refresh. */
-const DECISIONS_POLL_INTERVAL_MS = 15_000;
 type ViewMode = "split" | "map";
 
 function getStoredView(): ViewMode {
@@ -41,11 +42,14 @@ function setStoredView(mode: ViewMode) {
 
 function getTypeLabel(type: string): string {
   const labels: Record<string, string> = {
-    classify_intent: "Project Classification",
-    propose_project: "Project Template",
+    organization_onboarding: "Organization Onboarding",
+    propose_project: "Project Proposal",
+    classify_intent: "Project Classification",  // legacy; kept for backward compat
     project_from_upload: "Project from Document",
     generate_project_configuration_summary: "Project Configuration",
     propose_hydration_complete: "Hydration Complete",
+    hydration_complete_trim: "Hydration Complete",
+    hydration_complete_prune: "Hydration Complete",
     generate_concept_brief: "Concept Brief",
     generate_ux_brief: "UX Brief",
     generate_requirements_proposal: "Requirements",
@@ -56,6 +60,7 @@ function getTypeLabel(type: string): string {
     approve_enrichment: "Enrichment",
     enrichment: "Enrichment",
     link_uploaded_document: "Link Artifact",
+    artifact_apply: "Link + Enrich",
   };
   return labels[type] || type.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 }
@@ -68,15 +73,22 @@ function relativeTime(ts: number): string {
   return `${Math.floor(d / 86400_000)} d ago`;
 }
 
+type Phase = "Organization" | "Project";
+
 type DecisionRow = {
   id: string;
   type: string;
   title: string;
   status: "pending" | "approved" | "rejected";
   time: number;
+  phase: Phase;
   item?: UnifiedPreviewItem;
   kg_version_sha?: string;
+  /** Proposal KG commit SHA (Phase 2); use for diff when pending/rejected */
+  proposed_kg_version_sha?: string;
   args?: Record<string, unknown>;
+  /** Phase boundary (thread concluded); show badge */
+  is_phase_change?: boolean;
 };
 
 function getArtifactDisplayName(row: DecisionRow): string | undefined {
@@ -87,7 +99,46 @@ function getArtifactDisplayName(row: DecisionRow): string | undefined {
     (args.filename as string | undefined);
   if (filename) return filename;
   if (row.type === "link_uploaded_document") return (args.document_id as string) || undefined;
+  if (row.type === "artifact_apply") return (args.artifact_id as string) || undefined;
   return undefined;
+}
+
+/** Read-only detail for phase decisions from fork lineage (e.g. org onboarding). */
+function PhaseRowDetail({ row }: { row: DecisionRow }) {
+  const phase = (row.phase ?? inferPhaseFromType(row.type)) as string;
+  const phaseLabel = phase === "Organization" ? "Organization phase (from fork)" : `${phase} phase (from fork)`;
+  const description =
+    phase === "Organization"
+      ? "This decision was made during organization onboarding and is included with the project fork."
+      : `This decision was made during the ${phase.toLowerCase()} phase and is included with the fork.`;
+
+  return (
+    <div className="rounded-lg border bg-muted/20 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 text-sm">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium shrink-0">
+            {getTypeLabel(row.type)}
+          </span>
+          <span className="truncate" title={row.title}>
+            {row.title}
+          </span>
+        </div>
+        <span className="text-xs text-muted-foreground shrink-0">{phaseLabel}</span>
+      </div>
+      <p className="px-4 pb-4 text-sm text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+/** Minimal header when project was forked from org — decisions are now in the unified table. */
+function OrgForkBadge({ orgPhase }: { orgPhase: OrgPhaseLineage }) {
+  const version = orgPhase.organization_kg_version;
+  if (!version) return null;
+  return (
+    <div className="mt-2 text-xs text-muted-foreground">
+      Forked from Org KG • {version.length > 12 ? version.slice(0, 8) + "…" : version}
+    </div>
+  );
 }
 
 function getDecisionDisplayTitle(row: DecisionRow): string {
@@ -96,6 +147,7 @@ function getDecisionDisplayTitle(row: DecisionRow): string {
   const isEnrichment =
     row.type === "enrichment" || row.type === "approve_enrichment" || row.type === "propose_enrichment";
   const isLink = row.type === "link_uploaded_document";
+  const isArtifactApply = row.type === "artifact_apply";
 
   if (isEnrichment && artifactName) {
     const cycleId = (args as Record<string, unknown> | undefined)?.cycle_id as string | undefined;
@@ -106,7 +158,8 @@ function getDecisionDisplayTitle(row: DecisionRow): string {
     return `Enrichment${cycleSuffix}: ${artifactName}`;
   }
   if (isLink && artifactName) return `Link: ${artifactName}`;
-  if (artifactName && (isEnrichment || isLink)) return artifactName;
+  if (isArtifactApply && artifactName) return `Link + Enrich: ${artifactName}`;
+  if (artifactName && (isEnrichment || isLink || isArtifactApply)) return artifactName;
   return row.title;
 }
 
@@ -115,16 +168,20 @@ export function DecisionsPanel() {
   const router = useRouter();
   const [threadIdFromUrl] = useQueryState("threadId");
   const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+  const { orgId, projectId } = useRouteScope();
   const [versionParam, setVersionParam] = useQueryState("version"); // In map layout: selected decision's KG version → map shows that version + diff
 
   const mapCompareHref = threadId
-    ? `/workbench/map?threadId=${encodeURIComponent(threadId)}&compare=1`
-    : "/workbench/map?compare=1";
+    ? (orgId
+        ? `/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(projectId ?? threadId)}/map?compare=1`
+        : `/map?threadId=${encodeURIComponent(threadId)}&compare=1`)
+    : "/map?compare=1";
 
   const allPreviews = useUnifiedPreviews();
   const { pending: pendingFromApi, isLoading: pendingApiLoading, refetch: refetchPending } = usePendingDecisions(threadId);
-  const { processed, addProcessed, isLoading, refetch: refetchProcessed } = useProcessedDecisions(threadId);
-  const { connected: sseConnected } = useThreadUpdates(threadId, {
+  const { processed, orgPhase, addProcessed, isLoading, refetch: refetchProcessed } = useProcessedDecisions(threadId);
+  const { inferPhase } = useDecisionTypesConfig();
+  useThreadUpdates(threadId, {
     onDecisionsUpdate: () => {
       refetchPending();
       refetchProcessed();
@@ -137,45 +194,39 @@ export function DecisionsPanel() {
     if (threadId && workbenchRefreshKey > 0) refetchPending();
   }, [threadId, workbenchRefreshKey, refetchPending]);
 
-  // Multi-user: poll decisions when SSE is not connected so updates from other users appear
-  useEffect(() => {
-    if (!threadId || sseConnected) return;
-    const intervalId = setInterval(() => {
-      refetchPending();
-      refetchProcessed();
-    }, DECISIONS_POLL_INTERVAL_MS);
-    return () => clearInterval(intervalId);
-  }, [threadId, sseConnected, refetchPending, refetchProcessed]);
-
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
-  // Logical key for link/enrich so one upload = one link + one enrich (dedupe API vs stream proposals)
-  const linkEnrichKey = (item: UnifiedPreviewItem): string | null => {
+  // Logical keys for link/enrich/artifact_apply so one upload = one combined decision (dedupe API vs stream)
+  const linkEnrichKeys = (item: UnifiedPreviewItem): string[] => {
     const args = item.data?.args;
-    if (!args) return null;
+    if (!args) return [];
     const artifactId = (args.artifact_id as string) ?? (args.document_id as string);
-    if (!artifactId) return null;
-    if (item.type === "link_uploaded_document") return `link:${artifactId}`;
+    if (!artifactId) return [];
+    if (item.type === "link_uploaded_document") return [`link:${artifactId}`];
     if (item.type === "enrichment" || item.type === "approve_enrichment") {
       const cycleId = args.cycle_id as string | undefined;
-      return `enrich:${artifactId}:${cycleId ?? ""}`;
+      return [`enrich:${artifactId}:${cycleId ?? ""}`];
     }
-    return null;
+    if (item.type === "artifact_apply") {
+      const cycleId = args.cycle_id as string | undefined;
+      return [`link:${artifactId}`, `enrich:${artifactId}:${cycleId ?? ""}`];
+    }
+    return [];
   };
   // Merge persisted pending (GET /decisions) with stream-based pending; dedupe by id and by link/enrich key
   const pending = useMemo(() => {
     const byId = new Map<string, UnifiedPreviewItem>();
-    const linkEnrichKeys = new Set<string>();
+    const linkEnrichKeySet = new Set<string>();
     pendingFromApi.forEach((p) => {
       byId.set(p.id, p);
-      const key = linkEnrichKey(p);
-      if (key) linkEnrichKeys.add(key);
+      linkEnrichKeys(p).forEach((k) => linkEnrichKeySet.add(k));
     });
     allPreviews.forEach((p) => {
       if (byId.has(p.id)) return;
-      const key = linkEnrichKey(p);
-      if (key && linkEnrichKeys.has(key)) return; // already have a pending link/enrich for this artifact (and cycle)
+      const keys = linkEnrichKeys(p);
+      if (keys.length > 0 && keys.some((k) => linkEnrichKeySet.has(k)))
+        return; // already have a pending link/enrich/artifact_apply for this artifact (and cycle)
       byId.set(p.id, p);
-      if (key) linkEnrichKeys.add(key);
+      keys.forEach((k) => linkEnrichKeySet.add(k));
     });
     return Array.from(byId.values()).filter((p) => !processedIds.has(p.id));
   }, [pendingFromApi, allPreviews, processedIds]);
@@ -199,12 +250,14 @@ export function DecisionsPanel() {
       status: "approved" | "rejected",
       extra?: { kg_version_sha?: string; artifact_id?: string; outcome_description?: string }
     ) => {
+      const phase = (item.phase ?? inferPhase(item.type)) as Phase;
       addProcessed({
         id: item.id,
         type: item.type,
         title: item.title,
         status,
         timestamp: Date.now(),
+        phase,
         ...(extra?.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
         ...(extra?.outcome_description != null ? { outcome_description: extra.outcome_description } : {}),
         ...(item.data?.preview_data != null ? { preview_data: item.data.preview_data as Record<string, unknown> } : {}),
@@ -212,18 +265,31 @@ export function DecisionsPanel() {
       });
       refetchPending();
     },
-    [addProcessed, refetchPending]
+    [addProcessed, refetchPending, inferPhase]
   );
 
   const allRows = useMemo((): DecisionRow[] => {
+    const orgDecisions = orgPhase?.decisions ?? [];
+    const orgRows: DecisionRow[] = orgDecisions.map((d) => ({
+      id: d.id,
+      type: d.type,
+      title: d.title,
+      status: (d.status === "approved" ? "approved" : "rejected") as "approved" | "rejected",
+      time: 0,
+      phase: "Organization" as Phase,
+      is_phase_change: isPhaseChangeDecisionType(d.type),
+    }));
     const pendingRows: DecisionRow[] = pending.map((item) => ({
       id: item.id,
       type: item.type,
       title: item.title,
       status: "pending" as const,
       time: Date.now(),
+      phase: (item.phase ?? inferPhase(item.type)) as Phase,
       item,
       args: item.data?.args as Record<string, unknown> | undefined,
+      proposed_kg_version_sha: (item.data as { proposed_kg_version_sha?: string } | undefined)?.proposed_kg_version_sha,
+      is_phase_change: isPhaseChangeDecisionType(item.type),
     }));
     const processedRows: DecisionRow[] = processed.map((p) => ({
       id: p.id,
@@ -231,11 +297,14 @@ export function DecisionsPanel() {
       title: p.title,
       status: p.status,
       time: p.timestamp,
+      phase: (p.phase as Phase) ?? (inferPhase(p.type) as Phase),
       kg_version_sha: p.kg_version_sha,
+      proposed_kg_version_sha: (p as { proposed_kg_version_sha?: string }).proposed_kg_version_sha,
       args: p.args,
+      is_phase_change: p.is_phase_change ?? isPhaseChangeDecisionType(p.type),
     }));
-    return [...pendingRows, ...processedRows];
-  }, [pending, processed]);
+    return [...orgRows, ...pendingRows, ...processedRows];
+  }, [orgPhase?.decisions, pending, processed, inferPhase]);
 
   // In map layout, sync selected row from URL version (e.g. opened via "Compare on map" from a decision)
   const prevVersionParam = React.useRef<string | null>(null);
@@ -243,18 +312,22 @@ export function DecisionsPanel() {
     if (viewMode !== "map" || !versionParam) return;
     if (prevVersionParam.current === versionParam) return;
     prevVersionParam.current = versionParam;
-    const row = allRows.find((r) => "kg_version_sha" in r && (r as { kg_version_sha?: string }).kg_version_sha === versionParam);
+    const row = allRows.find(
+    (r) => (r.kg_version_sha ?? r.proposed_kg_version_sha) === versionParam
+  );
     if (row) setSelectedId(row.id);
   }, [viewMode, versionParam, allRows]);
 
+  const selectedRow = useMemo(() => allRows.find((r) => r.id === selectedId) ?? null, [allRows, selectedId]);
   const selectedItem = useMemo(() => pending.find((p) => p.id === selectedId) ?? null, [pending, selectedId]);
   const selectedProcessed = useMemo(
     () => processed.find((p) => p.id === selectedId) ?? null,
     [processed, selectedId]
   );
 
-  const _hasAny = pending.length > 0 || processed.length > 0;
-  const emptyMessage = !isLoading && !pendingApiLoading && pending.length === 0 && processed.length === 0;
+  const orgDecCount = orgPhase?.decisions?.length ?? 0;
+  const hasAny = orgDecCount > 0 || pending.length > 0 || processed.length > 0;
+  const emptyMessage = !isLoading && !pendingApiLoading && !hasAny;
 
   return (
     <div className="flex flex-col h-full min-h-0 p-6">
@@ -264,6 +337,9 @@ export function DecisionsPanel() {
           <p className="text-sm text-muted-foreground mt-1">
             Review and approve pending actions; view processed decisions below.
           </p>
+          {orgPhase && (
+            <OrgForkBadge orgPhase={orgPhase} />
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -332,6 +408,7 @@ export function DecisionsPanel() {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-muted/80 backdrop-blur border-b">
                     <tr>
+                      <th className="text-left py-2 px-3 font-medium w-24">Phase</th>
                       <th className="text-left py-2 px-3 font-medium">Type</th>
                       <th className="text-left py-2 px-3 font-medium">Title</th>
                       <th className="text-left py-2 px-3 font-medium">Subject</th>
@@ -355,16 +432,34 @@ export function DecisionsPanel() {
                           if (viewMode === "map") {
                             if (isDeselecting) setVersionParam(null);
                             else {
-                              const sha = "kg_version_sha" in row ? (row as { kg_version_sha?: string }).kg_version_sha : undefined;
+                              const sha = row.kg_version_sha ?? row.proposed_kg_version_sha;
                               setVersionParam(sha ?? null);
                             }
                           }
                         }}
                       >
                         <td className="py-2 px-3">
-                          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium">
-                            {getTypeLabel(row.type)}
+                          <span
+                            className={cn(
+                              "text-xs font-medium",
+                              row.phase === "Organization" && "text-muted-foreground",
+                              row.phase === "Project" && "text-foreground"
+                            )}
+                          >
+                            {row.phase}
                           </span>
+                        </td>
+                        <td className="py-2 px-3">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium">
+                              {getTypeLabel(row.type)}
+                            </span>
+                            {row.is_phase_change && (
+                              <span className="rounded border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-400" title="Thread boundary: phase concluded, new thread started">
+                                Phase boundary
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-2 px-3 truncate max-w-[200px]" title={getDecisionDisplayTitle(row)}>
                           {getDecisionDisplayTitle(row)}
@@ -385,7 +480,7 @@ export function DecisionsPanel() {
                           </span>
                         </td>
                         <td className="py-2 px-3 text-muted-foreground text-xs">
-                          {relativeTime(row.time)}
+                          {row.time > 0 ? relativeTime(row.time) : "—"}
                         </td>
                         <td className="py-2 px-1">
                           {selectedId === row.id && (
@@ -420,7 +515,11 @@ export function DecisionsPanel() {
           {viewMode === "split" && (
             <div className="min-h-0 flex flex-col overflow-hidden w-1/2 min-w-[320px] flex-1">
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden border rounded-lg bg-card">
-                  {proposalViewActive && selectedItem ? (
+                  {selectedRow && !selectedItem && !selectedProcessed ? (
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                      <PhaseRowDetail row={selectedRow} />
+                    </div>
+                  ) : proposalViewActive && selectedItem ? (
                     <>
                       <div className="shrink-0 flex items-center gap-2 border-b px-4 py-2 bg-muted/30">
                         <Button
@@ -443,13 +542,18 @@ export function DecisionsPanel() {
                       </div>
                     </>
                   ) : selectedItem ? (
-                    <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
                       <ApprovalCard
                         item={selectedItem}
                         stream={stream}
                         onDecisionProcessed={onDecisionProcessed}
                         onViewFullProposal={() => setProposalViewActive(true)}
                       />
+                      {(() => {
+                        const sha = (selectedItem.data as { proposed_kg_version_sha?: string } | undefined)?.proposed_kg_version_sha;
+                        if (!sha || !threadId) return null;
+                        return <DecisionKgDiffView threadId={threadId} kgVersionSha={sha} />;
+                      })()}
                     </div>
                   ) : selectedProcessed ? (
                     <div className="flex-1 min-h-0 overflow-y-auto p-4">
@@ -460,6 +564,7 @@ export function DecisionsPanel() {
                           ...selectedProcessed,
                           time: selectedProcessed.timestamp,
                           args: selectedProcessed.args,
+                          phase: (selectedProcessed.phase as Phase) ?? (inferPhase(selectedProcessed.type) as Phase),
                         })}
                       />
                     </div>
@@ -477,13 +582,15 @@ export function DecisionsPanel() {
   );
 }
 
-/** Fetches and shows KG diff for a decision that produced a KG version (kg_version_sha). */
+/** Fetches and shows KG diff for a decision (kg_version_sha or proposed_kg_version_sha). */
 function DecisionKgDiffView({
   threadId,
   kgVersionSha,
+  label,
 }: {
   threadId: string | undefined;
   kgVersionSha: string;
+  label?: string;
 }) {
   const [payload, setPayload] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -535,7 +642,9 @@ function DecisionKgDiffView({
   if (!payload) return null;
   return (
     <div className="mt-4 border rounded-lg p-4 bg-muted/30">
-      <div className="text-[10px] font-bold text-muted-foreground uppercase mb-2">KG diff (this decision)</div>
+      <div className="text-[10px] font-bold text-muted-foreground uppercase mb-2">
+        {label ?? "KG diff (this decision)"}
+      </div>
       <KgDiffDiagramView payload={payload} isLoading={false} />
     </div>
   );
@@ -546,21 +655,22 @@ function ProcessedRow({
   threadId,
   displayTitle,
 }: {
-  decision: ProcessedDecision;
+  decision: ProcessedDecision & { proposed_kg_version_sha?: string };
   threadId: string | undefined;
   displayTitle?: string;
 }) {
   const router = useRouter();
   const title = displayTitle ?? decision.title;
+  const versionSha = decision.kg_version_sha ?? decision.proposed_kg_version_sha;
 
   const openCompareOnMap = useCallback(() => {
-    if (!threadId || !decision.kg_version_sha) return;
+    if (!threadId || !versionSha) return;
     const params = new URLSearchParams({
       threadId,
-      version: decision.kg_version_sha,
+      version: versionSha,
     });
-    router.push(`/workbench/map?${params.toString()}`);
-  }, [threadId, decision.kg_version_sha, router]);
+    router.push(`/map?${params.toString()}`);
+  }, [threadId, versionSha, router]);
 
   return (
     <div className="rounded-lg border bg-muted/20 overflow-hidden">
@@ -598,7 +708,7 @@ function ProcessedRow({
           />
         </div>
       ) : null}
-      {decision.kg_version_sha && threadId && (
+      {versionSha && threadId && (
         <div className="px-4 pb-4 space-y-2">
           <div className="flex items-center gap-2">
             <Button
@@ -612,7 +722,11 @@ function ProcessedRow({
               Compare on map
             </Button>
           </div>
-          <DecisionKgDiffView threadId={threadId} kgVersionSha={decision.kg_version_sha} />
+          <DecisionKgDiffView
+            threadId={threadId}
+            kgVersionSha={versionSha}
+            label={decision.proposed_kg_version_sha && !decision.kg_version_sha ? "KG diff (proposed)" : undefined}
+          />
         </div>
       )}
     </div>

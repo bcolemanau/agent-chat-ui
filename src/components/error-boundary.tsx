@@ -2,6 +2,19 @@
 
 import React from "react";
 
+/** DOM quirk when a portal (e.g. Radix SelectContent) is torn down; recoverable. */
+function isRecoverablePortalError(error: Error | null): boolean {
+    if (!error || typeof error.message !== "string") return false;
+    const msg = error.message;
+    if (!msg.includes("removeChild")) return false;
+    // Browsers can report this as NotFoundError or DOMException; match by message.
+    return (
+        error.name === "NotFoundError" ||
+        error.name === "DOMException" ||
+        msg.includes("not a child of this node")
+    );
+}
+
 interface ErrorBoundaryProps {
     children: React.ReactNode;
     fallback?: React.ReactNode;
@@ -29,6 +42,11 @@ export class ErrorBoundary extends React.Component<
 
     componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
         const label = this.props.name ? `[ErrorBoundary: ${this.props.name}]` : "[ErrorBoundary]";
+        if (isRecoverablePortalError(error)) {
+            console.debug(`${label} Recoverable portal/removeChild error (ignoring):`, error.message);
+            this.setState({ hasError: false, error: null });
+            return;
+        }
         console.error(`${label} Caught error:`, error, errorInfo);
         if (errorInfo?.componentStack) {
             console.error(`${label} Component stack:`, errorInfo.componentStack);
@@ -36,7 +54,7 @@ export class ErrorBoundary extends React.Component<
     }
 
     render() {
-        if (this.state.hasError) {
+        if (this.state.hasError && !isRecoverablePortalError(this.state.error)) {
             if (this.props.fallback) {
                 return this.props.fallback;
             }

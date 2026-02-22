@@ -5,7 +5,7 @@ import { getBackendBaseUrl, getProxyHeaders } from "@/lib/backend-proxy";
 /**
  * Proxies SSE stream from backend GET /updates/stream?thread_id=...
  * so the browser EventSource (same-origin) gets auth via session cookie and we add Bearer token server-side.
- * When backend returns 503 (Redis disabled), client can fall back to polling.
+ * When backend returns 503 (Redis disabled), updates are not pushed until the stream is available again.
  */
 export async function GET(req: Request) {
     try {

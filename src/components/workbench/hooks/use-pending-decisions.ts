@@ -13,9 +13,12 @@ interface DecisionRecord {
   type: string;
   title: string;
   status: string;
+  phase?: "Organization" | "Project";
   args?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
+  /** Commit SHA of the proposal KG (Phase 2); use for diff view when pending/rejected */
+  proposed_kg_version_sha?: string;
 }
 
 function recordToPreviewItem(record: DecisionRecord, threadId: string | undefined): UnifiedPreviewItem {
@@ -27,11 +30,13 @@ function recordToPreviewItem(record: DecisionRecord, threadId: string | undefine
     title: record.title,
     summary: (args.model_summary as string) || `${record.type} ready to apply`,
     status: "pending",
+    phase: record.phase,
     data: {
       name: record.type,
       args,
       preview_data,
       diff: preview_data?.diff,
+      proposed_kg_version_sha: record.proposed_kg_version_sha,
     },
     threadId,
     fromMessages: true,
@@ -67,13 +72,13 @@ export function usePendingDecisions(threadId: string | undefined): {
         return;
       }
       const data = await res.json();
-      const list = Array.isArray(data) ? data : [];
+      const list = Array.isArray(data) ? data : (data?.decisions ?? []);
       // Only show current version of each logical decision (exclude superseded old versions)
       const pendingRecords = list.filter(
         (r: DecisionRecord) =>
           r &&
           typeof r.id === "string" &&
-          r.status === "pending" &&
+          (r.status === "pending" || r.status === "proposed") &&
           !(r as { superseded_by?: string }).superseded_by
       ) as DecisionRecord[];
       setPending(pendingRecords.map((r) => recordToPreviewItem(r, threadId)));

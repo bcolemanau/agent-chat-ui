@@ -21,6 +21,18 @@ function getProposalTitle(toolName: string, proposal: Record<string, any>): stri
       return "Project Configuration - Ready for Concept Phase";
     case "generate_concept_brief":
       return "Concept Brief Options";
+    case "generate_ux_brief":
+      return "UX Brief Options";
+    case "generate_requirements_proposal":
+      return "Requirements Proposal";
+    case "generate_architecture_proposal":
+      return "Architecture Proposal";
+    case "generate_design_proposal":
+      return "Design Proposal";
+    case "generate_manufacturing_ops_proposal":
+      return `Manufacturing Ops: ${args.template_type || "runbook"}`;
+    case "generate_software_ops_proposal":
+      return `Software Ops: ${args.template_type || "ops"}`;
     case "propose_enrichment":
     case "approve_enrichment":
     case "enrichment":
@@ -58,7 +70,7 @@ function DecisionProposalCard({
     (stream as any)?.setWorkbenchView?.("decisions")?.catch?.(() => {});
     const threadId = (stream as any)?.threadId;
     const q = threadId ? `?threadId=${encodeURIComponent(threadId)}` : "";
-    router.push(`/workbench/decisions${q}`);
+    router.push(`/decisions${q}`);
   };
 
   return (

@@ -1,21 +1,8 @@
 # Troubleshooting — Console / API errors
 
-## 1. LangSmith / OTEL 403 (`api.smith.langchain.com/otel/v1/traces`)
+*OpenTelemetry/LangSmith tracing has been removed from the app; the following section is kept for historical reference only.*
 
-**Symptom:** Repeated `403 (Forbidden)` and `[OTEL] Failed to flush span` in the console. Traces are sent to LangSmith but rejected.
-
-**Causes:**
-- **No API key:** `LANGSMITH_API_KEY` is not set in the environment (or is empty / placeholder like `remove-me`).
-- **Invalid or expired key:** The key is set but LangSmith rejects it (e.g. revoked, wrong project, or tracing not enabled).
-
-**Fix:**
-- **To stop the errors / turn OTEL off:** Use one of:
-  - **`OTEL_DISABLED=true`** (server env) — `/api/langsmith-config` returns no key, so the client never initializes OTEL. Works in Docker/Railway.
-  - **`NEXT_PUBLIC_OTEL_DISABLED=true`** (client build-time) — client skips OpenTelemetry init before any fetch.
-  - Unset `LANGSMITH_API_KEY` or set it to `remove-me` — same effect as `OTEL_DISABLED=true` (no key → no init).
-- **To use tracing:** Set `LANGSMITH_API_KEY` to a valid LangSmith API key and do **not** set `OTEL_DISABLED` or `NEXT_PUBLIC_OTEL_DISABLED`. Ensure the project (e.g. `LANGSMITH_PROJECT` / `LANGCHAIN_PROJECT`) exists and tracing is enabled.
-
-**Code:** Client OTEL only initializes when `/api/langsmith-config` returns a valid key (503 when not configured). If `OTEL_DISABLED=true`, the API route returns `apiKey: undefined` so the client skips init. If `NEXT_PUBLIC_OTEL_DISABLED=true`, the client skips init before calling the API. Before initializing, the client does a **preflight** POST to the traces endpoint; if the response is **403**, init is skipped so the console is not flooded. Server OTEL (`otel-server.ts`) skips init when the key is missing or equals `remove-me`.
+~~## 1. LangSmith / OTEL 403~~ *(removed — OTEL no longer used)*
 
 ---
 
@@ -72,11 +59,28 @@
 
 ---
 
+## 5. `/api/threads/{id}/state` and `/api/threads/{id}/history` 404 (Not Found)
+
+**Symptom:** Toast: *"Conversation state for this project isn't available (e.g. after a server restart)..."*, or console: `Failed to load resource: 404`, `[Stream] Failed to update workbench view: HTTP 404`, or `SDK Error: HTTP 404`.
+
+**Cause:** The LangGraph backend has no conversation state for this thread (e.g. `?threadId=...`). Common reasons:
+- LangGraph server was restarted (in-memory checkpointer loses threads)
+- Thread was deleted or never created
+- Stale URL from a previous session
+
+**Behaviour:** When state refetch gets 404, the app no longer clears the thread from the URL, so you can still **browse the map and decisions** (they load from the Reflexion backend by project/thread_id). Only the chat/conversation state is missing.
+
+**Fix:**
+1. To **keep browsing:** Stay on the page — map and decisions should still load.
+2. To **start a new conversation:** Click **"New Project"** in the project switcher, or go to `/workbench/map` without `?threadId=`. The first message will create a new thread.
+
+---
+
 ## Summary
 
 | Error | Likely cause | Action |
 |-------|----------------|--------|
-| OTEL 403 | No/invalid LangSmith API key | Unset key or set `remove-me` to disable; or set a valid key to enable tracing. |
+| threads/{id}/state or /history 404 | Conversation state missing (restart, deleted, stale URL) | Map/decisions still work; use "New Project" to start a new conversation if needed |
 | link/apply 404 | Backend does not expose `/artifact/link/apply` | Deploy Reflexion proxy_server routes on the same backend or add a separate Reflexion API URL. |
 | classification/apply 422 | Missing `trigger_id` (or other required field) | Ensure decision has `trigger_id` in args or preview_data; UI now falls back to preview_data. |
 | project/diff 500/502 | Backend exception, or ECONNRESET/timeout (connection closed or too slow) | Proxy now returns 502 with clear message; increase backend timeout or retry; check backend logs and storage. |

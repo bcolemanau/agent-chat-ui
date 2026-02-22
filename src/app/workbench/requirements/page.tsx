@@ -1,14 +1,11 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { SingleProposalApprovalPage } from "@/components/workbench/single-proposal-approval-page";
-
-export default function RequirementsPage() {
-  return (
-    <SingleProposalApprovalPage
-      toolName="generate_requirements_proposal"
-      artifactType="requirements_package"
-      rejectMessage="Requirements proposal rejected"
-      pageTitle="Requirements Proposal"
-    />
-  );
+export default async function WorkbenchRequirementsRedirect({
+    searchParams,
+}: {
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+    const params = await searchParams;
+    const q = new URLSearchParams(params as Record<string, string>).toString();
+    redirect(`/decisions${q ? `?${q}` : ""}`);
 }

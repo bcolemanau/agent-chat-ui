@@ -30,10 +30,10 @@ export function ProjectConfigurationDiffView({
 
   // If no diffData provided, show empty state; when threadId is present offer links so context helps
   if (!diffData) {
-    const mapHref = threadId ? `/workbench/map?threadId=${encodeURIComponent(threadId)}` : "/workbench/map";
+    const mapHref = threadId ? `/map?threadId=${encodeURIComponent(threadId)}` : "/map";
     const artifactsHref = threadId
-      ? `/workbench/map?threadId=${encodeURIComponent(threadId)}&view=artifacts`
-      : "/workbench/map?view=artifacts";
+      ? `/map?threadId=${encodeURIComponent(threadId)}&view=artifacts`
+      : "/map?view=artifacts";
     return (
       <div className="flex items-center justify-center p-8 h-full">
         <div className="text-center max-w-md space-y-4">

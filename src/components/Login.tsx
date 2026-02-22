@@ -17,7 +17,7 @@ export function Login() {
     // If already authenticated, go straight to workbench
     useEffect(() => {
         if (status === "authenticated") {
-            router.replace("/workbench/map");
+            router.replace("/map");
         }
     }, [status, router]);
 

@@ -29,7 +29,6 @@ import { StreamProvider } from "@/providers/Stream";
 import { ArtifactProvider } from "@/components/thread/artifact";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Toaster } from "@/components/ui/sonner";
-import { OtelInit } from "@/components/otel-init";
 
 export default function RootLayout({
   children,
@@ -39,7 +38,6 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <OtelInit />
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <NextAuthProvider>
             <BrandingProvider>

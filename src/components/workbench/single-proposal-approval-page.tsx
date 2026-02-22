@@ -32,13 +32,13 @@ interface PendingItem {
 async function persistDecisionRejected(
   item: PendingItem,
   threadId: string | undefined
-): Promise<void> {
-  if (!threadId) return;
+): Promise<{ new_thread_id?: string } | undefined> {
+  if (!threadId) return undefined;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const orgContext =
     typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
   if (orgContext) headers["X-Organization-Context"] = orgContext;
-  await fetch("/api/decisions", {
+  const res = await fetch("/api/decisions", {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -52,6 +52,8 @@ async function persistDecisionRejected(
       },
     }),
   });
+  if (!res.ok) return undefined;
+  return (await res.json()) as { new_thread_id?: string };
 }
 
 /**
@@ -65,7 +67,7 @@ export function SingleProposalApprovalPage({
   pageTitle = "Proposal",
 }: SingleProposalApprovalPageProps) {
   const stream = useStreamContext();
-  const [threadIdFromUrl] = useQueryState("threadId");
+  const [threadIdFromUrl, setThreadId] = useQueryState("threadId");
   const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
 
   const [item, setItem] = useState<PendingItem | null>(null);
@@ -95,7 +97,7 @@ export function SingleProposalApprovalPage({
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       const pending = list.find(
-        (r: PendingItem) => r?.type === toolName && r?.status === "pending"
+        (r: PendingItem) => r?.type === toolName && (r?.status === "pending" || r?.status === "proposed")
       ) as PendingItem | undefined;
       if (pending) {
         setItem(pending);
@@ -132,6 +134,19 @@ export function SingleProposalApprovalPage({
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       const orgContext = localStorage.getItem("reflexion_org_context");
       if (orgContext) headers["X-Organization-Context"] = orgContext;
+      // Phase 3.3: fetch draft_content for all artifact types when cache_key present (same as approval-card).
+      let draftContent: string | undefined;
+      try {
+        const draftParams = new URLSearchParams({ cache_key: cacheKey, option_index: "-1" });
+        draftParams.set("thread_id", threadId);
+        const draftRes = await fetch(`/api/artifact/draft-content?${draftParams.toString()}`, { headers });
+        if (draftRes.ok) {
+          const draftData = (await draftRes.json()) as { content?: string };
+          if (typeof draftData?.content === "string" && draftData.content.trim()) draftContent = draftData.content.trim();
+        }
+      } catch {
+        /* optional: backend falls back to KG or GitHub */
+      }
       const res = await fetch("/api/artifact/apply", {
         method: "POST",
         headers,
@@ -141,6 +156,7 @@ export function SingleProposalApprovalPage({
           option_index: -1,
           thread_id: threadId,
           artifact_type: artifactType,
+          ...(draftContent != null ? { draft_content: draftContent } : {}),
         }),
       });
       if (!res.ok) {
@@ -153,7 +169,7 @@ export function SingleProposalApprovalPage({
         const postHeaders: Record<string, string> = { "Content-Type": "application/json" };
         const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
         if (orgContext) postHeaders["X-Organization-Context"] = orgContext;
-        await fetch("/api/decisions", {
+        const postRes = await fetch("/api/decisions", {
           method: "POST",
           headers: postHeaders,
           body: JSON.stringify({
@@ -168,6 +184,10 @@ export function SingleProposalApprovalPage({
             },
           }),
         });
+        if (postRes.ok) {
+          const postData = (await postRes.json()) as { new_thread_id?: string };
+          if (postData?.new_thread_id) setThreadId(postData.new_thread_id);
+        }
       }
       toast.success("Proposal applied", {
         description: `Saved ${artifactType.replace(/_/g, " ")}.`,
@@ -192,7 +212,8 @@ export function SingleProposalApprovalPage({
     if (!item || !threadId) return;
     setIsApplying(true);
     try {
-      await persistDecisionRejected(item, threadId);
+      const r = await persistDecisionRejected(item, threadId);
+      if (r?.new_thread_id) setThreadId(r.new_thread_id);
       toast.info(rejectMessage);
       setItem(null);
       setPreviewData(null);

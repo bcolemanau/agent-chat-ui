@@ -16,8 +16,6 @@ import {
 } from "react";
 import { createClient } from "./client";
 import { useSession } from "next-auth/react";
-import { withThreadSpan } from "@/lib/otel-client";
-
 interface ThreadContextType {
   getThreads: () => Promise<Thread[]>;
   threads: Thread[];
@@ -48,35 +46,26 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const getThreads = useCallback(async (): Promise<Thread[]> => {
     if (!apiUrl || !assistantId) return [];
 
-    return withThreadSpan(
-      "thread.list",
-      {
-        "thread.assistant_id": assistantId,
-        "api.url": apiUrl,
+    // Read organization context from localStorage
+    const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+    const headers: Record<string, string> = {};
+    if (orgContext) {
+      headers['X-Organization-Context'] = orgContext;
+    }
+
+    // apiUrl could be null from useQueryState, createClient expects string
+    // Prefer session token (fresh) over localStorage (potentially stale)
+    const token = session?.user?.idToken || getApiKey();
+    const client = createClient(apiUrl || "", token ?? undefined, headers);
+
+    const threads = await client.threads.search({
+      metadata: {
+        ...getThreadSearchMetadata(assistantId),
       },
-      async () => {
-        // Read organization context from localStorage
-        const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
-        const headers: Record<string, string> = {};
-        if (orgContext) {
-          headers['X-Organization-Context'] = orgContext;
-        }
+      limit: 100,
+    });
 
-        // apiUrl could be null from useQueryState, createClient expects string
-        // Prefer session token (fresh) over localStorage (potentially stale)
-        const token = session?.user?.idToken || getApiKey();
-        const client = createClient(apiUrl || "", token ?? undefined, headers);
-
-        const threads = await client.threads.search({
-          metadata: {
-            ...getThreadSearchMetadata(assistantId),
-          },
-          limit: 100,
-        });
-
-        return threads;
-      }
-    );
+    return threads;
   }, [apiUrl, assistantId, session]);
 
   const value = {

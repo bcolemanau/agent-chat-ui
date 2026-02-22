@@ -17,11 +17,11 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Title and description are required" }, { status: 400 });
         }
 
-        const token = process.env.GITHUB_TOKEN;
-        const repoUrl = process.env.GITHUB_REPO; // Expected format: owner/repo
+        const token = process.env.PRODUCT_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+        const repoUrl = process.env.PRODUCT_GITHUB_REPO_NAME || process.env.GITHUB_REPO || process.env.GITHUB_REPO_NAME; // Expected format: owner/repo
 
         if (!token || !repoUrl) {
-            console.error("Missing GITHUB_TOKEN or GITHUB_REPO env vars");
+            console.error("Missing PRODUCT_GITHUB_TOKEN/GITHUB_TOKEN or PRODUCT_GITHUB_REPO_NAME/GITHUB_REPO env vars");
             return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
         }
 

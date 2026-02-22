@@ -1,12 +1,11 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { OptionsApprovalPage } from "@/components/workbench/options-approval-page";
-
-export default function ConceptBriefPage() {
-  return (
-    <OptionsApprovalPage
-      toolName="generate_concept_brief"
-      rejectMessage="Concept brief options rejected"
-    />
-  );
+export default async function WorkbenchConceptBriefRedirect({
+    searchParams,
+}: {
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+    const params = await searchParams;
+    const q = new URLSearchParams(params as Record<string, string>).toString();
+    redirect(`/decisions${q ? `?${q}` : ""}`);
 }

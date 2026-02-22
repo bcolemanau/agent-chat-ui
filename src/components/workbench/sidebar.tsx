@@ -2,11 +2,12 @@
 
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useRouteScope } from "@/hooks/use-route-scope";
 import {
     FileText,
     Settings,
-    CheckSquare,
+    Plug,
     Search,
     Trash2,
     Clock,
@@ -19,11 +20,18 @@ import { Button } from "@/components/ui/button";
 import { Plus, Search as SearchIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import { useStreamContext } from "@/providers/Stream";
 
 interface Project {
     id: string;
     name: string;
+    thread_id?: string;
     updated_at?: string;
+}
+
+/** URL segment for a project: use thread_id so LangGraph/backend get the real thread; fallback to id (slug) for backwards compat. */
+function projectSegment(project: Project): string {
+    return project.thread_id ?? project.id;
 }
 
 // Generate a more meaningful project name from thread ID
@@ -44,19 +52,25 @@ function formatProjectName(project: Project): string {
 // Removed static PROJECT_LINKS
 
 const PRODUCT_LINKS = [
-    { name: "Smart Backlog", href: "/workbench/backlog", icon: CheckSquare },
-    { name: "Discovery", href: "/workbench/discovery", icon: Search },
-    { name: "System Settings", href: "/workbench/settings", icon: Settings },
+    { name: "Integrations", href: "/integrations", icon: Plug },
+    { name: "Discovery", href: "/discovery", icon: Search },
+    { name: "System Settings", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar() {
     const { data: session } = useSession();
     const pathname = usePathname();
+    const router = useRouter();
+    const { orgId, projectId } = useRouteScope();
     const userRole = session?.user?.role;
 
     const [threadId, setThreadId] = useQueryState("threadId");
+    const effectiveProjectId = projectId ?? threadId ?? undefined;
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(false);
+    const [creatingProject, setCreatingProject] = useState(false);
+    const stream = useStreamContext();
+    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: () => Promise<string | null> })?.createNewThreadWithContext;
     const [searchQuery, setSearchQuery] = useState("");
     const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState("");
@@ -131,7 +145,7 @@ export function Sidebar() {
         }
     }, [editingProjectId, editingName, fetchProjects]);
 
-    const deleteProject = async (e: React.MouseEvent, projectId: string) => {
+    const deleteProject = async (e: React.MouseEvent, project: Project) => {
         e.stopPropagation();
         if (!confirm("Are you sure you want to delete this project and all its data? This cannot be undone.")) {
             return;
@@ -144,15 +158,16 @@ export function Sidebar() {
                 headers['X-Organization-Context'] = orgContext;
             }
 
-            const res = await fetch(`/api/projects?projectId=${projectId}`, { 
+            const res = await fetch(`/api/projects?projectId=${encodeURIComponent(project.id)}`, {
                 method: 'DELETE',
-                headers 
+                headers
             });
 
             if (res.ok) {
                 toast.success("Project deleted successfully");
-                if (threadId === projectId) {
+                if (effectiveProjectId === projectSegment(project)) {
                     setThreadId(null);
+                    if (orgId) router.push(`/org/${encodeURIComponent(orgId)}/map`);
                 }
                 fetchProjects();
             } else {
@@ -220,7 +235,20 @@ export function Sidebar() {
                             variant="ghost"
                             size="icon"
                             className="h-5 w-5 hover:bg-muted"
-                            onClick={() => setThreadId(null)}
+                            disabled={creatingProject}
+                            onClick={async () => {
+                                if (createNewThreadWithContext) {
+                                    setCreatingProject(true);
+                                    try {
+                                        await createNewThreadWithContext();
+                                        window.dispatchEvent(new CustomEvent("orgContextChanged"));
+                                    } finally {
+                                        setCreatingProject(false);
+                                    }
+                                } else {
+                                    setThreadId(null);
+                                }
+                            }}
                         >
                             <Plus className="h-3 w-3" />
                             <span className="sr-only">New Project</span>
@@ -236,12 +264,18 @@ export function Sidebar() {
                             </div>
                         ) : (
                             filteredProjects.map((project) => {
-                                const isActive = threadId === project.id;
+                                const segment = projectSegment(project);
+                                const isActive = effectiveProjectId === segment;
                                 const isEditing = editingProjectId === project.id;
                                 return (
                                     <div key={project.id} className="group relative">
+                                        {/* Select existing project: put thread_id in URL so effectiveThreadId is the real LangGraph thread. */}
                                         <button
-                                            onClick={() => !isEditing && setThreadId(project.id)}
+                                            onClick={() => {
+                                                if (isEditing) return;
+                                                if (orgId) router.push(`/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(segment)}/map`);
+                                                else setThreadId(segment);
+                                            }}
                                             className={cn(
                                                 "w-full text-left flex flex-col rounded-md px-3 py-2.5 text-sm font-medium transition-all",
                                                 isActive ? "bg-primary/10 text-primary shadow-sm" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
@@ -294,7 +328,7 @@ export function Sidebar() {
                                                     variant="ghost"
                                                     size="icon"
                                                     className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
-                                                    onClick={(e) => deleteProject(e, project.id)}
+                                                    onClick={(e) => deleteProject(e, project)}
                                                 >
                                                     <Trash2 className="h-3.5 w-3.5" />
                                                     <span className="sr-only">Delete Project</span>
@@ -308,7 +342,21 @@ export function Sidebar() {
                         <Button
                             variant="ghost"
                             className="w-full justify-start text-muted-foreground hover:text-foreground px-3 py-2 h-auto font-normal mt-2"
-                            onClick={() => setThreadId(null)}
+                            disabled={creatingProject}
+                            onClick={async () => {
+                                if (createNewThreadWithContext) {
+                                    setCreatingProject(true);
+                                    try {
+                                        const newId = await createNewThreadWithContext();
+                                        window.dispatchEvent(new CustomEvent("orgContextChanged"));
+                                        if (newId && orgId) router.push(`/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(newId)}/map`);
+                                    } finally {
+                                        setCreatingProject(false);
+                                    }
+                                } else {
+                                    setThreadId(null);
+                                }
+                            }}
                         >
                             <Plus className="mr-3 h-4 w-4" />
                             New Project
@@ -325,11 +373,12 @@ export function Sidebar() {
                         <div className="space-y-1">
                             {PRODUCT_LINKS.map((link) => {
                                 const Icon = link.icon;
-                                const isActive = pathname === link.href;
+                                const href = orgId ? `/org/${encodeURIComponent(orgId)}${link.href}` : link.href;
+                                const isActive = pathname === href || pathname === link.href;
                                 return (
                                     <Link
                                         key={link.href}
-                                        href={link.href}
+                                        href={href}
                                         className={cn(
                                             "group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-all",
                                             isActive ? "bg-primary/10 text-primary shadow-sm" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"

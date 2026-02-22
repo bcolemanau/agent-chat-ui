@@ -6,7 +6,6 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
 import { useBranding } from "@/providers/Branding";
-import { withThreadSpan } from "@/lib/otel-client";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
@@ -385,41 +384,23 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
       uploadedDocuments: uploadedDocuments.length
     });
 
-    // Trace message submission, especially for new threads
-    const isNewThread = !threadId;
-    withThreadSpan(
-      "message.submit",
+    (stream as any).submit(
+      { messages: [...toolMessages, newHumanMessage], context },
       {
-        "thread.id": threadId || "new",
-        "thread.is_new": isNewThread,
-        "message.has_text": input.trim().length > 0,
-        "message.content_blocks": contentBlocks.length,
-        "message.uploaded_documents": uploadedDocuments.length,
-        "message.tool_messages": toolMessages.length,
-        "api.url": stream.apiUrl || "unknown",
+        streamMode: ["values"],
+        streamSubgraphs: true,
+        streamResumable: true,
+        optimisticValues: (prev: any) => ({
+          ...(prev || {}),
+          context,
+          messages: [
+            ...((prev?.messages || [])),
+            ...toolMessages,
+            newHumanMessage,
+          ],
+        }),
       },
-      async () => {
-        (stream as any).submit(
-          { messages: [...toolMessages, newHumanMessage], context },
-          {
-            streamMode: ["values"],
-            streamSubgraphs: true,
-            streamResumable: true,
-            optimisticValues: (prev: any) => ({
-              ...(prev || {}),
-              context,
-              messages: [
-                ...((prev?.messages || [])),
-                ...toolMessages,
-                newHumanMessage,
-              ],
-            }),
-          },
-        );
-      }
-    ).catch((err) => {
-      console.error("[OTEL] Failed to trace message submission:", err);
-    });
+    );
 
     setInput("");
     setContentBlocks([]);
@@ -531,7 +512,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                       className="p-4"
                       tooltip="Open Workbench"
                       variant="ghost"
-                      onClick={() => window.location.href = "/workbench/map"}
+                      onClick={() => window.location.href = "/map"}
                     >
                       <LayoutDashboard className="size-5" />
                     </TooltipIconButton>
@@ -592,7 +573,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                       className="p-4"
                       tooltip="Open Workbench"
                       variant="ghost"
-                      onClick={() => window.location.href = "/workbench/map"}
+                      onClick={() => window.location.href = "/map"}
                     >
                       <LayoutDashboard className="size-5" />
                     </TooltipIconButton>

@@ -1,7 +1,11 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { DecisionsPanel } from "@/components/workbench/decisions-panel";
-
-export default function DecisionsPage() {
-  return <DecisionsPanel />;
+export default async function WorkbenchDecisionsRedirect({
+    searchParams,
+}: {
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+    const params = await searchParams;
+    const q = new URLSearchParams(params as Record<string, string>).toString();
+    redirect(`/decisions${q ? `?${q}` : ""}`);
 }

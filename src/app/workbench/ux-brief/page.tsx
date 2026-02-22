@@ -1,12 +1,11 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { OptionsApprovalPage } from "@/components/workbench/options-approval-page";
-
-export default function UxBriefPage() {
-  return (
-    <OptionsApprovalPage
-      toolName="generate_ux_brief"
-      rejectMessage="UX brief options rejected"
-    />
-  );
+export default async function WorkbenchUxBriefRedirect({
+    searchParams,
+}: {
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+    const params = await searchParams;
+    const q = new URLSearchParams(params as Record<string, string>).toString();
+    redirect(`/decisions${q ? `?${q}` : ""}`);
 }

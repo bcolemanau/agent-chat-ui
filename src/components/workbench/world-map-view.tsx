@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitCompare, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
@@ -47,6 +47,31 @@ interface GraphData {
     };
 }
 
+/** Parse decision commit message body (build_decision_commit_message format) for status/type. */
+function parseDecisionCommitMessage(messageFull: string | undefined): { status?: string; type?: string } {
+    if (!messageFull || typeof messageFull !== 'string') return {};
+    const out: { status?: string; type?: string } = {};
+    for (const line of messageFull.split('\n')) {
+        const t = line.trim();
+        if (t.startsWith('status:')) out.status = t.slice(6).trim();
+        else if (t.startsWith('type:')) out.type = t.slice(5).trim();
+    }
+    return out;
+}
+
+/** Map decision status to timeline badge label. */
+function decisionStatusLabel(status: string | undefined): string | null {
+    if (!status) return null;
+    const s = status.toLowerCase();
+    if (s === 'pending') return 'Proposed';
+    if (s === 'approved') return 'Approved';
+    if (s === 'rejected') return 'Rejected';
+    return status;
+}
+
+/** Content-level trace link types to emphasize when a node is focused (primary over ART–ART links). */
+const CONTENT_TRACE_LINK_TYPES = new Set(['DERIVED_FROM', 'SATISFIES', 'REALIZES', 'VALIDATES', 'TRACES_TO']);
+
 /** Type → display label (for legend and fallback). */
 const typeConfig: Record<string, { color: string; label: string }> = {
     DOMAIN: { color: '#64748b', label: 'Domain' },
@@ -76,40 +101,40 @@ const typeConfig: Record<string, { color: string; label: string }> = {
     TEMPLATE: { color: '#64748b', label: 'Template' },
 };
 
-/** Agent → Template → NodeTypes hierarchy (aligns with ArtifactTemplates_kg). Colour is at Agent level. */
+/** Agent → Template → NodeTypes hierarchy (aligns with ArtifactTemplates_kg). Colour is at Agent level. templateId matches backend CONTRIBUTES_TO (T-*) for artifact risk aggregates. */
 const MAP_LEGEND_AGENT_HIERARCHY: {
     agentId: string;
     agentName: string;
-    templates: { templateName: string; types: string[] }[];
+    templates: { templateName: string; templateId?: string; types: string[] }[];
 }[] = [
     {
         agentId: 'concept',
         agentName: 'Concept',
         templates: [
-            { templateName: 'Concept Brief', types: ['PERSONA', 'PERS', 'SCENARIO', 'OUTCOME', 'OUT', 'METRIC', 'MET', 'DECISION', 'CONSTRAINT', 'CONST'] },
-            { templateName: 'Feature Definition', types: ['FEATURE', 'FEAT', 'JTBD'] },
-            { templateName: 'UX Brief', types: ['UXO'] },
+            { templateName: 'Concept Brief', templateId: 'T-CONCEPT', types: ['PERSONA', 'PERS', 'SCENARIO', 'OUTCOME', 'OUT', 'METRIC', 'MET', 'DECISION', 'CONSTRAINT', 'CONST'] },
+            { templateName: 'Feature Definition', templateId: 'T-FEATDEF', types: ['FEATURE', 'FEAT', 'JTBD'] },
+            { templateName: 'UX Brief', templateId: 'T-UX', types: ['UXO'] },
         ],
     },
     {
         agentId: 'requirements',
         agentName: 'Requirements',
         templates: [
-            { templateName: 'Requirements Package', types: ['REQUIREMENT', 'LIFECYCLE', 'SCENARIO'] },
+            { templateName: 'Requirements Package', templateId: 'T-REQPKG', types: ['REQUIREMENT', 'LIFECYCLE', 'SCENARIO'] },
         ],
     },
     {
         agentId: 'architecture',
         agentName: 'Architecture',
         templates: [
-            { templateName: 'Architecture', types: ['COMPONENT', 'INTERFACE', 'VIEW'] },
+            { templateName: 'Architecture', templateId: 'T-ARCH', types: ['COMPONENT', 'INTERFACE', 'VIEW'] },
         ],
     },
     {
         agentId: 'design',
         agentName: 'Design',
         templates: [
-            { templateName: 'Design', types: ['COMPONENT', 'INTERFACE', 'REQUIREMENT', 'DECISION'] },
+            { templateName: 'Design', templateId: 'T-DESIGN', types: ['COMPONENT', 'INTERFACE', 'REQUIREMENT', 'DECISION'] },
         ],
     },
     {
@@ -170,7 +195,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-    const [threadId] = useQueryState("threadId");
+    const [threadIdFromUrl] = useQueryState("threadId");
+    const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
 
     const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
     const [kgDecisions, setKgDecisions] = useState<{ id: string; type: string; title: string; status?: string; kg_version_sha?: string }[]>([]);
@@ -237,8 +263,27 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const [legendCollapsed, setLegendCollapsed] = useState<Record<string, boolean>>({});
     /** Workflow strip for bottom panel (same left-to-right as header). */
     const [workflowStrip, setWorkflowStrip] = useState<{ nodes: { id: string; label: string }[]; active_node?: string } | null>(null);
+    /** Project risk summary (in-scope, covered, uncovered, artifact_aggregates) for map context pane. */
+    const [riskSummary, setRiskSummary] = useState<{
+        in_scope: number;
+        covered: number;
+        uncovered: number;
+        artifact_aggregates: { art_node_id: string; template_id?: string; covered: number; covered_crit_ids: string[] }[];
+    } | null>(null);
+    /** Phase-level risk aggregates (phase_id, in_scope, covered, uncovered) for map hierarchy. */
+    const [phaseRiskAggregates, setPhaseRiskAggregates] = useState<{ phase_id: string; in_scope: number; covered: number; uncovered: number }[]>([]);
+    const [loadingRiskSummary, setLoadingRiskSummary] = useState(false);
     /** Bottom panel (workflow | filter | search | zoom) collapsed. */
     const [bottomPanelCollapsed, setBottomPanelCollapsed] = useState(false);
+    /** Focused node (ART or content). Map emphasizes this node + its contained nodes + content-level trace links. Clicking a node moves focus. */
+    const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+
+    // Clear focus when graph data changes and the focused node is no longer present
+    useEffect(() => {
+        if (focusedNodeId && data?.nodes && !data.nodes.some((n: Node) => n.id === focusedNodeId)) {
+            setFocusedNodeId(null);
+        }
+    }, [data?.nodes, focusedNodeId]);
 
     // Fetch workflow strip for bottom panel (same as header, left-to-right flow)
     useEffect(() => {
@@ -257,6 +302,43 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         return () => { cancelled = true; };
     }, [threadId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
 
+    // Fetch project risk summary (project + phase + artifact aggregates) for map context pane
+    useEffect(() => {
+        if (!threadId || embeddedInDecisions) {
+            setRiskSummary(null);
+            return;
+        }
+        let cancelled = false;
+        setLoadingRiskSummary(true);
+        const params = new URLSearchParams({ thread_id: threadId });
+        const headers: Record<string, string> = {};
+        const orgContext = localStorage.getItem('reflexion_org_context');
+        if (orgContext) headers['X-Organization-Context'] = orgContext;
+        fetch(`/api/project/risk-summary?${params.toString()}`, { headers })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data: { in_scope?: number; covered?: number; uncovered?: number; phase_aggregates?: { phase_id: string; in_scope: number; covered: number; uncovered: number }[]; artifact_aggregates?: { art_node_id: string; template_id?: string; covered: number; covered_crit_ids: string[] }[] } | null) => {
+                if (cancelled) return;
+                if (data && typeof data.in_scope === 'number') {
+                    setRiskSummary({
+                        in_scope: data.in_scope,
+                        covered: data.covered ?? 0,
+                        uncovered: data.uncovered ?? 0,
+                        artifact_aggregates: Array.isArray(data.artifact_aggregates) ? data.artifact_aggregates : [],
+                    });
+                    setPhaseRiskAggregates(Array.isArray(data.phase_aggregates) ? data.phase_aggregates : []);
+                    if (process.env.NODE_ENV === 'development') {
+                        console.info('[Map context] Project risk: in_scope=%s covered=%s uncovered=%s', data.in_scope, data.covered, data.uncovered);
+                    }
+                } else {
+                    setRiskSummary(null);
+                    setPhaseRiskAggregates([]);
+                }
+            })
+            .catch(() => { if (!cancelled) setRiskSummary(null); })
+            .finally(() => { if (!cancelled) setLoadingRiskSummary(false); });
+        return () => { cancelled = true; };
+    }, [threadId, embeddedInDecisions]);
+
     useEffect(() => {
         if (selectedTimelineVersionId) {
             console.log('[WorldMapView] Timeline diff state', {
@@ -268,6 +350,37 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             });
         }
     }, [selectedTimelineVersionId, timelineVersionDiff, loadingTimelineDiff]);
+
+    /** ART node ids by template id (CONTRIBUTES_TO: ART → T-*) for focus-from-hierarchy. */
+    const artNodeIdsByTemplateId = useMemo(() => {
+        const map: Record<string, string[]> = {};
+        for (const l of data?.links ?? []) {
+            const typ = (l.type ?? '').toString().trim();
+            if (typ !== 'CONTRIBUTES_TO') continue;
+            const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+            const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+            if (!src || !tgt || !String(tgt).startsWith('T-')) continue;
+            if (!map[tgt]) map[tgt] = [];
+            map[tgt].push(src);
+        }
+        return map;
+    }, [data?.links]);
+
+    /** For a template, pick the best ART to focus: prefer one that only CONTRIBUTES_TO this template (avoids focusing "Concept Brief" when user chose "Requirements Package"). */
+    const getFocusArtIdForTemplate = useCallback(
+        (templateId: string): string | undefined => {
+            const artIds = artNodeIdsByTemplateId[templateId] ?? [];
+            if (artIds.length === 0) return undefined;
+            const otherTemplateIds = Object.keys(artNodeIdsByTemplateId).filter((t) => t !== templateId);
+            const artIdsInOther = new Set<string>();
+            for (const t of otherTemplateIds) {
+                for (const id of artNodeIdsByTemplateId[t] ?? []) artIdsInOther.add(id);
+            }
+            const exclusive = artIds.find((id) => !artIdsInOther.has(id));
+            return exclusive ?? artIds[0];
+        },
+        [artNodeIdsByTemplateId]
+    );
 
     const unifiedPreviews = useUnifiedPreviews();
     const draftArtifactNodes = useMemo(() => {
@@ -310,8 +423,12 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             if (orgContext) headers['X-Organization-Context'] = orgContext;
             const res = await fetch(`/api/decisions?thread_id=${encodeURIComponent(threadId)}`, { headers });
             if (res.ok) {
-                const list = await res.json();
-                setKgDecisions(Array.isArray(list) ? list.filter((r: any) => r && r.id) : []);
+                const data = await res.json();
+                // Backend returns { decisions, org_phase } when org has NPDDecision; otherwise a plain array
+                const projectList = Array.isArray(data) ? data : (data?.decisions ?? []);
+                const orgList = data?.org_phase?.decisions ?? [];
+                const merged = [...orgList, ...projectList].filter((r: { id?: string }) => r && r.id);
+                setKgDecisions(merged);
             }
         } catch (e) { console.error('Decisions fetch error:', e); }
     };
@@ -326,10 +443,20 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             setLoadingDiff(true);
             const v1Resolved = resolveVersion(v1);
             const v2Resolved = resolveVersion(v2);
+            const versions = (kgHistory?.versions ?? []) as { id?: string; source?: string }[];
+            const v1Source = v1 === "current" ? undefined : versions.find((x) => x.id === v1Resolved)?.source;
+            const v2Source = v2 === "current" ? undefined : versions.find((x) => x.id === v2Resolved)?.source;
+            const params = new URLSearchParams({
+                thread_id: threadId,
+                version1: v1Resolved,
+                version2: v2Resolved,
+            });
+            if (v1Source === "organization") params.set("version1_source", "organization");
+            if (v2Source === "organization") params.set("version2_source", "organization");
             const orgContext = localStorage.getItem('reflexion_org_context');
             const headers: Record<string, string> = {};
             if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const url = `/api/project/diff?thread_id=${threadId}&version1=${v1Resolved}&version2=${v2Resolved}`;
+            const url = `/api/project/diff?${params.toString()}`;
             const res = await fetch(url, { headers });
             if (res.ok) {
                 const diff = await res.json();
@@ -345,8 +472,9 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 setCompareMode(true);
                 setViewMode('map'); // Compare always shows map/diff view (workflow tab removed)
                 setActiveVersion(v2 === "current" ? null : v2);
+                const v2Source = v2 === "current" ? undefined : (kgHistory?.versions as { id?: string; source?: string }[] | undefined)?.find((x) => x.id === v2Resolved)?.source;
                 // Load v2 graph first so diff is applied to correct data (avoids race where diff showed on stale graph).
-                await fetchData(v2 === "current" ? undefined : v2, true);
+                await fetchData(v2 === "current" ? undefined : v2, true, false, v2Source);
                 setDiffData(diff);
             } else {
                 console.error('Diff fetch failed:', await res.text());
@@ -364,14 +492,23 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             console.log('[WorldMapView] Timeline diff fetch skipped: no threadId or kgHistory', { threadId: !!threadId, versionsLength: kgHistory?.versions?.length ?? 0 });
             return;
         }
-        const versions = kgHistory.versions as { id?: string }[];
+        const versions = kgHistory.versions as { id?: string; source?: string }[];
         const idx = versions.findIndex((v) => v.id === versionId);
         const versionBefore = idx >= 0 && idx < versions.length - 1 ? versions[idx + 1]?.id : undefined;
         if (!versionBefore) {
             console.log('[WorldMapView] Timeline diff fetch skipped: no versionBefore', { versionId, idx, versionsLength: versions.length });
             return;
         }
-        const url = `/api/project/diff?thread_id=${threadId}&version1=${versionBefore}&version2=${versionId}`;
+        const params = new URLSearchParams({
+            thread_id: threadId,
+            version1: versionBefore,
+            version2: versionId,
+        });
+        const v1Source = versions.find((v) => v.id === versionBefore)?.source;
+        const v2Source = versions.find((v) => v.id === versionId)?.source;
+        if (v1Source === "organization") params.set("version1_source", "organization");
+        if (v2Source === "organization") params.set("version2_source", "organization");
+        const url = `/api/project/diff?${params.toString()}`;
         console.log('[WorldMapView] Timeline diff fetch start', { versionId, versionBefore, url });
         try {
             setLoadingTimelineDiff(true);
@@ -398,10 +535,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
     };
 
-    /** Poll interval so KG updates from other users (same project) appear without refresh. */
-    const KG_POLL_INTERVAL_MS = 15_000;
-
-    const fetchData = async (version?: string, preserveDiff: boolean = false, silent: boolean = false) => {
+    const fetchData = async (version?: string, preserveDiff: boolean = false, silent: boolean = false, versionSource?: string) => {
         try {
             if (!silent) {
                 setLoading(true);
@@ -411,15 +545,18 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             const headers: Record<string, string> = {};
             if (orgContext) headers['X-Organization-Context'] = orgContext;
 
-            let url = threadId ? `/api/kg-data?thread_id=${threadId}` : '/api/kg-data';
+            const params = new URLSearchParams();
+            if (threadId) params.set('thread_id', threadId);
             if (version) {
-                url += `&version=${version}`;
+                params.set('version', version);
                 setActiveVersion(version);
             } else {
                 setActiveVersion(null);
             }
+            if (versionSource === 'organization') params.set('version_source', 'organization');
+            const url = `/api/kg-data?${params.toString()}`;
 
-            console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version });
+            console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version, versionSource });
             const res = await fetch(url, { headers });
             if (!res.ok) throw new Error('Failed to fetch graph data');
             const json = await res.json();
@@ -446,16 +583,9 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     };
 
     const workbenchRefreshKey = (stream as any)?.workbenchRefreshKey ?? 0;
-    const { connected: sseConnected } = useThreadUpdates(threadId ?? undefined, {
+    useThreadUpdates(threadId ?? undefined, {
         onKgUpdate: () => fetchData(undefined, false, true),
     });
-
-    // Multi-user: poll KG when SSE not connected and viewing current map so updates from other users appear
-    useEffect(() => {
-        if (!threadId || sseConnected || activeVersion || (compareMode && diffData)) return;
-        const intervalId = setInterval(() => fetchData(undefined, false, true), KG_POLL_INTERVAL_MS);
-        return () => clearInterval(intervalId);
-    }, [threadId, sseConnected, activeVersion, compareMode, diffData]);
 
     // When we have a project (threadId), always fetch from API so map/artifacts show persisted KG
     // (uploaded/enriched). When no threadId, use filtered_kg if streamed or fallback to fetch.
@@ -834,6 +964,18 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             validLinks = resolvedLinks;
         }
 
+        // In-focus set: focused node + contained nodes (REFERENCES from that node). Same logic for ART or content node.
+        const inFocusNodeIds = new Set<string>();
+        if (focusedNodeId) {
+            inFocusNodeIds.add(focusedNodeId);
+            for (const l of resolvedLinks) {
+                const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+                const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+                const linkType = (l.type ?? '').toString().trim();
+                if (linkType === 'REFERENCES' && src === focusedNodeId && tgt) inFocusNodeIds.add(tgt);
+            }
+        }
+
         // Unconditional logging so console always shows resolution result (filter by "WorldMapView").
         const addedNodeIds = new Set(nodes.filter((n: Node) => (n as any).diff_status === 'added').map((n: Node) => n.id));
         const endpointSet = allSourceTargets;
@@ -948,6 +1090,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .style('opacity', 1)
             .style('filter', 'none')
             .on('click', (event, d) => {
+                setFocusedNodeId(d.id);
                 setSelectedNode(d);
                 event.stopPropagation();
             })
@@ -1046,38 +1189,43 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .style('pointer-events', 'none');
 
         simulation.on('tick', () => {
+            const linkType = (d: Link) => (d.type ?? '').toString().trim();
+            const isContentTraceLink = (d: Link) => CONTENT_TRACE_LINK_TYPES.has(linkType(d));
+            const isReferencesFromFocus = (d: Link) => linkType(d) === 'REFERENCES' && (typeof d.source === 'string' ? d.source : (d.source as Node)?.id) === focusedNodeId;
+            const sourceId = (d: Link) => typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
+            const targetId = (d: Link) => typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
+            const linkTouchesFocus = (d: Link) => inFocusNodeIds.has(sourceId(d)) || inFocusNodeIds.has(targetId(d));
+            const linkHighlighted = (d: Link) => focusedNodeId && linkTouchesFocus(d) && (isContentTraceLink(d) || isReferencesFromFocus(d));
+
             link
                 .attr('x1', d => (d.source as Node).x!)
                 .attr('y1', d => (d.source as Node).y!)
                 .attr('x2', d => (d.target as Node).x!)
                 .attr('y2', d => (d.target as Node).y!)
                 .style('opacity', d => {
-                    // Highlight links connected to selected node
+                    if (focusedNodeId) {
+                        if (linkHighlighted(d)) return 1;
+                        return 0.2;
+                    }
                     if (selectedNode) {
-                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
-                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-                        if (sourceId === selectedNode.id || targetId === selectedNode.id) return 1;
+                        if (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id) return 1;
                     }
                     return 0.5;
                 })
                 .style('stroke-width', d => {
-                    if (selectedNode) {
-                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
-                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-                        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
-                            return 2.5;
-                        }
+                    if (focusedNodeId) {
+                        if (linkHighlighted(d)) return 2.5;
+                        return 1;
                     }
+                    if (selectedNode && (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id)) return 2.5;
                     return 1.5;
                 })
                 .style('stroke', d => {
-                    if (selectedNode) {
-                        const sourceId = typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
-                        const targetId = typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
-                        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
-                            return '#3b82f6';
-                        }
+                    if (focusedNodeId) {
+                        if (linkHighlighted(d)) return '#3b82f6';
+                        return '#888';
                     }
+                    if (selectedNode && (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id)) return '#3b82f6';
                     if (linkIsPendingOrRejected(d)) return linkKgStatus(d) === 'pending' ? '#f59e0b' : '#ef4444';
                     return '#888';
                 });
@@ -1085,7 +1233,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             node
                 .attr('transform', d => `translate(${d.x},${d.y})`)
                 .style('opacity', d => {
-                    // Dim non-selected nodes when a node is selected
+                    if (focusedNodeId) return inFocusNodeIds.has(d.id) ? 1 : 0.35;
                     if (selectedNode && d.id !== selectedNode.id) return 0.4;
                     return 1;
                 });
@@ -1127,7 +1275,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 }
             }
         };
-    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, compareViewMode, mapSearchQuery, typeFilter, statusFilter]);
+    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, focusedNodeId, compareViewMode, mapSearchQuery, typeFilter, statusFilter]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -1233,6 +1381,16 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             <p className="text-[10px] text-muted-foreground">
                                 {compareMode ? "Select two versions to compare" : `${kgHistory.total} snapshots available`}
                             </p>
+                            {!compareMode && (
+                                <p className="text-[10px] text-muted-foreground/70 mt-0.5" title="GitHub commits for NPDModel.json (KG+decision pair), not LangGraph thread history">
+                                    KG + decision history
+                                </p>
+                            )}
+                            {!compareMode && kgHistory.total === 0 && (
+                                <p className="text-[10px] text-muted-foreground/80 mt-1 italic">
+                                    Version history appears after the KG is saved (e.g. apply a decision or complete hydration). If you see history on GitHub for this project, the backend may be using a different branch — set DATA_GITHUB_STORAGE_BRANCH to match the branch in your GitHub URL.
+                                </p>
+                            )}
                         </div>
                         <UIButton variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
                             setShowHistory(false);
@@ -1279,9 +1437,34 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                     <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                                 )}
                                             </div>
-                                            {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
-                                                <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
-                                            )}
+                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                {v.source === "organization" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Organization</span>
+                                                )}
+                                                {v.source === "project" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
+                                                )}
+                                                {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                    <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
+                                                )}
+                                                <span className="text-[9px] text-muted-foreground">Clone: {v.source === "organization" ? "Org" : "—"}</span>
+                                                {(() => {
+                                                    const parsed = parseDecisionCommitMessage(v.message_full);
+                                                    const label = decisionStatusLabel(parsed.status);
+                                                    if (!label) return null;
+                                                    const s = parsed.status?.toLowerCase();
+                                                    return (
+                                                        <span className={cn(
+                                                            "text-[9px] px-1.5 py-0.5 rounded font-medium",
+                                                            s === 'pending' && "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200",
+                                                            s === 'approved' && "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200",
+                                                            s === 'rejected' && "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200"
+                                                        )}>
+                                                            {label}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -1322,9 +1505,34 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                     <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                                 )}
                                             </div>
-                                            {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
-                                                <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
-                                            )}
+                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                {v.source === "organization" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Organization</span>
+                                                )}
+                                                {v.source === "project" && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
+                                                )}
+                                                {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                    <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
+                                                )}
+                                                <span className="text-[9px] text-muted-foreground">Clone: {v.source === "organization" ? "Org" : "—"}</span>
+                                                {(() => {
+                                                    const parsed = parseDecisionCommitMessage(v.message_full);
+                                                    const label = decisionStatusLabel(parsed.status);
+                                                    if (!label) return null;
+                                                    const s = parsed.status?.toLowerCase();
+                                                    return (
+                                                        <span className={cn(
+                                                            "text-[9px] px-1.5 py-0.5 rounded font-medium",
+                                                            s === 'pending' && "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200",
+                                                            s === 'approved' && "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200",
+                                                            s === 'rejected' && "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200"
+                                                        )}>
+                                                            {label}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -1334,43 +1542,56 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                     <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                                 </div>
                             )}
-                            {diffData && diffData.summary && (
-                                <div className="mt-4 p-3 bg-muted/50 rounded-md border border-border">
-                                    <div className="text-[10px] font-bold text-muted-foreground uppercase mb-2">Diff Summary</div>
-                                    <div className="space-y-1 text-xs">
-                                        <div className="flex justify-between">
-                                            <span className="text-green-500">Added:</span>
-                                            <span className="font-medium">{diffData.summary.added}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="text-yellow-500">Modified:</span>
-                                            <span className="font-medium">{diffData.summary.modified}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="text-red-500">Removed:</span>
-                                            <span className="font-medium">{diffData.summary.removed}</span>
-                                        </div>
-                                        <div className="pt-2 border-t border-border mt-2">
-                                            <div className="flex justify-between text-[10px] text-muted-foreground">
-                                                <span>Nodes: {diffData.summary.total_nodes_v1} → {diffData.summary.total_nodes_v2}</span>
+                            {(() => {
+                                const effectiveSummary = (selectedTimelineVersionId && timelineVersionDiff?.summary)
+                                    ? timelineVersionDiff.summary
+                                    : diffData?.summary;
+                                if (!effectiveSummary) return null;
+                                const semSummary = timelineVersionDiff?.diff?.summary?.semanticSummary ?? timelineVersionDiff?.summary?.semanticSummary ?? (diffData?.diff?.summary as { semanticSummary?: string })?.semanticSummary ?? (diffData?.summary as { semanticSummary?: string })?.semanticSummary;
+                                return (
+                                    <div className="mt-4 p-3 bg-muted/50 rounded-md border border-border">
+                                        <div className="text-[10px] font-bold text-muted-foreground uppercase mb-2">Diff Summary</div>
+                                        <div className="space-y-1 text-xs">
+                                            <div className="flex justify-between">
+                                                <span className="text-green-500">Added:</span>
+                                                <span className="font-medium">{effectiveSummary.added ?? 0}</span>
                                             </div>
-                                            <div className="flex justify-between text-[10px] text-muted-foreground">
-                                                <span>Links: {diffData.summary.total_links_v1} → {diffData.summary.total_links_v2}</span>
+                                            <div className="flex justify-between">
+                                                <span className="text-yellow-500">Modified:</span>
+                                                <span className="font-medium">{effectiveSummary.modified ?? 0}</span>
                                             </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-red-500">Removed:</span>
+                                                <span className="font-medium">{effectiveSummary.removed ?? 0}</span>
+                                            </div>
+                                            {(effectiveSummary as { total_nodes_v1?: number }).total_nodes_v1 != null && (
+                                                <div className="pt-2 border-t border-border mt-2">
+                                                    <div className="flex justify-between text-[10px] text-muted-foreground">
+                                                        <span>Nodes: {(effectiveSummary as { total_nodes_v1?: number }).total_nodes_v1} → {(effectiveSummary as { total_nodes_v2?: number }).total_nodes_v2}</span>
+                                                    </div>
+                                                    <div className="flex justify-between text-[10px] text-muted-foreground">
+                                                        <span>Links: {(effectiveSummary as { total_links_v1?: number }).total_links_v1} → {(effectiveSummary as { total_links_v2?: number }).total_links_v2}</span>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {semSummary && (
+                                                <div className="pt-2 border-t border-border mt-2">
+                                                    <p className="text-[10px] text-muted-foreground italic">{semSummary as string}</p>
+                                                </div>
+                                            )}
                                         </div>
-                                        {(diffData.diff?.summary?.semanticSummary ?? (diffData.summary as { semanticSummary?: string })?.semanticSummary) && (
-                                            <div className="pt-2 border-t border-border mt-2">
-                                                <p className="text-[10px] text-muted-foreground italic">
-                                                    {(diffData.diff?.summary?.semanticSummary ?? (diffData.summary as { semanticSummary?: string })?.semanticSummary) as string}
-                                                </p>
-                                            </div>
-                                        )}
                                     </div>
-                                </div>
-                            )}
+                                );
+                            })()}
                         </div>
                     ) : (
                         <div className="flex-1 overflow-y-auto p-2 space-y-1 flex flex-col">
+                            {/* Data view header: Phase and Clone */}
+                            <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-2 py-1 text-[10px] font-bold text-muted-foreground uppercase border-b border-border/50">
+                                <span>Version</span>
+                                <span>Phase</span>
+                                <span>Clone</span>
+                            </div>
                             <div
                                 className={cn(
                                     "p-3 rounded-md cursor-pointer transition-colors flex flex-col gap-1",
@@ -1391,6 +1612,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
                             {kgHistory.versions.map((v: any) => {
                                 const isDecision = kgDecisions.some((d: any) => d.kg_version_sha === v.id);
+                                const phase = v.source === "organization" ? "Organization" : (v.source === "project" ? "Project" : (v.source ?? "Project"));
+                                const cloneLabel = v.source === "organization" ? "Org" : "—";
                                 return (
                                     <div
                                         key={v.id}
@@ -1400,7 +1623,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                         )}
                                         onClick={() => {
                                             setActiveVersion(v.id);
-                                            fetchData(v.id);
+                                            fetchData(v.id, false, false, v.source);
                                             if (isDecision) {
                                                 setSelectedTimelineVersionId(v.id);
                                                 console.log('[WorldMapView] Timeline: selected decision version', { versionId: v.id });
@@ -1414,15 +1637,47 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                         <span className="text-xs font-medium text-foreground">
                                             {v.message || v.id}
                                         </span>
+                                        {v.message_full && v.message_full.trim() !== (v.message || '').trim() && (
+                                            <p className="text-[10px] text-muted-foreground whitespace-pre-wrap line-clamp-3 mt-0.5 border-t border-border/50 pt-1">
+                                                {v.message_full}
+                                            </p>
+                                        )}
                                         <div className="flex items-center justify-between">
                                             <span className="text-[10px] text-muted-foreground">{v.timestamp}</span>
                                             {v.sha && (
                                                 <span className="text-[9px] text-muted-foreground/60 font-mono">{v.sha}</span>
                                             )}
                                         </div>
-                                        {isDecision && (
-                                            <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5 block">Decision</span>
-                                        )}
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                            {phase === "Organization" && (
+                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200" title="Phase">Organization</span>
+                                            )}
+                                            {phase === "Project" && (
+                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200" title="Phase">Project</span>
+                                            )}
+                                            {isDecision && (
+                                                <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
+                                            )}
+                                            {(() => {
+                                                const parsed = parseDecisionCommitMessage(v.message_full);
+                                                const label = decisionStatusLabel(parsed.status);
+                                                if (!label) return null;
+                                                const s = parsed.status?.toLowerCase();
+                                                return (
+                                                    <span className={cn(
+                                                        "text-[9px] px-1.5 py-0.5 rounded font-medium",
+                                                        s === 'pending' && "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200",
+                                                        s === 'approved' && "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200",
+                                                        s === 'rejected' && "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200"
+                                                    )}>
+                                                        {label}
+                                                    </span>
+                                                );
+                                            })()}
+                                            </div>
+                                            <span className="text-[9px] text-muted-foreground shrink-0" title="Clone">{cloneLabel}</span>
+                                        </div>
                                     </div>
                                 );
                             })}
@@ -1453,6 +1708,16 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                         <span className="text-red-500">Removed:</span>
                                                         <span className="font-medium">{timelineVersionDiff.summary.removed ?? 0}</span>
                                                     </div>
+                                                    {(timelineVersionDiff.summary as { total_nodes_v1?: number }).total_nodes_v1 != null && (
+                                                        <div className="pt-2 border-t border-border mt-2 space-y-0.5">
+                                                            <div className="flex justify-between text-[10px] text-muted-foreground">
+                                                                <span>Nodes: {(timelineVersionDiff.summary as { total_nodes_v1?: number }).total_nodes_v1} → {(timelineVersionDiff.summary as { total_nodes_v2?: number }).total_nodes_v2}</span>
+                                                            </div>
+                                                            <div className="flex justify-between text-[10px] text-muted-foreground">
+                                                                <span>Links: {(timelineVersionDiff.summary as { total_links_v1?: number }).total_links_v1} → {(timelineVersionDiff.summary as { total_links_v2?: number }).total_links_v2}</span>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     {timelineVersionDiff.summary.semanticSummary && (
                                                         <p className="text-[10px] text-muted-foreground italic pt-1 border-t border-border mt-1">
                                                             {timelineVersionDiff.summary.semanticSummary}
@@ -1613,7 +1878,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                     </div>
                 </div>
             ) : (
-                <div ref={containerRef} className="flex-1 min-h-0 flex flex-col relative overflow-hidden" onClick={() => setSelectedNode(null)}>
+                <div ref={containerRef} className="flex-1 min-h-0 flex flex-col relative overflow-hidden" onClick={() => { setSelectedNode(null); setFocusedNodeId(null); }}>
                     {viewMode === 'artifacts' ? (
                         <ArtifactsView />
                     ) : (
@@ -1703,6 +1968,27 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
                         )}
                         <div className="h-4 w-px bg-border shrink-0" />
+                        {/* Project risk summary (Epic #143 — map context pane) */}
+                        {threadId && (loadingRiskSummary || riskSummary !== null) && (
+                            <div className="flex items-center gap-1.5 shrink-0 px-2 py-1 rounded-md border border-border bg-background/50">
+                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Risks</span>
+                                {loadingRiskSummary ? (
+                                    <span className="text-[10px] text-muted-foreground">…</span>
+                                ) : riskSummary ? (
+                                    <span className="text-[10px] tabular-nums">
+                                        <span className="text-foreground">{riskSummary.in_scope}</span>
+                                        <span className="text-muted-foreground mx-0.5">in scope</span>
+                                        <span className="text-muted-foreground mx-1">·</span>
+                                        <span className="text-green-600 dark:text-green-400">{riskSummary.covered}</span>
+                                        <span className="text-muted-foreground mx-0.5">covered</span>
+                                        <span className="text-muted-foreground mx-1">·</span>
+                                        <span className={riskSummary.uncovered > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>{riskSummary.uncovered}</span>
+                                        <span className="text-muted-foreground mx-0.5">uncovered</span>
+                                    </span>
+                                ) : null}
+                            </div>
+                        )}
+                        <div className="h-4 w-px bg-border shrink-0" />
                         {/* Status filter: every decision has an impact on the world. Default = Active (approved only). */}
                         {data?.nodes?.length ? (
                             <div className="flex items-center gap-1.5 flex-wrap shrink-0">
@@ -1726,10 +2012,23 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
                         ) : null}
                         <div className="h-4 w-px bg-border shrink-0" />
-                        {/* Filter by type (hierarchy). Schema summary (entity_counts) from metadata shows counts; else derive presence from nodes. */}
+                        {/* Project risk summary (in scope, covered, uncovered). Not affected by map filters. */}
+                        {riskSummary ? (
+                            <div className="flex items-center gap-1.5 flex-wrap shrink-0" title="Risks in scope for this project; covered = addressed by artifact content.">
+                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Risks</span>
+                                <span className="text-[10px] text-foreground">
+                                    {riskSummary.in_scope} in scope · {riskSummary.covered} covered · {riskSummary.uncovered} uncovered
+                                </span>
+                            </div>
+                        ) : null}
+                        <div className="h-4 w-px bg-border shrink-0" />
+                        {/* Focus: click template to focus that artifact on the map (contained nodes + content trace links). Clear to show all. */}
                         {data?.nodes?.length ? (
                             <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Filter</span>
+                                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Focus</span>
+                                {focusedNodeId ? (
+                                    <button type="button" onClick={() => { setFocusedNodeId(null); }} className="inline-flex items-center rounded px-2 py-0.5 text-[10px] font-medium border border-border bg-primary/15 text-primary hover:bg-primary/25" title="Show all nodes and links">Clear focus</button>
+                                ) : null}
                                 {(() => {
                                     const entityCounts = data.metadata?.entity_counts ?? {};
                                     const typesInData = new Set(data.nodes.map((n) => n.type));
@@ -1738,28 +2037,51 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                         if (agentTypesPresent.length === 0) return null;
                                         const isCollapsed = legendCollapsed[agent.agentId] === true;
                                         const color = agentColors[agent.agentId] ?? '#888';
+                                        const phaseRisk = phaseRiskAggregates.find((p) => p.phase_id === agent.agentId);
                                         return (
                                             <div key={agent.agentId} className="rounded-md overflow-hidden border border-border" style={{ borderColor: `color-mix(in srgb, ${color} 65%, transparent)` }}>
                                                 <button type="button" onClick={() => setLegendCollapsed((prev) => ({ ...prev, [agent.agentId]: !prev[agent.agentId] }))} className={cn("w-full inline-flex items-center gap-1.5 rounded-t-md px-2 py-0.5 text-[10px] font-semibold border-b border-border transition-colors bg-muted/30 hover:bg-muted/50 text-foreground")} style={{ backgroundColor: `color-mix(in srgb, ${color} 22%, hsl(215,20%,25%))` }}>
                                                     {isCollapsed ? <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
                                                     <span>{agent.agentName}</span>
+                                                    {phaseRisk != null && (phaseRisk.covered > 0 || phaseRisk.uncovered > 0) && (
+                                                        <span className="text-[9px] font-normal text-muted-foreground tabular-nums ml-1">
+                                                            Risks: {phaseRisk.covered} covered, {phaseRisk.uncovered} uncovered
+                                                        </span>
+                                                    )}
                                                 </button>
                                                 {!isCollapsed && (
                                                     <div className="bg-background/50 p-1.5 pt-1 space-y-1">
                                                         {agent.templates.map((tpl) => {
                                                             const present = tpl.types.filter((ty) => typesInData.has(ty));
                                                             if (present.length === 0) return null;
+                                                            const firstArtId = tpl.templateId ? getFocusArtIdForTemplate(tpl.templateId) : undefined;
+                                                            const isFocused = firstArtId != null && focusedNodeId === firstArtId;
+                                                            const risksAddressed = tpl.templateId ? (() => {
+                                                                const arts = (riskSummary?.artifact_aggregates ?? []).filter((a) => a.template_id === tpl.templateId);
+                                                                const union = new Set<string>();
+                                                                arts.forEach((a) => (a.covered_crit_ids ?? []).forEach((id) => union.add(id)));
+                                                                return union.size;
+                                                            })() : 0;
                                                             return (
                                                                 <div key={tpl.templateName} className="pl-1">
-                                                                    <div className="text-[9px] font-medium text-muted-foreground mb-0.5">{tpl.templateName}</div>
-                                                                    <div className="flex flex-wrap gap-1">
+                                                                    <div className="flex items-center gap-1 mb-0.5">
+                                                                        <span className="text-[9px] font-medium text-muted-foreground">{tpl.templateName}</span>
+                                                                        {firstArtId != null ? (
+                                                                            <button type="button" onClick={(e) => { e.stopPropagation(); setFocusedNodeId(firstArtId); const node = data?.nodes?.find((n: Node) => n.id === firstArtId); if (node) setSelectedNode(node); }} className={cn("rounded px-1 py-0.5 text-[8px] font-medium border transition-colors", isFocused ? "border-primary bg-primary/20 text-primary" : "border-border bg-muted/30 hover:bg-muted/50 text-muted-foreground")} title="Focus map on this artifact (contained nodes + trace links)">Focus</button>
+                                                                        ) : null}
+                                                                    </div>
+                                                                    {risksAddressed > 0 ? (
+                                                                        <div className="text-[9px] text-muted-foreground/90 mb-0.5" title="Risks addressed by artifacts of this type">Risks addressed: {risksAddressed}</div>
+                                                                    ) : null}
+                                                                    <div className="flex flex-wrap gap-1 opacity-75">
+                                                                        <span className="text-[8px] text-muted-foreground/80 uppercase tracking-wider">Type</span>
                                                                         {present.map((t) => {
                                                                             const cfg = typeConfig[t] ?? { label: t };
                                                                             const count = entityCounts[t];
                                                                             const visible = typeFilter[t] !== false;
                                                                             return (
-                                                                                <button key={t} type="button" onClick={(e) => { e.stopPropagation(); setTypeFilter((prev) => ({ ...prev, [t]: !(prev[t] !== false) })); }} className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors", visible ? "border-border bg-muted/50 hover:bg-muted text-foreground" : "border-transparent bg-muted/20 text-muted-foreground opacity-60")} title={visible ? `Hide ${cfg.label}` : `Show ${cfg.label}`}>
-                                                                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                                                                <button key={t} type="button" onClick={(e) => { e.stopPropagation(); setTypeFilter((prev) => ({ ...prev, [t]: !(prev[t] !== false) })); }} className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium border transition-colors", visible ? "border-border bg-muted/50 hover:bg-muted text-foreground" : "border-transparent bg-muted/20 text-muted-foreground opacity-60")} title={visible ? `Hide ${cfg.label}` : `Show ${cfg.label}`}>
+                                                                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                                                                                     {cfg.label}
                                                                                     {typeof count === "number" && <span className="text-muted-foreground tabular-nums">({count})</span>}
                                                                                 </button>
