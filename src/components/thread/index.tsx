@@ -2,6 +2,7 @@
 
 import { v4 as uuidv4 } from "uuid";
 import { ReactNode, useEffect, useMemo, useRef, useState, FormEvent } from "react";
+import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
@@ -43,7 +44,14 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { ThemeToggle } from "../theme-toggle";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Link2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 import { UserMenu } from "./user-menu";
 import { RunComparisonModal } from "./run-comparison-modal";
@@ -106,6 +114,13 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   const [artifactOpen, closeArtifact] = useArtifactOpen();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
+  const [connectorHelpOpen, setConnectorHelpOpen] = useState(false);
+  const { data: session } = useSession();
+  const isAdmin =
+    session?.user?.role === "reflexion_admin" ||
+    session?.user?.role === "admin" ||
+    session?.user?.role === "newco_admin" ||
+    (session?.user?.role as string)?.toLowerCase() === "customeradministrator";
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
@@ -783,6 +798,39 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                             accept=".zip,application/zip"
                             className="hidden"
                           />
+                          {isAdmin && (
+                            <>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="flex items-center gap-2 text-gray-600"
+                                onClick={() => setConnectorHelpOpen(true)}
+                              >
+                                <Link2 className="size-5" />
+                                <span className="text-sm">Connect GitHub Issues</span>
+                              </Button>
+                              <Dialog open={connectorHelpOpen} onOpenChange={setConnectorHelpOpen}>
+                                <DialogContent className="sm:max-w-md">
+                                  <DialogHeader>
+                                    <DialogTitle>Connect GitHub Issues</DialogTitle>
+                                  </DialogHeader>
+                                  <p className="text-sm text-muted-foreground">
+                                    To connect a GitHub Issues backlog to an artifact, open the Workbench, select an
+                                    artifact node, and use &quot;Configure connector&quot; in the Backlog section.
+                                  </p>
+                                  <DialogFooter>
+                                    <Button variant="outline" onClick={() => setConnectorHelpOpen(false)}>
+                                      Close
+                                    </Button>
+                                    <Button onClick={() => { setConnectorHelpOpen(false); window.location.href = "/map"; }}>
+                                      Open workbench
+                                    </Button>
+                                  </DialogFooter>
+                                </DialogContent>
+                              </Dialog>
+                            </>
+                          )}
                         </div>
                         {folderUploading && folderUploadProgress && (
                           <div className="text-xs text-muted-foreground">

@@ -1,13 +1,16 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { ZoomOut, Activity, Loader2, Pencil, CheckCircle2, Link2, Eye, FileCode } from "lucide-react";
+import { useSession } from "next-auth/react";
+import { ZoomOut, Activity, Loader2, Pencil, CheckCircle2, Link2, Eye, FileCode, Settings2 } from "lucide-react";
 import { Button as UIButton } from "@/components/ui/button";
 import { contentRendererRegistry } from "./content-renderers";
 // Import renderers to ensure they register themselves
 import "./content-renderers/markdown-renderer";
 import "./content-renderers/text-renderer";
 import "./content-renderers/binary-renderer";
+import { BacklogRenderer } from "./content-renderers/backlog-renderer";
+import { ConnectorConfigModal } from "./connector-config";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useStreamContext } from "@/providers/Stream";
@@ -67,7 +70,14 @@ export function NodeDetailPanel({
   const [pickerNodes, setPickerNodes] = useState<Array<{ id: string; type: string; label: string; snippet?: string | null }>>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerLinking, setPickerLinking] = useState(false);
+  const [connectorConfigOpen, setConnectorConfigOpen] = useState(false);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const { data: session } = useSession();
+  const isAdmin =
+    session?.user?.role === "reflexion_admin" ||
+    session?.user?.role === "admin" ||
+    session?.user?.role === "newco_admin" ||
+    (session?.user?.role as string)?.toLowerCase() === "customeradministrator";
   const pendingCursorRef = useRef<number | null>(null);
   const lastAppliedReviseIdRef = useRef<string | null>(null);
 
@@ -710,6 +720,47 @@ export function NodeDetailPanel({
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Backlog (connector-linked issues, Issue 154) */}
+            {node.type === "ARTIFACT" && content && (
+              <div className="space-y-2 pt-4 border-t border-border">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <BacklogRenderer
+                    artifactId={node.id}
+                    threadId={threadId}
+                    orgId={typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null}
+                    projectId={threadId}
+                    />
+                  </div>
+                  {isAdmin && (
+                    <UIButton
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1.5 text-xs shrink-0"
+                      onClick={() => setConnectorConfigOpen(true)}
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                      Configure connector
+                    </UIButton>
+                  )}
+                </div>
+                {isAdmin && (
+                  <ConnectorConfigModal
+                    open={connectorConfigOpen}
+                    onOpenChange={setConnectorConfigOpen}
+                    artifactId={node.id}
+                    threadId={threadId}
+                    orgId={typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null}
+                    projectId={threadId}
+                    onSuccess={() => {
+                      setConnectorConfigOpen(false);
+                      (stream as { triggerWorkbenchRefresh?: () => void })?.triggerWorkbenchRefresh?.();
+                    }}
+                  />
+                )}
               </div>
             )}
           </>
