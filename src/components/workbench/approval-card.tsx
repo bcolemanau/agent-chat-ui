@@ -171,7 +171,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
     setStatus("processing");
 
     // Preview-only tools: apply via API endpoints, not graph resume (no HITL/interrupts)
-    // propose_project / project_from_upload (epic #84): apply via POST /project/apply
+    // propose_project / project_from_upload (epic #84): apply via POST /decisions/apply
     const projectProposalTypes = ["propose_project", "project_from_upload"] as const;
     if (projectProposalTypes.includes(item.type as (typeof projectProposalTypes)[number])) {
       if (decisionType === "reject") {
@@ -195,7 +195,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
-          const res = await fetch("/api/project/apply", {
+          const res = await fetch("/api/decisions/apply", {
             method: "POST",
             headers,
             body: JSON.stringify({
@@ -263,16 +263,21 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
-          const res = await fetch("/api/hydration/apply", {
+          const res = await fetch("/api/decisions/apply", {
             method: "POST",
             headers,
             body: JSON.stringify({
+              proposal_type: item.type === "propose_hydration_complete" ? "propose_hydration_complete" : "generate_project_configuration_summary",
               decision_id: item.id,
-              trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
+              payload: {
+                trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
+                thread_id: threadId,
+                project_id: threadId,
+                readiness_assessment: item.data?.args?.readiness_assessment ?? item.data?.preview_data?.readiness_assessment,
+                confidence: item.data?.args?.confidence ?? item.data?.preview_data?.confidence,
+                reasoning: item.data?.args?.reasoning,
+              },
               thread_id: threadId,
-              readiness_assessment: item.data?.args?.readiness_assessment ?? item.data?.preview_data?.readiness_assessment,
-              confidence: item.data?.args?.confidence ?? item.data?.preview_data?.confidence,
-              reasoning: item.data?.args?.reasoning,
             }),
           });
           if (!res.ok) {
@@ -335,10 +340,18 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
             const headers: Record<string, string> = { "Content-Type": "application/json" };
             const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
             if (orgContext) headers["X-Organization-Context"] = orgContext;
-            const res = await fetch(
-              `/api/artifacts/${encodeURIComponent(artifactId)}/enrichment/${encodeURIComponent(cycleId)}/reject`,
-              { method: "POST", headers, body: JSON.stringify({ thread_id: threadId }) }
-            );
+            const res = await fetch("/api/decisions/apply", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                proposal_type: "enrichment",
+                action: "reject",
+                artifact_id: artifactId,
+                cycle_id: cycleId,
+                payload: { thread_id: threadId },
+                thread_id: threadId,
+              }),
+            });
             if (!res.ok) {
               const err = await res.json().catch(() => ({ detail: res.statusText }));
               throw new Error((err as any).detail || "Failed to reject");
@@ -495,10 +508,18 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
-          const res = await fetch(
-            `/api/artifacts/${encodeURIComponent(artifactId)}/enrichment/${encodeURIComponent(cycleId)}/reject`,
-            { method: "POST", headers, body: JSON.stringify({ thread_id: threadId }) }
-          );
+          const res = await fetch("/api/decisions/apply", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              proposal_type: "enrichment",
+              action: "reject",
+              artifact_id: artifactId,
+              cycle_id: cycleId,
+              payload: { thread_id: threadId },
+              thread_id: threadId,
+            }),
+          });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: res.statusText }));
             throw new Error((err as any).detail || "Failed to reject enrichment");
@@ -523,19 +544,25 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
-          const res = await fetch(
-            `/api/artifacts/${encodeURIComponent(artifactId)}/enrichment/${encodeURIComponent(cycleId)}/approve`,
-            {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
+          const res = await fetch("/api/decisions/apply", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              proposal_type: "enrichment",
+              action: "approve",
+              artifact_id: artifactId,
+              cycle_id: cycleId,
+              decision_id: item.id,
+              thread_id: threadId,
+              project_id: projectId,
+              payload: {
                 artifact_types: Array.isArray(artifactTypes) ? artifactTypes : [artifactTypes],
                 thread_id: threadId,
                 project_id: projectId,
                 decision_id: item.id,
-              }),
-            }
-          );
+              },
+            }),
+          });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: res.statusText }));
             throw new Error((err as any).detail || "Failed to apply enrichment");
@@ -788,7 +815,7 @@ export function ApprovalCard({ item, stream, onDecisionProcessed, onViewFullProp
           const headers: Record<string, string> = { "Content-Type": "application/json" };
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           if (orgContext) headers["X-Organization-Context"] = orgContext;
-          const res = await fetch("/api/admin/apply", {
+          const res = await fetch("/api/decisions/apply", {
             method: "POST",
             headers,
             body: JSON.stringify({ proposal_type: proposalType, payload }),
