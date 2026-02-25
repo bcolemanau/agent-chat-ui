@@ -71,7 +71,7 @@ export function Sidebar() {
     const [loading, setLoading] = useState(false);
     const [creatingProject, setCreatingProject] = useState(false);
     const stream = useStreamContext();
-    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: () => Promise<string | null> })?.createNewThreadWithContext;
+    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: (orgId?: string) => Promise<string | null> })?.createNewThreadWithContext;
     const [searchQuery, setSearchQuery] = useState("");
     const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState("");
