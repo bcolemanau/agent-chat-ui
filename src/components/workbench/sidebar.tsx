@@ -21,6 +21,7 @@ import { Plus, Search as SearchIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { useStreamContext } from "@/providers/Stream";
+import { apiFetch } from "@/lib/api-fetch";
 
 interface Project {
     id: string;
@@ -82,13 +83,7 @@ export function Sidebar() {
     const fetchProjects = useCallback(async (): Promise<Project[]> => {
         try {
             setLoading(true);
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) {
-                headers['X-Organization-Context'] = orgContext;
-            }
-
-            const res = await fetch('/api/projects', { headers });
+            const res = await apiFetch('/api/projects');
             if (res.ok) {
                 const data = await res.json();
                 setProjects(data);
@@ -120,13 +115,9 @@ export function Sidebar() {
         }
         const name = editingName.trim();
         try {
-            const orgContext = localStorage.getItem("reflexion_org_context");
-            const headers: Record<string, string> = { "Content-Type": "application/json" };
-            if (orgContext) headers["X-Organization-Context"] = orgContext;
-
-            const res = await fetch(`/api/projects/${encodeURIComponent(editingProjectId)}`, {
+            const res = await apiFetch(`/api/projects/${encodeURIComponent(editingProjectId)}`, {
                 method: "PATCH",
-                headers,
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name }),
             });
 
@@ -155,15 +146,8 @@ export function Sidebar() {
         }
 
         try {
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) {
-                headers['X-Organization-Context'] = orgContext;
-            }
-
-            const res = await fetch(`/api/projects?projectId=${encodeURIComponent(project.id)}`, {
+            const res = await apiFetch(`/api/projects?projectId=${encodeURIComponent(project.id)}`, {
                 method: 'DELETE',
-                headers
             });
 
             if (res.ok) {

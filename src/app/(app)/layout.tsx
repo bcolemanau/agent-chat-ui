@@ -1,5 +1,6 @@
 import { WorkbenchShell } from "@/components/workbench/shell";
 import { RecordingProvider } from "@/providers/RecordingProvider";
+import { OrgContextRefProvider } from "@/providers/OrgContextRefProvider";
 
 export default function AppLayout({
     children,
@@ -8,7 +9,9 @@ export default function AppLayout({
 }) {
     return (
         <RecordingProvider>
-            <WorkbenchShell>{children}</WorkbenchShell>
+            <OrgContextRefProvider>
+                <WorkbenchShell>{children}</WorkbenchShell>
+            </OrgContextRefProvider>
         </RecordingProvider>
     );
 }

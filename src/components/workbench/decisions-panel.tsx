@@ -21,6 +21,7 @@ import { inferPhaseFromType, isPhaseChangeDecisionType } from "@/lib/decision-ty
 import { AlertCircle, PanelRight, ArrowLeft, GitCompare, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api-fetch";
 
 const VIEW_STORAGE_KEY = "reflexion_decisions_view";
 type ViewMode = "split" | "map";
@@ -604,13 +605,10 @@ function DecisionKgDiffView({
       return;
     }
     let cancelled = false;
-    const headers: Record<string, string> = {};
-    const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-    if (orgContext) headers["X-Organization-Context"] = orgContext;
 
     (async () => {
       try {
-        const historyRes = await fetch(`/api/project/history?thread_id=${encodeURIComponent(threadId)}`, { headers });
+        const historyRes = await apiFetch(`/api/project/history?thread_id=${encodeURIComponent(threadId)}`);
         if (!historyRes.ok || cancelled) return;
         const historyData = await historyRes.json();
         const versions = Array.isArray(historyData?.versions) ? historyData.versions : [];
@@ -621,9 +619,8 @@ function DecisionKgDiffView({
           setLoading(false);
           return;
         }
-        const diffRes = await fetch(
-          `/api/project/diff?thread_id=${encodeURIComponent(threadId)}&version1=${encodeURIComponent(versionBefore)}&version2=${encodeURIComponent(kgVersionSha)}`,
-          { headers }
+        const diffRes = await apiFetch(
+          `/api/project/diff?thread_id=${encodeURIComponent(threadId)}&version1=${encodeURIComponent(versionBefore)}&version2=${encodeURIComponent(kgVersionSha)}`
         );
         if (!diffRes.ok || cancelled) return;
         const diffData = await diffRes.json();

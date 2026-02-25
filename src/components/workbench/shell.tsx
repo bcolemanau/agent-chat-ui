@@ -23,6 +23,7 @@ import { ProductPanel } from "@/components/product-panel/ProductPanel";
 import { useApprovalCount } from "./hooks/use-approval-count";
 import { DecisionsPanel } from "./decisions-panel";
 import { getWorkflowNodeColor } from "@/lib/workflow-agent-colors";
+import { apiFetch, orgContextRef } from "@/lib/api-fetch";
 
 export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const stream = useStreamContext();
@@ -95,7 +96,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         setWorkflowStripLoading(true);
         const params = new URLSearchParams();
         if (activeAgent) params.set("active_node", activeAgent);
-        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`)
+        apiFetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: WorkflowDiagramStrip | null) => {
                 if (!cancelled && data?.nodes) {
@@ -113,7 +114,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             .catch(() => { if (!cancelled) setWorkflowStrip(null); })
             .finally(() => { if (!cancelled) setWorkflowStripLoading(false); });
         return () => { cancelled = true; };
-    }, [pathname, activeAgent]);
+    }, [pathname, activeAgent, orgId]);
 
     // Nodes to show in strip and dropdown (from API); hide Administration for non-admins
     const displayNodes = useMemo(
@@ -182,7 +183,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         }
         localStorage.setItem("reflexion_org_context", orgId);
         window.dispatchEvent(new CustomEvent("orgContextChanged"));
-        fetch("/api/projects", { headers: { "X-Organization-Context": orgId } })
+        orgContextRef.current = orgId;
+        apiFetch("/api/projects")
             .then((r) => (r.ok ? r.json() : []))
             .then((projects: Array<{ id: string; name?: string; slug?: string; thread_id?: string; updated_at?: string }>) => {
                 const latest = projects[0]; // API returns sorted by updated_at desc

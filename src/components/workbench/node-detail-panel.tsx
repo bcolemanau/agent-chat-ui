@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useStreamContext } from "@/providers/Stream";
 import { useArtifactContext } from "@/components/thread/artifact";
+import { apiFetch } from "@/lib/api-fetch";
+import { useOrgContext } from "@/hooks/use-org-context";
 
 interface Node {
   id: string;
@@ -46,6 +48,7 @@ export function NodeDetailPanel({
   threadId 
 }: NodeDetailPanelProps) {
   const stream = useStreamContext();
+  const { orgId: orgContextId } = useOrgContext();
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -96,16 +99,12 @@ export function NodeDetailPanel({
       setLoading(true);
       setError(null);
       try {
-        const orgContext = localStorage.getItem('reflexion_org_context');
-        const headers: Record<string, string> = {};
-        if (orgContext) headers['X-Organization-Context'] = orgContext;
-
         let url = `/api/artifact/content?node_id=${node.id}`;
         if (threadId) url += `&thread_id=${threadId}`;
         if (selectedVersion) url += `&version=${selectedVersion}`;
 
         console.log("[NodeDetailPanel] [BRANCH] Fetching content from URL:", url);
-        const res = await fetch(url, { headers });
+        const res = await apiFetch(url);
         if (!res.ok) {
           console.error("[NodeDetailPanel] [BRANCH] Fetch failed:", res.status, res.statusText);
           throw new Error(`Failed to fetch content: ${res.statusText}`);
@@ -144,15 +143,11 @@ export function NodeDetailPanel({
       console.log("[NodeDetailPanel] [BRANCH] Starting fetchHistory", { nodeId: node.id });
       setLoadingHistory(true);
       try {
-        const orgContext = localStorage.getItem('reflexion_org_context');
-        const headers: Record<string, string> = {};
-        if (orgContext) headers['X-Organization-Context'] = orgContext;
-
         let url = `/api/artifact/history?node_id=${node.id}`;
         if (threadId) url += `&thread_id=${threadId}`;
 
         console.log("[NodeDetailPanel] [BRANCH] Fetching history from URL:", url);
-        const res = await fetch(url, { headers });
+        const res = await apiFetch(url);
         if (res.ok) {
           const json = await res.json();
           const versions = json.versions || [];
@@ -177,15 +172,12 @@ export function NodeDetailPanel({
   const fetchPickerNodes = useCallback(async () => {
     setPickerLoading(true);
     try {
-      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-      const headers: Record<string, string> = {};
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
       const params = new URLSearchParams();
       if (threadId) params.set("thread_id", threadId);
       if (node?.id) params.set("source_node_id", node.id);
       if (pickerSearch.trim()) params.set("search", pickerSearch.trim());
       const url = `/api/kg/nodes-for-picker?${params.toString()}`;
-      const res = await fetch(url, { headers });
+      const res = await apiFetch(url);
       if (!res.ok) throw new Error("Failed to load nodes");
       const data = (await res.json()) as { nodes?: Array<{ id: string; type: string; label: string; snippet?: string | null }> };
       setPickerNodes(data.nodes ?? []);
@@ -272,12 +264,9 @@ export function NodeDetailPanel({
     if (!node) return;
     setEditLoading(true);
     try {
-      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
-      const res = await fetch("/api/artifact/draft-from-existing", {
+      const res = await apiFetch("/api/artifact/draft-from-existing", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ node_id: node.id, thread_id: threadId ?? undefined }),
       });
       if (!res.ok) {
@@ -340,12 +329,9 @@ export function NodeDetailPanel({
     if (!node || !editCacheKey) return;
     setEditApplying(true);
     try {
-      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
-      const res = await fetch("/api/artifact/apply", {
+      const res = await apiFetch("/api/artifact/apply", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cache_key: editCacheKey,
           option_index: 0,
@@ -394,12 +380,9 @@ export function NodeDetailPanel({
     // Create KG link: artifact (source) -> selected node (target)
     if (node?.id && selected.id !== node.id) {
       setPickerLinking(true);
-      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
-      fetch("/api/kg/link-nodes", {
+      apiFetch("/api/kg/link-nodes", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_id: node.id,
           target_id: selected.id,
@@ -697,16 +680,11 @@ export function NodeDetailPanel({
                       )}
                       onClick={async () => {
                         setSelectedVersion(v.id);
-                        // Fetch historical version content
                         try {
-                          const orgContext = localStorage.getItem('reflexion_org_context');
-                          const headers: Record<string, string> = {};
-                          if (orgContext) headers['X-Organization-Context'] = orgContext;
-
                           let url = `/api/artifact/content?node_id=${node.id}&version=${v.id}`;
                           if (threadId) url += `&thread_id=${threadId}`;
 
-                          const res = await fetch(url, { headers });
+                          const res = await apiFetch(url);
                           if (res.ok) {
                             const data = await res.json();
                             setHistoricalContent(data.content);
@@ -737,7 +715,7 @@ export function NodeDetailPanel({
                     <BacklogRenderer
                     artifactId={node.id}
                     threadId={threadId}
-                    orgId={typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null}
+                    orgId={orgContextId}
                     projectId={threadId}
                     />
                   </div>
@@ -759,7 +737,7 @@ export function NodeDetailPanel({
                     onOpenChange={setConnectorConfigOpen}
                     artifactId={node.id}
                     threadId={threadId}
-                    orgId={typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null}
+                    orgId={orgContextId}
                     projectId={threadId}
                     onSuccess={() => {
                       setConnectorConfigOpen(false);

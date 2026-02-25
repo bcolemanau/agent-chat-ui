@@ -27,6 +27,7 @@ import { useThreads } from "./Thread";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
 import { createClient } from "./client";
+import { apiFetch, orgContextRef } from "@/lib/api-fetch";
 /** Filtered KG from backend (filter_graph_data(..., context_mode=true)); streamed when Project Configurator sets it. */
 export type FilteredKgType = {
   nodes: Array<Record<string, unknown>>;
@@ -146,7 +147,6 @@ const StreamSession = ({
   const reconnectProjectToNewThreadRef = useRef<() => void | Promise<void>>(() => {});
 
   // Resolve project_id (slug) to thread_id when URL segment is not a UUID.
-  // Backend requires X-Organization-Context to scope project lookup to the correct org.
   useEffect(() => {
     if (!projectIdFromPath || isUuid(projectIdFromPath)) {
       setResolvedThreadId(null);
@@ -155,14 +155,8 @@ const StreamSession = ({
     let cancelled = false;
     (async () => {
       try {
-        const orgContext =
-          orgIdFromPath ??
-          (typeof window !== "undefined" ? localStorage.getItem("reflexion_org_context") : null);
-        const headers: Record<string, string> = {};
-        if (orgContext) headers["X-Organization-Context"] = orgContext;
-        const res = await fetch(
-          `/api/kg/resolve-project?project_id=${encodeURIComponent(projectIdFromPath)}`,
-          { headers }
+        const res = await apiFetch(
+          `/api/kg/resolve-project?project_id=${encodeURIComponent(projectIdFromPath)}`
         );
         if (!res.ok || cancelled) return;
         const data = await res.json();
@@ -281,7 +275,7 @@ const StreamSession = ({
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const headers: Record<string, string> = {};
-        if (orgContext) headers["X-Organization-Context"] = orgContext;
+        if (orgContextRef.current) headers["X-Organization-Context"] = orgContextRef.current;
         const client = createClient(apiUrl, apiKey ?? undefined, headers);
         await client.threads.updateState(effectiveThreadId, {
           values: { workbench_view: view },
@@ -334,7 +328,7 @@ const StreamSession = ({
     setValuesOverlay({ ...valuesOverlayRef.current });
     try {
       const headers: Record<string, string> = {};
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      if (orgContextRef.current) headers["X-Organization-Context"] = orgContextRef.current;
 
       const client = createClient(apiUrl, apiKey ?? undefined, headers);
       await client.threads.updateState(effectiveThreadId, {
@@ -403,7 +397,7 @@ const StreamSession = ({
       }
       setValuesOverlay({ ...valuesOverlayRef.current });
       const headers: Record<string, string> = {};
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
+      if (orgContextRef.current) headers["X-Organization-Context"] = orgContextRef.current;
       const client = createClient(apiUrl, apiKey ?? undefined, headers);
       await client.threads.updateState(effectiveThreadId, { values: rest });
     } catch (e) {
@@ -421,11 +415,10 @@ const StreamSession = ({
     const retryDelayMs = 3000;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (apiKey) headers["X-Api-Key"] = apiKey;
-    if (orgContext) headers["X-Organization-Context"] = orgContext;
     const base = apiUrl.replace(/\/+$/, "");
     const url = `${base}/threads/${effectiveThreadId}/state`;
     try {
-      const res = await fetch(url, { headers });
+      const res = await apiFetch(url, { headers });
       if (res.status === 409 && attempt < maxRetries) {
         await new Promise((r) => setTimeout(r, retryDelayMs));
         return refetchThreadState(attempt + 1);
@@ -470,7 +463,7 @@ const StreamSession = ({
         console.warn("[Stream] refetchThreadState failed:", e);
       }
     }
-  }, [effectiveThreadId, apiUrl, apiKey, orgContext, setThreadId]);
+  }, [effectiveThreadId, apiUrl, apiKey, setThreadId]);
 
   // Broad refresh after a decision is applied (KG, Artifacts, Workflow may have changed).
   const [workbenchRefreshKey, setWorkbenchRefreshKey] = useState(0);
@@ -485,9 +478,8 @@ const StreamSession = ({
     const base = apiUrl.replace(/\/+$/, "");
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (apiKey) headers["X-Api-Key"] = apiKey;
-    if (orgContext) headers["X-Organization-Context"] = orgContext;
     try {
-      const listRes = await fetch(`${base}/kg/projects`, { headers });
+      const listRes = await apiFetch(`${base}/kg/projects`, { headers });
       let project_id: string = effectiveThreadId;
       if (listRes.ok) {
         const list = (await listRes.json()) as Array<{ id?: string; thread_id?: string }>;
@@ -495,20 +487,20 @@ const StreamSession = ({
         if (byThread?.id) project_id = byThread.id;
       }
       const newId = crypto.randomUUID();
-      const createRes = await fetch(`${base}/threads`, {
+      const createRes = await apiFetch(`${base}/threads`, {
         method: "POST",
         headers,
         body: JSON.stringify({ thread_id: newId }),
       });
       if (createRes.status !== 200 && createRes.status !== 201) {
-        const fallback = await fetch(`${base}/threads`, { method: "POST", headers });
+        const fallback = await apiFetch(`${base}/threads`, { method: "POST", headers });
         if (!fallback.ok) {
           toast.error("Could not create new thread. Try “New Project” instead.");
           return;
         }
         const fallbackData = (await fallback.json()) as { thread_id?: string };
         if (fallbackData?.thread_id) {
-          const reconnectRes = await fetch(`${base}/kg/projects/${encodeURIComponent(project_id)}/reconnect`, {
+          const reconnectRes = await apiFetch(`${base}/kg/projects/${encodeURIComponent(project_id)}/reconnect`, {
             method: "POST",
             headers,
             body: JSON.stringify({ thread_id: fallbackData.thread_id }),
@@ -524,7 +516,7 @@ const StreamSession = ({
         toast.error("Could not reconnect project. Try “New Project” instead.");
         return;
       }
-      const reconnectRes = await fetch(`${base}/kg/projects/${encodeURIComponent(project_id)}/reconnect`, {
+      const reconnectRes = await apiFetch(`${base}/kg/projects/${encodeURIComponent(project_id)}/reconnect`, {
         method: "POST",
         headers,
         body: JSON.stringify({ thread_id: newId }),
@@ -542,7 +534,7 @@ const StreamSession = ({
       console.warn("[Stream] reconnectProjectToNewThread failed:", e);
       toast.error("Could not reconnect. Try “New Project” instead.");
     }
-  }, [effectiveThreadId, apiUrl, apiKey, orgContext, setThreadId, triggerWorkbenchRefresh]);
+  }, [effectiveThreadId, apiUrl, apiKey, setThreadId, triggerWorkbenchRefresh]);
 
   reconnectProjectToNewThreadRef.current = reconnectProjectToNewThread;
 
@@ -550,12 +542,12 @@ const StreamSession = ({
   const createNewThreadWithContext = useCallback(async (orgId?: string): Promise<string | null> => {
     const base = apiUrl?.replace(/\/+$/, "") ?? "";
     if (!base) return null;
+    const effectiveOrg = orgId ?? (typeof window !== "undefined" ? orgContext : null);
+    if (effectiveOrg) orgContextRef.current = effectiveOrg;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (apiKey) headers["X-Api-Key"] = apiKey;
-    const effectiveOrg = orgId ?? (typeof window !== "undefined" ? orgContext : null);
-    if (effectiveOrg) headers["X-Organization-Context"] = effectiveOrg;
     try {
-      const res = await fetch(`${base}/kg/threads/create-with-context`, { method: "POST", headers });
+      const res = await apiFetch(`${base}/kg/threads/create-with-context`, { method: "POST", headers });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { detail?: string };
         toast.error(err?.detail ?? "Could not create new thread.");

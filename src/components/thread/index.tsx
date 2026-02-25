@@ -37,6 +37,7 @@ import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { useRouteScope, isUuid } from "@/hooks/use-route-scope";
+import { useOrgContext } from "@/hooks/use-org-context";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import {
   useArtifactOpen,
@@ -111,6 +112,7 @@ interface ThreadProps {
 
 export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {}) {
   const { branding } = useBranding();
+  const { orgId: orgContextId } = useOrgContext();
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
 
@@ -259,9 +261,8 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
           },
         ],
       };
-      const orgContext = typeof window !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
       const context: Record<string, unknown> = {
-        ...(orgContext ? { user_id: orgContext } : {}),
+        ...(orgContextId ? { user_id: orgContextId } : {}),
         pending_document_ids: uploadedDocuments.map((d) => d.document_id),
       };
       (stream as any).submit(
@@ -284,7 +285,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
         return () => clearTimeout(t);
       }
     }
-  }, [uploadedDocuments, processedArtifactIds, stream]);
+  }, [uploadedDocuments, processedArtifactIds, stream, orgContextId]);
 
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   const safeMessages = useMemo(() => messages ?? [], [messages]);
@@ -391,10 +392,9 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
 
     const toolMessages = ensureToolCallsHaveResponses(safeMessages);
 
-    const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
     const context = {
       ...(Object.keys(artifactContext).length > 0 ? artifactContext : {}),
-      ...(orgContext ? { user_id: orgContext } : {}),
+      ...(orgContextId ? { user_id: orgContextId } : {}),
       // Include uploaded document IDs for Hydration agent to process
       ...(uploadedDocuments.length > 0 ? { 
         pending_document_ids: uploadedDocuments.map(d => d.document_id) 

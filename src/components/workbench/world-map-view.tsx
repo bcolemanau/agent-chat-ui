@@ -15,6 +15,7 @@ import { ArtifactsListView } from './artifacts-list-view';
 import { useUnifiedPreviews } from './hooks/use-unified-previews';
 import { useThreadUpdates } from './hooks/use-thread-updates';
 import { KgDiffDiagramView } from './kg-diff-diagram-view';
+import { apiFetch } from '@/lib/api-fetch';
 
 interface Node extends d3.SimulationNodeDatum {
     id: string;
@@ -285,14 +286,14 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
     }, [data?.nodes, focusedNodeId]);
 
-    // Fetch workflow strip for bottom panel (same as header, left-to-right flow)
+    // Fetch workflow strip for bottom panel (same as header, left-to-right flow).
     useEffect(() => {
         if (!threadId || embeddedInDecisions) return;
         let cancelled = false;
         const params = new URLSearchParams();
         const activeAgent = (stream as any)?.values?.active_agent;
         if (activeAgent) params.set('active_node', activeAgent);
-        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ''}`)
+        apiFetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ''}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: { nodes?: { id: string; label: string }[]; active_node?: string } | null) => {
                 if (!cancelled && data?.nodes) setWorkflowStrip({ nodes: data.nodes, active_node: data.active_node });
@@ -311,10 +312,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         let cancelled = false;
         setLoadingRiskSummary(true);
         const params = new URLSearchParams({ thread_id: threadId });
-        const headers: Record<string, string> = {};
-        const orgContext = localStorage.getItem('reflexion_org_context');
-        if (orgContext) headers['X-Organization-Context'] = orgContext;
-        fetch(`/api/project/risk-summary?${params.toString()}`, { headers })
+        apiFetch(`/api/project/risk-summary?${params.toString()}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: { in_scope?: number; covered?: number; uncovered?: number; phase_aggregates?: { phase_id: string; in_scope: number; covered: number; uncovered: number }[]; artifact_aggregates?: { art_node_id: string; template_id?: string; covered: number; covered_crit_ids: string[] }[] } | null) => {
                 if (cancelled) return;
@@ -406,11 +404,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     const fetchKgHistory = async () => {
         try {
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
             const url = threadId ? `/api/project/history?thread_id=${threadId}` : '/api/project/history';
-            const res = await fetch(url, { headers });
+            const res = await apiFetch(url);
             if (res.ok) setKgHistory(await res.json());
         } catch (e) { console.error('History fetch error:', e); }
     };
@@ -418,10 +413,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const fetchKgDecisions = async () => {
         if (!threadId) return;
         try {
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const res = await fetch(`/api/decisions?thread_id=${encodeURIComponent(threadId)}`, { headers });
+            const res = await apiFetch(`/api/decisions?thread_id=${encodeURIComponent(threadId)}`);
             if (res.ok) {
                 const data = await res.json();
                 // Backend returns { decisions, org_phase } when org has NPDDecision; otherwise a plain array
@@ -453,11 +445,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             });
             if (v1Source === "organization") params.set("version1_source", "organization");
             if (v2Source === "organization") params.set("version2_source", "organization");
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
             const url = `/api/project/diff?${params.toString()}`;
-            const res = await fetch(url, { headers });
+            const res = await apiFetch(url);
             if (res.ok) {
                 const diff = await res.json();
                 const apiSummary = diff.summary ?? diff.diff?.summary ?? {};
@@ -512,10 +501,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         console.log('[WorldMapView] Timeline diff fetch start', { versionId, versionBefore, url });
         try {
             setLoadingTimelineDiff(true);
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const res = await fetch(url, { headers });
+            const res = await apiFetch(url);
             if (res.ok) {
                 const diff = await res.json();
                 const hasDiff = !!diff?.diff;
@@ -541,10 +527,6 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 setLoading(true);
                 setError(null);
             }
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-
             const params = new URLSearchParams();
             if (threadId) params.set('thread_id', threadId);
             if (version) {
@@ -557,7 +539,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             const url = `/api/kg-data?${params.toString()}`;
 
             console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version, versionSource });
-            const res = await fetch(url, { headers });
+            const res = await apiFetch(url);
             if (!res.ok) throw new Error('Failed to fetch graph data');
             const json = await res.json();
             console.log('[WorldMapView] Fetched data:', {

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/api-fetch";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(s: string) {
@@ -37,10 +38,7 @@ export function LegacyOrgRedirect({
       if (isUuid(segment)) {
         (async () => {
           try {
-            const orgContext = localStorage.getItem("reflexion_org_context");
-            const headers: Record<string, string> = {};
-            if (orgContext) headers["X-Organization-Context"] = orgContext;
-            const res = await fetch("/api/projects", { headers });
+            const res = await apiFetch("/api/projects");
             if (res.ok) {
               const projects = await res.json();
               const proj = projects.find((p: { thread_id?: string; id: string }) => p.thread_id === segment);

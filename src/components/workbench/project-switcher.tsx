@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useStreamContext } from "@/providers/Stream";
 import { useRouteScope } from "@/hooks/use-route-scope";
+import { apiFetch } from "@/lib/api-fetch";
 
 interface Project {
     id: string;
@@ -53,13 +54,7 @@ export function ProjectSwitcher() {
     const fetchProjects = React.useCallback(async (): Promise<Project[]> => {
         try {
             setLoading(true);
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) {
-                headers['X-Organization-Context'] = orgContext;
-            }
-
-            const res = await fetch('/api/projects', { headers });
+            const res = await apiFetch('/api/projects');
             if (res.ok) {
                 const data = await res.json();
                 setProjects(data);

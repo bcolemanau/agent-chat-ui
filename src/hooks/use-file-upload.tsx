@@ -4,6 +4,7 @@ import { ContentBlock } from "@langchain/core/messages";
 import { fileToContentBlock } from "@/lib/multimodal-utils";
 import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
+import { orgContextRef } from "@/lib/api-fetch";
 
 // Image types that are processed as content blocks (inline in messages)
 export const SUPPORTED_IMAGE_TYPES = [
@@ -206,8 +207,7 @@ export function useFileUpload({
         console.warn("[FileUpload] ⚠️ No authentication token available");
       }
       
-      // Add organization context if available
-      const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+      const orgContext = orgContextRef.current;
       if (orgContext) {
         headers['X-Organization-Context'] = orgContext;
         console.log("[FileUpload] Organization context: Present");
@@ -337,7 +337,7 @@ export function useFileUpload({
         console.warn("[FileUpload] ⚠️ No authentication token available for folder upload");
       }
       
-      const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+      const orgContext = orgContextRef.current;
       if (orgContext) {
         headers['X-Organization-Context'] = orgContext;
         console.log("[FileUpload] Organization context: Present");
