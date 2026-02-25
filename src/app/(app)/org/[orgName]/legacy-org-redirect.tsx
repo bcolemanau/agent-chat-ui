@@ -9,7 +9,7 @@ function isUuid(s: string) {
 }
 
 /**
- * When on legacy /org/[orgId] or /org/[orgId]/project/[projectId], redirect to
+ * When on legacy /org/[orgName] or /org/[orgName]/project/[projectId], redirect to
  * canonical /org/[orgName]/[orgId] and /org/.../project/[projectName]/[projectId].
  * If project segment is a UUID (thread_id), resolve via projects list to get project_id (slug).
  */
