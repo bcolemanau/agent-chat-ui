@@ -134,7 +134,7 @@ const StreamSession = ({
   setApiKey: (key: string) => void;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { projectId: projectIdFromPath } = useRouteScope();
+  const { projectId: projectIdFromPath, orgId: orgIdFromPath } = useRouteScope();
   const [resolvedThreadId, setResolvedThreadId] = useState<string | null>(null);
   // URL has project_id (slug) or legacy thread_id (UUID). Resolve slug → thread_id for LangGraph.
   const effectiveThreadId =
@@ -146,6 +146,7 @@ const StreamSession = ({
   const reconnectProjectToNewThreadRef = useRef<() => void | Promise<void>>(() => {});
 
   // Resolve project_id (slug) to thread_id when URL segment is not a UUID.
+  // Backend requires X-Organization-Context to scope project lookup to the correct org.
   useEffect(() => {
     if (!projectIdFromPath || isUuid(projectIdFromPath)) {
       setResolvedThreadId(null);
@@ -154,7 +155,15 @@ const StreamSession = ({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/kg/resolve-project?project_id=${encodeURIComponent(projectIdFromPath)}`);
+        const orgContext =
+          orgIdFromPath ??
+          (typeof window !== "undefined" ? localStorage.getItem("reflexion_org_context") : null);
+        const headers: Record<string, string> = {};
+        if (orgContext) headers["X-Organization-Context"] = orgContext;
+        const res = await fetch(
+          `/api/kg/resolve-project?project_id=${encodeURIComponent(projectIdFromPath)}`,
+          { headers }
+        );
         if (!res.ok || cancelled) return;
         const data = await res.json();
         if (data?.thread_id && !cancelled) setResolvedThreadId(data.thread_id);
@@ -165,7 +174,7 @@ const StreamSession = ({
     return () => {
       cancelled = true;
     };
-  }, [projectIdFromPath]);
+  }, [projectIdFromPath, orgIdFromPath]);
 
   // Load Org Context for Headers
   const [orgContext, setOrgContext] = useState<string | null>(null);
