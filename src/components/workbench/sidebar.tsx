@@ -168,7 +168,7 @@ export function Sidebar() {
 
             if (res.ok) {
                 toast.success("Project deleted successfully");
-                if (effectiveProjectId === projectSegment(project)) {
+                if (effectiveProjectId === projectSlug(project)) {
                     setThreadId(null);
                     if (orgId) router.push(`/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/map`);
                 }
