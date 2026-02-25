@@ -36,6 +36,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
 import { useFileUpload } from "@/hooks/use-file-upload";
+import { useRouteScope, isUuid } from "@/hooks/use-route-scope";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import {
   useArtifactOpen,
@@ -139,6 +140,14 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   } = stream;
   // Use stream's threadId when URL hasn't updated yet (avoids enrichment going to "default" on new threads)
   const effectiveThreadIdForUpload = (stream as { threadId?: string | null })?.threadId ?? threadId;
+  const { projectId: projectIdFromRoute, orgId: orgIdFromRoute } = useRouteScope();
+  // phase_id: use project slug when available (not UUID); else org slug; else threadId (backend bootstraps)
+  const effectivePhaseId =
+    projectIdFromRoute && !isUuid(projectIdFromRoute)
+      ? projectIdFromRoute
+      : orgIdFromRoute && !isUuid(orgIdFromRoute)
+        ? orgIdFromRoute
+        : effectiveThreadIdForUpload;
   const {
     contentBlocks,
     setContentBlocks,
@@ -154,7 +163,11 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     resetBlocks: _resetBlocks,
     dragOver,
     handlePaste,
-  } = useFileUpload({ apiUrl, threadId: effectiveThreadIdForUpload });
+  } = useFileUpload({
+    apiUrl,
+    threadId: effectiveThreadIdForUpload,
+    phaseId: effectivePhaseId,
+  });
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const [processedArtifactIds, setProcessedArtifactIds] = useState<Set<string>>(new Set());
   const [compareModalOpen, setCompareModalOpen] = useState(false);
