@@ -18,12 +18,13 @@ import { useRouteScope } from "@/hooks/use-route-scope";
 interface Project {
     id: string;
     name: string;
+    slug?: string;
     thread_id?: string;
 }
 
-/** URL segment for a project: thread_id so LangGraph gets the real thread; fallback to id for backwards compat. */
-function projectSegment(project: Project): string {
-    return project.thread_id ?? project.id;
+/** Canonical URL uses project.id (slug). Use for Select value and navigation. */
+function projectSlug(project: Project): string {
+    return project.slug ?? project.id;
 }
 
 // Match sidebar display: meaningful names as-is, UUIDs as "Project xxxxxxxx"
@@ -39,16 +40,17 @@ function formatProjectLabel(project: Project): string {
 export function ProjectSwitcher() {
     const { data: _session } = useSession();
     const router = useRouter();
-    const { orgId, projectId } = useRouteScope();
+    const { orgId, projectId, orgName } = useRouteScope();
     const [projects, setProjects] = React.useState<Project[]>([]);
     const [threadId, setThreadId] = useQueryState("threadId");
     const effectiveProjectId = projectId ?? threadId ?? undefined;
     const [_loading, setLoading] = React.useState(false);
     const [creatingProject, setCreatingProject] = React.useState(false);
     const stream = useStreamContext();
-    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: () => Promise<string | null> })?.createNewThreadWithContext;
+    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: (orgId?: string) => Promise<string | null> })?.createNewThreadWithContext;
+    const orgSlug = orgName ?? orgId ?? "";
 
-    const fetchProjects = React.useCallback(async () => {
+    const fetchProjects = React.useCallback(async (): Promise<Project[]> => {
         try {
             setLoading(true);
             const orgContext = localStorage.getItem('reflexion_org_context');
@@ -61,12 +63,14 @@ export function ProjectSwitcher() {
             if (res.ok) {
                 const data = await res.json();
                 setProjects(data);
+                return data;
             }
         } catch (error) {
             console.error("Failed to fetch projects:", error);
         } finally {
             setLoading(false);
         }
+        return [];
     }, []);
 
     React.useEffect(() => {
@@ -81,30 +85,49 @@ export function ProjectSwitcher() {
         };
     }, [fetchProjects]);
 
-    const currentProject = effectiveProjectId ? projects.find((p) => projectSegment(p) === effectiveProjectId) : null;
+    const currentProject = effectiveProjectId
+        ? projects.find((p) => p.id === effectiveProjectId || p.thread_id === effectiveProjectId)
+        : null;
     const currentLabel = currentProject ? formatProjectLabel(currentProject) : null;
     const triggerTitle = currentProject ? (currentProject.name || currentProject.id) : undefined;
 
-    const handleValueChange = React.useCallback(async (val: string) => {
-        if (val === "new") {
-            if (createNewThreadWithContext && !creatingProject) {
-                setCreatingProject(true);
-                try {
-                    const newId = await createNewThreadWithContext();
-                    window.dispatchEvent(new CustomEvent("orgContextChanged"));
-                    if (newId && orgId) router.push(`/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(newId)}/map`);
-                } finally {
-                    setCreatingProject(false);
+    const handleValueChange = React.useCallback(
+        async (val: string) => {
+            if (val === "new") {
+                if (createNewThreadWithContext && !creatingProject) {
+                    setCreatingProject(true);
+                    try {
+                        const returnedId = await createNewThreadWithContext(orgId ?? undefined);
+                        window.dispatchEvent(new CustomEvent("orgContextChanged"));
+                        if (returnedId && orgId) {
+                            const list = await fetchProjects();
+                            const afterCreate = list.find((p) => p.thread_id === returnedId || p.id === returnedId);
+                            const finalId = afterCreate?.id ?? returnedId;
+                            const finalSlug = afterCreate ? projectSlug(afterCreate) : returnedId;
+                            router.push(
+                                `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(finalSlug)}/${encodeURIComponent(finalId)}/map`
+                            );
+                        }
+                    } finally {
+                        setCreatingProject(false);
+                    }
+                } else {
+                    setThreadId(null);
+                    if (orgId) router.push(`/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/map`);
                 }
             } else {
-                setThreadId(null);
-                if (orgId) router.push(`/org/${encodeURIComponent(orgId)}/map`);
+                const proj = projects.find((p) => p.id === val || p.thread_id === val);
+                const slug = proj ? projectSlug(proj) : val;
+                const id = proj?.id ?? val;
+                if (orgId) {
+                    router.push(
+                        `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/map`
+                    );
+                } else setThreadId(val);
             }
-        } else {
-            if (orgId) router.push(`/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(val)}/map`);
-            else setThreadId(val);
-        }
-    }, [createNewThreadWithContext, creatingProject, setThreadId, orgId, router]);
+        },
+        [createNewThreadWithContext, creatingProject, setThreadId, orgId, orgSlug, router, projects, fetchProjects]
+    );
 
     return (
         <Select
@@ -123,7 +146,7 @@ export function ProjectSwitcher() {
             </SelectTrigger>
             <SelectContent className="bg-background border-border text-foreground">
                 {projects.map((project) => (
-                    <SelectItem key={project.id} value={projectSegment(project)} className="focus:bg-muted focus:text-foreground italic">
+                    <SelectItem key={project.id} value={project.id} className="focus:bg-muted focus:text-foreground italic">
                         {formatProjectLabel(project)}
                     </SelectItem>
                 ))}

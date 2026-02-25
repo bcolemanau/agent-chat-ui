@@ -1,9 +1,11 @@
 import { OrgScopeSync } from "./org-scope-sync";
+import { LegacyOrgRedirect } from "./legacy-org-redirect";
 
 /**
- * Phase 3: Org scope. Sync orgId from URL to localStorage so API calls use it.
+ * Legacy route: /org/[orgId] and /org/[orgId]/project/[projectId].
+ * Syncs org context and redirects to canonical /org/[orgName]/[orgId] (and project path when present).
  */
-export default async function OrgLayout({
+export default async function LegacyOrgLayout({
   children,
   params,
 }: {
@@ -11,5 +13,9 @@ export default async function OrgLayout({
   params: Promise<{ orgId: string }>;
 }) {
   const { orgId } = await params;
-  return <OrgScopeSync orgId={orgId}>{children}</OrgScopeSync>;
+  return (
+    <LegacyOrgRedirect orgId={orgId}>
+      <OrgScopeSync orgId={orgId}>{children}</OrgScopeSync>
+    </LegacyOrgRedirect>
+  );
 }

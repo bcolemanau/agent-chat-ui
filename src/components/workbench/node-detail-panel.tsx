@@ -652,12 +652,18 @@ export function NodeDetailPanel({
         ) : content ? (
           <>
             {/* Render content using appropriate renderer (pass node name as filename fallback for binary) */}
-            <div className="content-renderer-wrapper min-h-0">
-              {renderer?.render(content.content, {
-                ...content.metadata,
-                filename: content.metadata?.filename || (node as { name?: string }).name,
-              })}
-            </div>
+            {content.content != null && String(content.content).trim() ? (
+              <div className="content-renderer-wrapper min-h-0">
+                {renderer?.render(content.content, {
+                  ...content.metadata,
+                  filename: content.metadata?.filename || (node as { name?: string }).name,
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                No content available for this artifact. The content may not have been stored yet, or the artifact may be metadata-only.
+              </p>
+            )}
 
             {/* Properties */}
             {node.properties && Object.keys(node.properties).length > 0 && (

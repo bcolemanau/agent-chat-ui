@@ -168,12 +168,14 @@ export function DecisionsPanel() {
   const router = useRouter();
   const [threadIdFromUrl] = useQueryState("threadId");
   const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
-  const { orgId, projectId } = useRouteScope();
+  const { orgId, projectId, orgName, projectName } = useRouteScope();
+  const orgSlug = orgName ?? orgId ?? "";
+  const projectSlug = projectName ?? projectId ?? "";
   const [versionParam, setVersionParam] = useQueryState("version"); // In map layout: selected decision's KG version → map shows that version + diff
 
   const mapCompareHref = threadId
     ? (orgId
-        ? `/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(projectId ?? threadId)}/map?compare=1`
+        ? `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(projectSlug)}/${encodeURIComponent(projectId ?? threadId)}/map?compare=1`
         : `/map?threadId=${encodeURIComponent(threadId)}&compare=1`)
     : "/map?compare=1";
 

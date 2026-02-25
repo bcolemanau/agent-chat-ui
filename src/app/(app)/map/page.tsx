@@ -17,8 +17,8 @@ export default function MapPage() {
             setRedirecting(false);
             return;
         }
-        if (threadId) router.replace(`/org/${encodeURIComponent(org)}/project/${encodeURIComponent(threadId)}/map`);
-        else router.replace(`/org/${encodeURIComponent(org)}/map`);
+        if (threadId) router.replace(`/org/${encodeURIComponent(org)}/${encodeURIComponent(org)}/project/${encodeURIComponent(threadId)}/${encodeURIComponent(threadId)}/map`);
+        else router.replace(`/org/${encodeURIComponent(org)}/${encodeURIComponent(org)}/map`);
     }, [router, threadId]);
 
     if (redirecting) return null;

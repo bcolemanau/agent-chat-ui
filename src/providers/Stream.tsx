@@ -22,7 +22,7 @@ import {
 } from "@langchain/langgraph-sdk/react-ui";
 import { useQueryState } from "nuqs";
 import { getApiKey } from "@/lib/api-key";
-import { useRouteScope } from "@/hooks/use-route-scope";
+import { useRouteScope, isUuid } from "@/hooks/use-route-scope";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
@@ -135,11 +135,37 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { projectId: projectIdFromPath } = useRouteScope();
-  // Phase 3: When on /org/[orgId]/project/[projectId], use projectId as threadId (no opaque query param).
-  const effectiveThreadId = projectIdFromPath ?? threadId ?? undefined;
+  const [resolvedThreadId, setResolvedThreadId] = useState<string | null>(null);
+  // URL has project_id (slug) or legacy thread_id (UUID). Resolve slug → thread_id for LangGraph.
+  const effectiveThreadId =
+    (projectIdFromPath && isUuid(projectIdFromPath)
+      ? projectIdFromPath
+      : resolvedThreadId) ?? threadId ?? undefined;
   const { getThreads, setThreads } = useThreads();
   const prevThreadIdRef = useRef<string | null>(null);
   const reconnectProjectToNewThreadRef = useRef<() => void | Promise<void>>(() => {});
+
+  // Resolve project_id (slug) to thread_id when URL segment is not a UUID.
+  useEffect(() => {
+    if (!projectIdFromPath || isUuid(projectIdFromPath)) {
+      setResolvedThreadId(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/kg/resolve-project?project_id=${encodeURIComponent(projectIdFromPath)}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (data?.thread_id && !cancelled) setResolvedThreadId(data.thread_id);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectIdFromPath]);
 
   // Load Org Context for Headers
   const [orgContext, setOrgContext] = useState<string | null>(null);

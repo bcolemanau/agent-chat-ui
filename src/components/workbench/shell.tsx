@@ -46,13 +46,15 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
 
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
     const [threadId, setThreadId] = useQueryState("threadId");
-    const { orgId, projectId } = useRouteScope();
-    // Phase 3: Build links with org/project in path when on scoped route; else preserve threadId in query
+    const { orgId, projectId, orgName, projectName } = useRouteScope();
+    const orgSlug = orgName ?? orgId ?? "";
+    const projectSlug = projectName ?? projectId ?? "";
+    // Build canonical /org/[orgName]/[orgId]/... and /project/[projectName]/[projectId]/... when on scoped route
     const workbenchHref = (path: string) => {
         const base = path.split("?")[0];
         const qs = path.includes("?") ? path.slice(path.indexOf("?")) : "";
-        if (orgId && projectId) return `/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(projectId)}${base}${qs}`;
-        if (orgId) return `/org/${encodeURIComponent(orgId)}${base}${qs}`;
+        if (orgId && projectId) return `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(projectSlug)}/${encodeURIComponent(projectId)}${base}${qs}`;
+        if (orgId) return `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}${base}${qs}`;
         return threadId ? `${path}${path.includes("?") ? "&" : "?"}threadId=${encodeURIComponent(threadId)}` : path;
     };
     const effectiveThreadId = projectId ?? threadId ?? undefined;
@@ -182,14 +184,16 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new CustomEvent("orgContextChanged"));
         fetch("/api/projects", { headers: { "X-Organization-Context": orgId } })
             .then((r) => (r.ok ? r.json() : []))
-            .then((projects: Array<{ id: string; name?: string; thread_id?: string; updated_at?: string }>) => {
+            .then((projects: Array<{ id: string; name?: string; slug?: string; thread_id?: string; updated_at?: string }>) => {
                 const latest = projects[0]; // API returns sorted by updated_at desc
                 sessionStorage.setItem(INIT_KEY, "1");
-                const segment = latest?.thread_id ?? latest?.id;
-                if (segment) {
+                if (latest?.id && orgId) {
+                    const pslug = latest.slug ?? latest.id;
+                    router.replace(`/org/${encodeURIComponent(orgId)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(pslug)}/${encodeURIComponent(latest.id)}/map`);
+                } else if (latest?.thread_id ?? latest?.id) {
                     const org = localStorage.getItem("reflexion_org_context");
-                    if (org) router.replace(`/org/${encodeURIComponent(org)}/project/${encodeURIComponent(segment)}/map`);
-                    else router.replace(`/map?threadId=${encodeURIComponent(segment)}`);
+                    if (org) router.replace(`/org/${encodeURIComponent(org)}/${encodeURIComponent(org)}/project/${encodeURIComponent(latest?.id ?? latest.thread_id)}/${encodeURIComponent(latest?.id ?? latest.thread_id)}/map`);
+                    else router.replace(`/map?threadId=${encodeURIComponent(latest?.thread_id ?? latest?.id)}`);
                 }
             })
             .catch(() => sessionStorage.setItem(INIT_KEY, "1"));
