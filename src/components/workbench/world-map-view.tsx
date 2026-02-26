@@ -408,7 +408,12 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     const fetchKgHistory = async () => {
         try {
-            const url = threadId ? `/api/project/history?thread_id=${threadId}` : '/api/project/history';
+            // Scope from URL: use project_id (org/project layout). Fallback to thread_id for legacy URLs.
+            const url = scopeProjectId
+                ? `/api/project/history?project_id=${encodeURIComponent(scopeProjectId)}`
+                : threadId
+                    ? `/api/project/history?project_id=${encodeURIComponent(threadId)}`
+                    : '/api/project/history';
             const res = await apiFetch(url);
             if (res.ok) setKgHistory(await res.json());
         } catch (e) { console.error('History fetch error:', e); }

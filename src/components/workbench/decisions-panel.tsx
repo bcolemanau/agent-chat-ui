@@ -549,6 +549,8 @@ export function DecisionsPanel() {
                       <ApprovalCard
                         item={selectedItem}
                         stream={stream}
+                        scopeProjectId={scopeProjectId}
+                        scopeOrgId={scopeOrgId}
                         onDecisionProcessed={onDecisionProcessed}
                         onViewFullProposal={() => setProposalViewActive(true)}
                       />
@@ -614,16 +616,31 @@ function DecisionKgDiffView({
         const historyData = await historyRes.json();
         const versions = Array.isArray(historyData?.versions) ? historyData.versions : [];
         const idx = versions.findIndex((v: { id?: string }) => v.id === kgVersionSha);
-        const versionBefore = idx >= 0 && idx < versions.length - 1 ? versions[idx + 1]?.id : undefined;
+        const versionBeforeEntry = idx >= 0 && idx < versions.length - 1 ? versions[idx + 1] : undefined;
+        const versionBefore = versionBeforeEntry?.id;
+        const v1Source = (versionBeforeEntry as { source?: string })?.source;
+        const v2Source = (versions[idx] as { source?: string })?.source;
         if (versionBefore == null) {
           setPayload(null);
           setLoading(false);
           return;
         }
-        const diffRes = await apiFetch(
-          `/api/project/diff?project_id=${encodeURIComponent(projectId)}&version1=${encodeURIComponent(versionBefore)}&version2=${encodeURIComponent(kgVersionSha)}`
-        );
-        if (!diffRes.ok || cancelled) return;
+        const params = new URLSearchParams({
+          project_id: projectId,
+          version1: versionBefore,
+          version2: kgVersionSha,
+        });
+        if (v1Source === "organization") params.set("version1_source", "organization");
+        if (v2Source === "organization") params.set("version2_source", "organization");
+        const diffRes = await apiFetch(`/api/project/diff?${params.toString()}`);
+        if (!diffRes.ok) {
+          if (!cancelled && diffRes.status === 404) {
+            setError("Version not found (may be from a different branch or project)");
+          }
+          setLoading(false);
+          return;
+        }
+        if (cancelled) return;
         const diffData = await diffRes.json();
         if (diffData?.diff?.type === "kg_diff") setPayload(diffData.diff);
       } catch (e) {
