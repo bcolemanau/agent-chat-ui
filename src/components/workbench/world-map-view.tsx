@@ -699,8 +699,10 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 .filter((n: { changeType?: string; diff_status?: string }) => (n.changeType ?? n.diff_status) !== 'removed')
                 .map((n) => ({ ...n })) as Node[];
             const seen = new Set<string>();
+            const sampleEdgeChangeTypes: string[] = [];
             for (const e of diffEdges) {
                 if (e.changeType === 'removed') continue;
+                if (sampleEdgeChangeTypes.length < 5) sampleEdgeChangeTypes.push((e as any).changeType ?? (e as any).diff_status ?? 'none');
                 const src = typeof e.source === 'object' && e.source && 'id' in e.source ? e.source.id : e.source;
                 const tgt = typeof e.target === 'object' && e.target && 'id' in e.target ? e.target.id : e.target;
                 const srcStr = src != null ? String(src) : '';
@@ -711,6 +713,10 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 seen.add(key);
                 links.push({ source: srcStr, target: tgtStr, type: e.type } as Link);
             }
+            // #region agent log
+            const firstLinksHaveChangeType = links.slice(0, 3).map((l: any) => !!l.changeType || !!l.diff_status);
+            fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9026f6'},body:JSON.stringify({sessionId:'9026f6',location:'world-map-view.tsx:diffEdges',message:'Diff edges and link changeType',data:{useDiffPayload:true,diffEdgeSampleChangeTypes:sampleEdgeChangeTypes,linkCount:links.length,firstLinksHaveChangeType},hypothesisId:'H4,H5',timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
             console.log('[WorldMapView] Using diff payload for graph: nodes=', nodes.length, 'links=', links.length);
         } else {
             nodes = data.nodes.map(d => ({ ...d }));
@@ -739,7 +745,12 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
 
         // If we have diff data but didn't use diff payload (e.g. no edges), merge diff_status into nodes for coloring.
+        const diffEdgesForH5 = (effectiveDiff?.diff?.links ?? effectiveDiff?.diff?.edges) as Array<{ changeType?: string }> | undefined;
         if (effectiveDiff && effectiveDiff.diff && effectiveDiff.diff.nodes && !useDiffPayload) {
+            // #region agent log
+            const edgeSample = diffEdgesForH5?.slice(0, 3).map((e: any) => e?.changeType ?? e?.diff_status ?? 'none') ?? [];
+            fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9026f6'},body:JSON.stringify({sessionId:'9026f6',location:'world-map-view.tsx:mergeDiffNodesOnly',message:'useDiffPayload=false: merging nodes only, not edges',data:{useDiffPayload:false,diffEdgesCount:diffEdgesForH5?.length??0,diffEdgeSampleChangeTypes:edgeSample,linksMergedWithDiffStatus:false},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
             console.log('[WorldMapView] Applying diff visualization (data nodes + diff status):', {
                 diffDataStructure: {
                     hasDiff: !!effectiveDiff.diff,

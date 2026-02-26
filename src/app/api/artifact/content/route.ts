@@ -43,6 +43,9 @@ export async function GET(req: Request) {
         }
 
         const data = await resp.json();
+        // #region agent log
+        fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9026f6'},body:JSON.stringify({sessionId:'9026f6',location:'api/artifact/content/route.ts:GET',message:'Backend content response',data:{nodeId,threadId:threadId||'default',phaseIdPassed:!!searchParams.get("phase_id"),contentLength:data?.content?.length??0,hasContent:!!(data?.content&&String(data.content).trim())},hypothesisId:'H1,H2,H3',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         return NextResponse.json(data);
 
     } catch (error: any) {
