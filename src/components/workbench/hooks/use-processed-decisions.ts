@@ -171,6 +171,12 @@ async function loadFromApi(
     const headers: Record<string, string> = {};
     const orgContext = localStorage.getItem("reflexion_org_context");
     if (orgContext) headers["X-Organization-Context"] = orgContext;
+    console.info("[useProcessedDecisions] GET /api/decisions", {
+      project_id: projectId,
+      org_id: orgId,
+      orgContext: orgContext ?? "(none)",
+      url: `/api/decisions?${params}`,
+    });
     const res = await fetchWithTimeout(`/api/decisions?${params}`, { headers });
     if (!res.ok) return null;
     const data = await res.json();

@@ -27,10 +27,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "proposal_type is required" }, { status: 400 });
     }
 
+    console.info("[decisions/apply] proxy", {
+      proposalType,
+      thread_id: body.thread_id ?? "(none)",
+      project_id: body.project_id ?? "(none)",
+      payload_project_id: body.payload?.project_id ?? "(none)",
+      payload_thread_id: body.payload?.thread_id ?? "(none)",
+      orgContext: orgContext ?? "(none)",
+    });
+
     const baseUrl = getBackendBaseUrl();
     const targetUrl = `${baseUrl}/decisions/apply`;
 
     const orgContext = req.headers.get("X-Organization-Context");
+
+    console.info("[decisions/apply] POST", {
+      proposal_type: proposalType,
+      thread_id: body.thread_id,
+      project_id: body.project_id ?? body.payload?.project_id,
+      org_id: body.org_id ?? body.payload?.org_id,
+      orgContext: orgContext ?? "(none)",
+    });
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${session.user.idToken}`,

@@ -82,6 +82,13 @@ async function persistDecision(
 ): Promise<PersistDecisionResponse> {
   try {
     const projectId = await resolveThreadIdToProjectId(threadId) ?? threadId ?? "default";
+    console.info("[ApprovalCard] persistDecision", {
+      threadId,
+      resolvedProjectId: projectId,
+      decisionId: item.id,
+      status,
+      org_id: extra.org_id ?? (item.data?.args as Record<string, unknown>)?.org_id,
+    });
     const args = item.data?.args ?? {};
     const generation_inputs =
       args.project_context != null || args.trigger_id != null || args.num_options != null
@@ -101,28 +108,49 @@ async function persistDecision(
       org_id: extra.org_id ?? args.org_id ?? args.id,
       ...(item.data?.preview_data != null ? { preview_data: item.data.preview_data } : {}),
     };
+    const persistBody = {
+      thread_id: projectId,
+      decision: {
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        status,
+        phase: item.phase ?? inferPhaseFromType(item.type),
+        cache_key: args.cache_key ?? (item.data as any)?.preview_data?.cache_key ?? undefined,
+        generation_inputs,
+        option_index: extra.option_index ?? args.option_index ?? args.selected_option_index ?? undefined,
+        artifact_id: extra.artifact_id,
+        args: decisionArgs,
+        ...(extra.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
+      },
+    };
+    console.info("[ApprovalCard] persistDecision POST /api/decisions", {
+      inputThreadId: threadId,
+      resolvedProjectId: projectId,
+      orgContext: orgContext ?? "(none)",
+      bodyThreadId: persistBody.thread_id,
+      decisionId: persistBody.decision.id,
+      decisionStatus: persistBody.decision.status,
+    });
     const res = await fetch("/api/decisions", {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        thread_id: projectId,
-        decision: {
-          id: item.id,
-          type: item.type,
-          title: item.title,
-          status,
-          phase: item.phase ?? inferPhaseFromType(item.type),
-          cache_key: args.cache_key ?? (item.data as any)?.preview_data?.cache_key ?? undefined,
-          generation_inputs,
-          option_index: extra.option_index ?? args.option_index ?? args.selected_option_index ?? undefined,
-          artifact_id: extra.artifact_id,
-          args: decisionArgs,
-          ...(extra.kg_version_sha != null ? { kg_version_sha: extra.kg_version_sha } : {}),
-        },
-      }),
+      body: JSON.stringify(persistBody),
     });
-    if (!res.ok) return undefined;
+    if (!res.ok) {
+      console.warn("[ApprovalCard] persistDecision POST failed", {
+        status: res.status,
+        statusText: res.statusText,
+        decisionId: persistBody.decision.id,
+        bodyThreadId: persistBody.thread_id,
+      });
+      return undefined;
+    }
     const data = await res.json();
+    console.info("[ApprovalCard] persistDecision POST ok", {
+      decisionId: persistBody.decision.id,
+      new_thread_id: (data as PersistDecisionResponse)?.new_thread_id ?? "(none)",
+    });
     return data as PersistDecisionResponse;
   } catch (e) {
     console.warn("[ApprovalCard] Failed to persist decision:", e);
@@ -175,6 +203,19 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
   const handleDecision = async (decisionType: "approve" | "reject" | "edit") => {
     setIsLoading(true);
     setStatus("processing");
+
+    console.info("[ApprovalCard] handleDecision ENTRY", {
+      decisionType,
+      itemType: item.type,
+      itemId: item.id,
+      scopeProjectId: scopeProjectId ?? "(none)",
+      scopeOrgId: scopeOrgId ?? "(none)",
+      effectiveProjectId: effectiveProjectId ?? "(none)",
+      effectiveOrgId: effectiveOrgId ?? "(none)",
+      itemThreadId: item.threadId ?? "(none)",
+      streamThreadId: (stream as any)?.threadId ?? "(none)",
+      threadIdFromUrl: threadIdFromUrl ?? "(none)",
+    });
 
     // Preview-only tools: apply via API endpoints, not graph resume (no HITL/interrupts)
     // propose_project / project_from_upload (epic #84): apply via POST /decisions/apply

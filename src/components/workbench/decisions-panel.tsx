@@ -175,6 +175,14 @@ export function DecisionsPanel() {
   const scopeProjectId = projectId ?? undefined;
   const scopeOrgId = orgId ?? undefined;
 
+  useEffect(() => {
+    console.info("[DecisionsPanel] scope", {
+      scopeProjectId: scopeProjectId ?? "(none)",
+      scopeOrgId: scopeOrgId ?? "(none)",
+      fromRoute: { orgId, projectId },
+    });
+  }, [scopeProjectId, scopeOrgId, orgId, projectId]);
+
   const mapCompareHref = scopeProjectId && scopeOrgId
     ? `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(scopeOrgId)}/project/${encodeURIComponent(projectSlug)}/${encodeURIComponent(scopeProjectId)}/map?compare=1`
     : "/map?compare=1";

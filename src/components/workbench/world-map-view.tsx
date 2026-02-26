@@ -422,6 +422,10 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const fetchKgDecisions = async () => {
         if (!scopeProjectId || !scopeOrgId) return;
         try {
+            console.info("[WorldMapView] GET /api/decisions", {
+                scopeProjectId,
+                scopeOrgId,
+            });
             const res = await apiFetch(`/api/decisions?project_id=${encodeURIComponent(scopeProjectId)}&org_id=${encodeURIComponent(scopeOrgId)}`);
             if (res.ok) {
                 const data = await res.json();

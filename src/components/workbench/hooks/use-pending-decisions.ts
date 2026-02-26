@@ -63,9 +63,16 @@ export function usePendingDecisions(projectId: string | undefined, orgId: string
     const timeoutId = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
     try {
       const params = new URLSearchParams({ project_id: projectId, org_id: orgId });
+      console.info("[usePendingDecisions] fetch", { projectId, orgId, url: `/api/decisions?${params}` });
       const headers: Record<string, string> = {};
       const orgContext = localStorage.getItem("reflexion_org_context");
       if (orgContext) headers["X-Organization-Context"] = orgContext;
+      console.info("[usePendingDecisions] GET /api/decisions", {
+        project_id: projectId,
+        org_id: orgId,
+        orgContext: orgContext ?? "(none)",
+        url: `/api/decisions?${params}`,
+      });
       const res = await fetch(`/api/decisions?${params}`, { signal: ac.signal, headers });
       clearTimeout(timeoutId);
       if (!res.ok) {
