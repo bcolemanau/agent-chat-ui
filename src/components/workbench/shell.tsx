@@ -56,9 +56,10 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         const qs = path.includes("?") ? path.slice(path.indexOf("?")) : "";
         if (orgId && projectId) return `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(projectSlug)}/${encodeURIComponent(projectId)}${base}${qs}`;
         if (orgId) return `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}${base}${qs}`;
-        return threadId ? `${path}${path.includes("?") ? "&" : "?"}threadId=${encodeURIComponent(threadId)}` : path;
+        return path;
     };
-    const effectiveThreadId = projectId ?? threadId ?? undefined;
+    // Scope from URL only: project (and org). No thread-as-scope fallback.
+    const effectiveProjectIdForScope = projectId ?? undefined;
     const [isWorkbenchOpen, setIsWorkbenchOpen] = useState(true);
     const [isWorkbenchMinimized, setIsWorkbenchMinimized] = useState(false);
     const [isWorkbenchMaximized, setIsWorkbenchMaximized] = useState(false);
@@ -89,6 +90,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const lastApprovalCount = useRef<number>(0);
 
     // Fetch workflow diagram for mini strip (header + workbench pane). Run when on workbench so strip is ready.
+    // Scope from URL only: pass project_id so backend returns project-level pack (e.g. IOT). No thread-as-scope.
     useEffect(() => {
         const onWorkbench = pathname != null && pathname !== "/";
         if (!onWorkbench) return;
@@ -96,6 +98,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         setWorkflowStripLoading(true);
         const params = new URLSearchParams();
         if (activeAgent) params.set("active_node", activeAgent);
+        if (effectiveProjectIdForScope) params.set("project_id", effectiveProjectIdForScope);
         apiFetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: WorkflowDiagramStrip | null) => {
@@ -114,7 +117,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
             .catch(() => { if (!cancelled) setWorkflowStrip(null); })
             .finally(() => { if (!cancelled) setWorkflowStripLoading(false); });
         return () => { cancelled = true; };
-    }, [pathname, activeAgent, orgId]);
+    }, [pathname, activeAgent, orgId, effectiveProjectIdForScope]);
 
     // Nodes to show in strip and dropdown (from API); hide Administration for non-admins
     const displayNodes = useMemo(
@@ -128,7 +131,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     );
 
     // Close workflow strip Select before it unmounts to avoid portal removeChild (Root ErrorBoundary)
-    const wouldShowWorkflowSelect = Boolean(effectiveThreadId && displayNodes.length > 0 && (workflowStrip?.active_node ?? activeAgent));
+    const wouldShowWorkflowSelect = Boolean(effectiveProjectIdForScope && displayNodes.length > 0 && (workflowStrip?.active_node ?? activeAgent));
     useEffect(() => {
         if (!wouldShowWorkflowSelect) setWorkflowSelectOpen(false);
     }, [wouldShowWorkflowSelect]);
@@ -164,9 +167,9 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         if (status !== "authenticated" || !session?.user) return;
         const INIT_KEY = "reflexion_initial_route_done";
         if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(INIT_KEY)) return;
-        // Only run on default landing: /map with no threadId
+        // Only run on default landing: /map with no project in URL (scope from URL only)
         const onMap = pathname?.startsWith("/map");
-        if (!onMap || (effectiveThreadId ?? "").trim() !== "") return;
+        if (!onMap || (effectiveProjectIdForScope ?? "").trim() !== "") return;
 
         const customerId = (session.user as { customerId?: string }).customerId;
         if (isAdmin) {
@@ -192,14 +195,11 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                 if (latest?.id && orgId) {
                     const pslug = latest.slug ?? latest.id;
                     router.replace(`/org/${encodeURIComponent(orgId)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(pslug)}/${encodeURIComponent(latest.id)}/map`);
-                } else if (latest?.thread_id ?? latest?.id) {
-                    const org = localStorage.getItem("reflexion_org_context");
-                    if (org) router.replace(`/org/${encodeURIComponent(org)}/${encodeURIComponent(org)}/project/${encodeURIComponent(latest?.id ?? latest.thread_id)}/${encodeURIComponent(latest?.id ?? latest.thread_id)}/map`);
-                    else router.replace(`/map?threadId=${encodeURIComponent(latest?.thread_id ?? latest?.id)}`);
                 }
+                // No thread-as-scope fallback: only redirect to project when we have project id from API
             })
             .catch(() => sessionStorage.setItem(INIT_KEY, "1"));
-    }, [status, session, isAdmin, pathname, effectiveThreadId, router]);
+    }, [status, session, isAdmin, pathname, effectiveProjectIdForScope, router]);
 
     // Decisions has its own route (/decisions); we do NOT set view=decisions in URL so we keep one canonical URL
 
@@ -377,7 +377,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         }
     }, [isAgentPanelOpen, agentPanelHeight]);
 
-    if (status === "loading") {
+    // Skip auth loading gate on /gcp-chat so the page can render when session is slow or not configured
+    if (status === "loading" && pathname !== "/gcp-chat") {
         return (
             <div className="flex workbench-root-height items-center justify-center">
                 <span className="text-sm text-muted-foreground">Checking authentication…</span>
@@ -406,7 +407,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                 <div className="flex items-center gap-0.5 shrink-0 border border-border/50 rounded-md px-1.5 py-0.5 bg-muted/30">
                                     {displayNodes.map((node, i) => {
                                         const isActive = workflowStrip.active_node === node.id || activeAgent === node.id;
-                                        const showSelect = (isActive && effectiveThreadId) || (shouldRenderWorkflowSelect && !wouldShowWorkflowSelect && node.id === previousActiveNodeIdRef.current);
+                                        const showSelect = (isActive && effectiveProjectIdForScope) || (shouldRenderWorkflowSelect && !wouldShowWorkflowSelect && node.id === previousActiveNodeIdRef.current);
                                         const nodeColor = getWorkflowNodeColor(node.id);
                                         return (
                                             <span key={node.id} className="flex items-center shrink-0 gap-0.5">
@@ -415,7 +416,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                                         <TooltipTrigger asChild>
                                                             <Select
                                                                 value={previousActiveNodeIdRef.current ?? activeAgent}
-                                                                disabled={!effectiveThreadId}
+                                                                disabled={!effectiveProjectIdForScope}
                                                                 open={workflowSelectOpen && wouldShowWorkflowSelect}
                                                                 onOpenChange={setWorkflowSelectOpen}
                                                                 onValueChange={(value) => {
@@ -599,7 +600,12 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                             maxWidth: isWorkbenchMaximized ? '100%' : isAgentPanelOpen && !isAgentPanelMinimized && !isAgentPanelMaximized ? `calc(100% - ${agentPanelHeight}px)` : '100%'
                         }}
                     >
-                        {isWorkbenchOpen && (
+                        {pathname?.includes("/gcp-chat") && (
+                            <div className="h-full w-full min-h-0 overflow-hidden flex flex-col">
+                                {children}
+                            </div>
+                        )}
+                        {!pathname?.includes("/gcp-chat") && isWorkbenchOpen && (
                             <aside className={cn(
                                 "border-l bg-background flex flex-col shadow-xl z-30 transition-all min-h-0 overflow-hidden",
                                 isWorkbenchMinimized ? "h-12" : "flex-1"

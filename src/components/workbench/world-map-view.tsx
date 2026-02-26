@@ -5,6 +5,7 @@ import * as d3 from 'd3';
 import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitCompare, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
+import { useRouteScope } from '@/hooks/use-route-scope';
 import { useQueryState } from 'nuqs';
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
@@ -198,6 +199,9 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const [selectedNode, setSelectedNode] = useState<Node | null>(null);
     const [threadIdFromUrl] = useQueryState("threadId");
     const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+    const { projectId: projectIdFromRoute, orgId: orgIdFromRoute } = useRouteScope();
+    const scopeProjectId = projectIdFromRoute ?? undefined;
+    const scopeOrgId = orgIdFromRoute ?? undefined;
 
     const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
     const [kgDecisions, setKgDecisions] = useState<{ id: string; type: string; title: string; status?: string; kg_version_sha?: string }[]>([]);
@@ -242,7 +246,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             fetchDiffForTimelineVersion(versionParam);
         }
         fetchData(versionParam);
-    }, [versionParam, threadId, kgHistory]);
+    }, [versionParam, scopeProjectId, kgHistory]);
     const [compareVersion1, setCompareVersion1] = useState<string | null>(null);
     const [compareVersion2, setCompareVersion2] = useState<string | null>(null);
     const [diffData, setDiffData] = useState<any>(null);
@@ -288,7 +292,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     // Fetch workflow strip for bottom panel (same as header, left-to-right flow).
     useEffect(() => {
-        if (!threadId || embeddedInDecisions) return;
+        if (!scopeProjectId || embeddedInDecisions) return;
         let cancelled = false;
         const params = new URLSearchParams();
         const activeAgent = (stream as any)?.values?.active_agent;
@@ -301,17 +305,17 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             })
             .catch(() => { if (!cancelled) setWorkflowStrip(null); });
         return () => { cancelled = true; };
-    }, [threadId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
+    }, [scopeProjectId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
 
     // Fetch project risk summary (project + phase + artifact aggregates) for map context pane
     useEffect(() => {
-        if (!threadId || embeddedInDecisions) {
+        if (!scopeProjectId || embeddedInDecisions) {
             setRiskSummary(null);
             return;
         }
         let cancelled = false;
         setLoadingRiskSummary(true);
-        const params = new URLSearchParams({ thread_id: threadId });
+        const params = new URLSearchParams({ project_id: scopeProjectId });
         apiFetch(`/api/project/risk-summary?${params.toString()}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: { in_scope?: number; covered?: number; uncovered?: number; phase_aggregates?: { phase_id: string; in_scope: number; covered: number; uncovered: number }[]; artifact_aggregates?: { art_node_id: string; template_id?: string; covered: number; covered_crit_ids: string[] }[] } | null) => {
@@ -335,7 +339,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .catch(() => { if (!cancelled) setRiskSummary(null); })
             .finally(() => { if (!cancelled) setLoadingRiskSummary(false); });
         return () => { cancelled = true; };
-    }, [threadId, embeddedInDecisions]);
+    }, [scopeProjectId, embeddedInDecisions]);
 
     useEffect(() => {
         if (selectedTimelineVersionId) {
@@ -411,9 +415,9 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     };
 
     const fetchKgDecisions = async () => {
-        if (!threadId) return;
+        if (!scopeProjectId || !scopeOrgId) return;
         try {
-            const res = await apiFetch(`/api/decisions?thread_id=${encodeURIComponent(threadId)}`);
+            const res = await apiFetch(`/api/decisions?project_id=${encodeURIComponent(scopeProjectId)}&org_id=${encodeURIComponent(scopeOrgId)}`);
             if (res.ok) {
                 const data = await res.json();
                 // Backend returns { decisions, org_phase } when org has NPDDecision; otherwise a plain array
@@ -430,7 +434,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const resolveVersion = (v: string) => (v === "current" ? (latestVersionSha ?? v) : v);
 
     const fetchDiff = async (v1: string, v2: string) => {
-        if (!v1 || !v2 || !threadId) return;
+        if (!v1 || !v2 || !scopeProjectId) return;
         try {
             setLoadingDiff(true);
             const v1Resolved = resolveVersion(v1);
@@ -439,7 +443,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             const v1Source = v1 === "current" ? undefined : versions.find((x) => x.id === v1Resolved)?.source;
             const v2Source = v2 === "current" ? undefined : versions.find((x) => x.id === v2Resolved)?.source;
             const params = new URLSearchParams({
-                thread_id: threadId,
+                project_id: scopeProjectId,
                 version1: v1Resolved,
                 version2: v2Resolved,
             });
@@ -477,8 +481,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     /** Fetch diff for a single timeline version (versionBefore → versionId). Used in timeline view for decision versions. */
     const fetchDiffForTimelineVersion = async (versionId: string) => {
-        if (!threadId || !kgHistory?.versions?.length) {
-            console.log('[WorldMapView] Timeline diff fetch skipped: no threadId or kgHistory', { threadId: !!threadId, versionsLength: kgHistory?.versions?.length ?? 0 });
+        if (!scopeProjectId || !kgHistory?.versions?.length) {
+            console.log('[WorldMapView] Timeline diff fetch skipped: no project or kgHistory', { scopeProjectId: !!scopeProjectId, versionsLength: kgHistory?.versions?.length ?? 0 });
             return;
         }
         const versions = kgHistory.versions as { id?: string; source?: string }[];
@@ -488,11 +492,11 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             console.log('[WorldMapView] Timeline diff fetch skipped: no versionBefore', { versionId, idx, versionsLength: versions.length });
             return;
         }
-        const params = new URLSearchParams({
-            thread_id: threadId,
-            version1: versionBefore,
-            version2: versionId,
-        });
+            const params = new URLSearchParams({
+                project_id: scopeProjectId,
+                version1: versionBefore,
+                version2: versionId,
+            });
         const v1Source = versions.find((v) => v.id === versionBefore)?.source;
         const v2Source = versions.find((v) => v.id === versionId)?.source;
         if (v1Source === "organization") params.set("version1_source", "organization");
@@ -609,21 +613,21 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     // After "Begin Enriching" we update thread state with current_trigger_id; refetch version list so the new commit shows.
     const currentTriggerId = (stream as any)?.values?.current_trigger_id;
     useEffect(() => {
-        if (threadId && currentTriggerId) fetchKgHistory();
+        if (scopeProjectId && currentTriggerId) fetchKgHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgHistory stable
-    }, [threadId, currentTriggerId]);
+    }, [scopeProjectId, currentTriggerId]);
 
     // Load decisions when we have history so we can show which decision produced each version
     useEffect(() => {
-        if (threadId && kgHistory) fetchKgDecisions();
+        if (scopeProjectId && kgHistory) fetchKgDecisions();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgDecisions stable
-    }, [threadId, kgHistory]);
+    }, [scopeProjectId, kgHistory]);
 
     // After workbench refresh (e.g. after applying a proposal), refetch decisions so artifact list can hide applied drafts
     useEffect(() => {
-        if (threadId && workbenchRefreshKey > 0) fetchKgDecisions();
+        if (scopeProjectId && workbenchRefreshKey > 0) fetchKgDecisions();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgDecisions stable
-    }, [threadId, workbenchRefreshKey]);
+    }, [scopeProjectId, workbenchRefreshKey]);
 
     useEffect(() => {
         if (!data || !svgRef.current || !containerRef.current) return;
@@ -1951,7 +1955,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                         )}
                         <div className="h-4 w-px bg-border shrink-0" />
                         {/* Project risk summary (Epic #143 — map context pane) */}
-                        {threadId && (loadingRiskSummary || riskSummary !== null) && (
+                        {scopeProjectId && (loadingRiskSummary || riskSummary !== null) && (
                             <div className="flex items-center gap-1.5 shrink-0 px-2 py-1 rounded-md border border-border bg-background/50">
                                 <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Risks</span>
                                 {loadingRiskSummary ? (

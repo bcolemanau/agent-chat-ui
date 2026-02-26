@@ -167,24 +167,24 @@ function getDecisionDisplayTitle(row: DecisionRow): string {
 export function DecisionsPanel() {
   const stream = useStreamContext();
   const router = useRouter();
-  const [threadIdFromUrl] = useQueryState("threadId");
-  const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
   const { orgId, projectId, orgName, projectName } = useRouteScope();
   const orgSlug = orgName ?? orgId ?? "";
   const projectSlug = projectName ?? projectId ?? "";
   const [versionParam, setVersionParam] = useQueryState("version"); // In map layout: selected decision's KG version → map shows that version + diff
+  // Scope from URL only; no thread-as-scope fallback
+  const scopeProjectId = projectId ?? undefined;
+  const scopeOrgId = orgId ?? undefined;
 
-  const mapCompareHref = threadId
-    ? (orgId
-        ? `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(projectSlug)}/${encodeURIComponent(projectId ?? threadId)}/map?compare=1`
-        : `/map?threadId=${encodeURIComponent(threadId)}&compare=1`)
+  const mapCompareHref = scopeProjectId && scopeOrgId
+    ? `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(scopeOrgId)}/project/${encodeURIComponent(projectSlug)}/${encodeURIComponent(scopeProjectId)}/map?compare=1`
     : "/map?compare=1";
 
   const allPreviews = useUnifiedPreviews();
-  const { pending: pendingFromApi, isLoading: pendingApiLoading, refetch: refetchPending } = usePendingDecisions(threadId);
-  const { processed, orgPhase, addProcessed, isLoading, refetch: refetchProcessed } = useProcessedDecisions(threadId);
+  const { pending: pendingFromApi, isLoading: pendingApiLoading, refetch: refetchPending } = usePendingDecisions(scopeProjectId, scopeOrgId);
+  const { processed, orgPhase, addProcessed, isLoading, refetch: refetchProcessed } = useProcessedDecisions(scopeProjectId, scopeOrgId);
   const { inferPhase } = useDecisionTypesConfig();
-  useThreadUpdates(threadId, {
+  const threadIdForUpdates = (stream as any)?.threadId ?? undefined;
+  useThreadUpdates(threadIdForUpdates, {
     onDecisionsUpdate: () => {
       refetchPending();
       refetchProcessed();
@@ -194,8 +194,8 @@ export function DecisionsPanel() {
   // When thread/upload triggers a workbench refresh, refetch persisted pending so we see new decisions from GET /decisions
   const workbenchRefreshKey = (stream as any)?.workbenchRefreshKey ?? 0;
   useEffect(() => {
-    if (threadId && workbenchRefreshKey > 0) refetchPending();
-  }, [threadId, workbenchRefreshKey, refetchPending]);
+    if (scopeProjectId && workbenchRefreshKey > 0) refetchPending();
+  }, [scopeProjectId, workbenchRefreshKey, refetchPending]);
 
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
   // Logical keys for link/enrich/artifact_apply so one upload = one combined decision (dedupe API vs stream)
@@ -509,7 +509,7 @@ export function DecisionsPanel() {
                   </div>
                 }
               >
-                <WorldMapView key={threadId ?? "no-thread"} embeddedInDecisions />
+                <WorldMapView key={scopeProjectId ?? "no-project"} embeddedInDecisions />
               </ErrorBoundary>
             </div>
           )}
@@ -554,15 +554,16 @@ export function DecisionsPanel() {
                       />
                       {(() => {
                         const sha = (selectedItem.data as { proposed_kg_version_sha?: string } | undefined)?.proposed_kg_version_sha;
-                        if (!sha || !threadId) return null;
-                        return <DecisionKgDiffView threadId={threadId} kgVersionSha={sha} />;
+                        if (!sha || !scopeProjectId) return null;
+                        return <DecisionKgDiffView projectId={scopeProjectId} kgVersionSha={sha} />;
                       })()}
                     </div>
                   ) : selectedProcessed ? (
                     <div className="flex-1 min-h-0 overflow-y-auto p-4">
                       <ProcessedRow
                         decision={selectedProcessed}
-                        threadId={threadId}
+                        projectId={scopeProjectId}
+                        orgId={scopeOrgId}
                         displayTitle={getDecisionDisplayTitle({
                           ...selectedProcessed,
                           time: selectedProcessed.timestamp,
@@ -585,13 +586,13 @@ export function DecisionsPanel() {
   );
 }
 
-/** Fetches and shows KG diff for a decision (kg_version_sha or proposed_kg_version_sha). */
+/** Fetches and shows KG diff for a decision (kg_version_sha or proposed_kg_version_sha). Scope from URL only: projectId. */
 function DecisionKgDiffView({
-  threadId,
+  projectId,
   kgVersionSha,
   label,
 }: {
-  threadId: string | undefined;
+  projectId: string | undefined;
   kgVersionSha: string;
   label?: string;
 }) {
@@ -600,7 +601,7 @@ function DecisionKgDiffView({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!threadId || !kgVersionSha) {
+    if (!projectId || !kgVersionSha) {
       setLoading(false);
       return;
     }
@@ -608,7 +609,7 @@ function DecisionKgDiffView({
 
     (async () => {
       try {
-        const historyRes = await apiFetch(`/api/project/history?thread_id=${encodeURIComponent(threadId)}`);
+        const historyRes = await apiFetch(`/api/project/history?project_id=${encodeURIComponent(projectId)}`);
         if (!historyRes.ok || cancelled) return;
         const historyData = await historyRes.json();
         const versions = Array.isArray(historyData?.versions) ? historyData.versions : [];
@@ -620,7 +621,7 @@ function DecisionKgDiffView({
           return;
         }
         const diffRes = await apiFetch(
-          `/api/project/diff?thread_id=${encodeURIComponent(threadId)}&version1=${encodeURIComponent(versionBefore)}&version2=${encodeURIComponent(kgVersionSha)}`
+          `/api/project/diff?project_id=${encodeURIComponent(projectId)}&version1=${encodeURIComponent(versionBefore)}&version2=${encodeURIComponent(kgVersionSha)}`
         );
         if (!diffRes.ok || cancelled) return;
         const diffData = await diffRes.json();
@@ -634,7 +635,7 @@ function DecisionKgDiffView({
     return () => {
       cancelled = true;
     };
-  }, [threadId, kgVersionSha]);
+  }, [projectId, kgVersionSha]);
 
   if (error) return <div className="text-xs text-muted-foreground mt-2">KG diff: {error}</div>;
   if (loading) return <KgDiffDiagramView payload={null} isLoading />;
@@ -651,11 +652,13 @@ function DecisionKgDiffView({
 
 function ProcessedRow({
   decision,
-  threadId,
+  projectId,
+  orgId,
   displayTitle,
 }: {
   decision: ProcessedDecision & { proposed_kg_version_sha?: string };
-  threadId: string | undefined;
+  projectId: string | undefined;
+  orgId: string | undefined;
   displayTitle?: string;
 }) {
   const router = useRouter();
@@ -663,13 +666,10 @@ function ProcessedRow({
   const versionSha = decision.kg_version_sha ?? decision.proposed_kg_version_sha;
 
   const openCompareOnMap = useCallback(() => {
-    if (!threadId || !versionSha) return;
-    const params = new URLSearchParams({
-      threadId,
-      version: versionSha,
-    });
-    router.push(`/map?${params.toString()}`);
-  }, [threadId, versionSha, router]);
+    if (!projectId || !orgId || !versionSha) return;
+    const params = new URLSearchParams({ version: versionSha });
+    router.push(`/org/${encodeURIComponent(orgId)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(projectId)}/${encodeURIComponent(projectId)}/map?${params.toString()}`);
+  }, [projectId, orgId, versionSha, router]);
 
   return (
     <div className="rounded-lg border bg-muted/20 overflow-hidden">
@@ -707,7 +707,7 @@ function ProcessedRow({
           />
         </div>
       ) : null}
-      {versionSha && threadId && (
+      {versionSha && projectId && (
         <div className="px-4 pb-4 space-y-2">
           <div className="flex items-center gap-2">
             <Button
@@ -722,7 +722,7 @@ function ProcessedRow({
             </Button>
           </div>
           <DecisionKgDiffView
-            threadId={threadId}
+            projectId={projectId}
             kgVersionSha={versionSha}
             label={decision.proposed_kg_version_sha && !decision.kg_version_sha ? "KG diff (proposed)" : undefined}
           />

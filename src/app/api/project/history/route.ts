@@ -11,12 +11,12 @@ export async function GET(req: Request) {
         }
 
         const { searchParams } = new URL(req.url);
-        const threadId = searchParams.get("thread_id");
+        const projectId = searchParams.get("project_id");
 
         const backendUrl = getBackendBaseUrl();
 
-        const targetUrl = threadId
-            ? `${backendUrl}/project/history?thread_id=${threadId}`
+        const targetUrl = projectId
+            ? `${backendUrl}/project/history?project_id=${encodeURIComponent(projectId)}`
             : `${backendUrl}/project/history`;
 
         const orgContext = req.headers.get("X-Organization-Context");

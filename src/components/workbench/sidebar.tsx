@@ -11,7 +11,8 @@ import {
     Search,
     Trash2,
     Clock,
-    Pencil
+    Pencil,
+    Cloud
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryState } from "nuqs";
@@ -55,6 +56,7 @@ function formatProjectName(project: Project): string {
 const PRODUCT_LINKS = [
     { name: "Integrations", href: "/integrations", icon: Plug },
     { name: "Discovery", href: "/discovery", icon: Search },
+    { name: "GCP Chat", href: "/gcp-chat", icon: Cloud },
     { name: "System Settings", href: "/settings", icon: Settings },
 ];
 
@@ -67,7 +69,8 @@ export function Sidebar() {
     const userRole = session?.user?.role;
 
     const [threadId, setThreadId] = useQueryState("threadId");
-    const effectiveProjectId = projectId ?? threadId ?? undefined;
+    // Scope from URL only; no thread-as-scope fallback
+    const effectiveProjectId = projectId ?? undefined;
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(false);
     const [creatingProject, setCreatingProject] = useState(false);

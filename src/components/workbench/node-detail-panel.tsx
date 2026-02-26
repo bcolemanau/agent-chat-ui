@@ -17,6 +17,7 @@ import { useStreamContext } from "@/providers/Stream";
 import { useArtifactContext } from "@/components/thread/artifact";
 import { apiFetch } from "@/lib/api-fetch";
 import { useOrgContext } from "@/hooks/use-org-context";
+import { useRouteScope } from "@/hooks/use-route-scope";
 
 interface Node {
   id: string;
@@ -49,6 +50,8 @@ export function NodeDetailPanel({
 }: NodeDetailPanelProps) {
   const stream = useStreamContext();
   const { orgId: orgContextId } = useOrgContext();
+  const { projectId: projectIdFromRoute } = useRouteScope();
+  const scopeProjectId = projectIdFromRoute ?? undefined;
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -336,7 +339,7 @@ export function NodeDetailPanel({
           cache_key: editCacheKey,
           option_index: 0,
           thread_id: threadId ?? undefined,
-          project_id: threadId ?? undefined,
+          project_id: scopeProjectId ?? undefined,
           artifact_type: artifactTypeForApply(),
           source_node_id: node.id,
           draft_content: editDraftContent,
@@ -716,7 +719,7 @@ export function NodeDetailPanel({
                     artifactId={node.id}
                     threadId={threadId}
                     orgId={orgContextId}
-                    projectId={threadId}
+                    projectId={scopeProjectId}
                     />
                   </div>
                   {isAdmin && (
@@ -738,7 +741,7 @@ export function NodeDetailPanel({
                     artifactId={node.id}
                     threadId={threadId}
                     orgId={orgContextId}
-                    projectId={threadId}
+                    projectId={scopeProjectId}
                     onSuccess={() => {
                       setConnectorConfigOpen(false);
                       (stream as { triggerWorkbenchRefresh?: () => void })?.triggerWorkbenchRefresh?.();

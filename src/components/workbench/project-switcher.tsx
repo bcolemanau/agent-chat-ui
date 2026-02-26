@@ -44,7 +44,8 @@ export function ProjectSwitcher() {
     const { orgId, projectId, orgName } = useRouteScope();
     const [projects, setProjects] = React.useState<Project[]>([]);
     const [threadId, setThreadId] = useQueryState("threadId");
-    const effectiveProjectId = projectId ?? threadId ?? undefined;
+    // Scope from URL only; no thread-as-scope fallback
+    const effectiveProjectId = projectId ?? undefined;
     const [_loading, setLoading] = React.useState(false);
     const [creatingProject, setCreatingProject] = React.useState(false);
     const stream = useStreamContext();

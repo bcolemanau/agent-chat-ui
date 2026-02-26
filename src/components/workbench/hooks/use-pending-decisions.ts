@@ -21,7 +21,7 @@ interface DecisionRecord {
   proposed_kg_version_sha?: string;
 }
 
-function recordToPreviewItem(record: DecisionRecord, threadId: string | undefined): UnifiedPreviewItem {
+function recordToPreviewItem(record: DecisionRecord, scopeProjectId: string | undefined): UnifiedPreviewItem {
   const args = record.args ?? {};
   const preview_data = args.preview_data as Record<string, unknown> | undefined;
   return {
@@ -38,12 +38,13 @@ function recordToPreviewItem(record: DecisionRecord, threadId: string | undefine
       diff: preview_data?.diff,
       proposed_kg_version_sha: record.proposed_kg_version_sha,
     },
-    threadId,
+    threadId: scopeProjectId,
     fromMessages: true,
   };
 }
 
-export function usePendingDecisions(threadId: string | undefined): {
+/** Scope from URL only (projectId, orgId). No thread-as-scope fallback. */
+export function usePendingDecisions(projectId: string | undefined, orgId: string | undefined): {
   pending: UnifiedPreviewItem[];
   isLoading: boolean;
   refetch: () => Promise<void>;
@@ -52,7 +53,7 @@ export function usePendingDecisions(threadId: string | undefined): {
   const [isLoading, setIsLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (typeof window === "undefined" || !threadId?.trim()) {
+    if (typeof window === "undefined" || !projectId?.trim() || !orgId?.trim()) {
       setPending([]);
       setIsLoading(false);
       return;
@@ -61,7 +62,7 @@ export function usePendingDecisions(threadId: string | undefined): {
     const ac = new AbortController();
     const timeoutId = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
     try {
-      const params = new URLSearchParams({ thread_id: threadId });
+      const params = new URLSearchParams({ project_id: projectId, org_id: orgId });
       const headers: Record<string, string> = {};
       const orgContext = localStorage.getItem("reflexion_org_context");
       if (orgContext) headers["X-Organization-Context"] = orgContext;
@@ -81,7 +82,7 @@ export function usePendingDecisions(threadId: string | undefined): {
           (r.status === "pending" || r.status === "proposed") &&
           !(r as { superseded_by?: string }).superseded_by
       ) as DecisionRecord[];
-      setPending(pendingRecords.map((r) => recordToPreviewItem(r, threadId)));
+      setPending(pendingRecords.map((r) => recordToPreviewItem(r, projectId)));
     } catch (e) {
       clearTimeout(timeoutId);
       if ((e as Error)?.name === "AbortError") {
@@ -93,7 +94,7 @@ export function usePendingDecisions(threadId: string | undefined): {
     } finally {
       setIsLoading(false);
     }
-  }, [threadId]);
+  }, [projectId, orgId]);
 
   useEffect(() => {
     load();

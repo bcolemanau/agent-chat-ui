@@ -1,18 +1,17 @@
 /**
  * Hook to get the count of active (pending) decisions only: proposals awaiting
  * approval that have not yet been approved or rejected. Used for the
- * notification badge on the Decisions tab.
+ * notification badge on the Decisions tab. Scope from URL only (projectId, orgId).
  */
 import { useMemo } from "react";
-import { useStreamContext } from "@/providers/Stream";
+import { useRouteScope } from "@/hooks/use-route-scope";
 import { useUnifiedPreviews } from "./use-unified-previews";
 import { useProcessedDecisions } from "./use-processed-decisions";
 
 export function useApprovalCount(): number {
-  const stream = useStreamContext();
-  const threadId = (stream as any)?.threadId ?? undefined;
+  const { projectId, orgId } = useRouteScope();
   const previews = useUnifiedPreviews();
-  const { processed } = useProcessedDecisions(threadId);
+  const { processed } = useProcessedDecisions(projectId ?? undefined, orgId ?? undefined);
 
   const processedIds = useMemo(() => new Set(processed.map((p) => p.id)), [processed]);
 
