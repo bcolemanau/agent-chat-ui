@@ -260,7 +260,7 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
           setStatus("approved");
           const kg_version_sha = (data as any).kg_version_sha;
           onDecisionProcessed?.(item, "approved", { kg_version_sha });
-          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId ? { org_id: effectiveOrgId } : {}) });
+          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId && typeof effectiveOrgId === "string" ? { org_id: effectiveOrgId } : {}) });
           toast.success("Approved", { description: "Project created." });
           if (typeof (stream as any).updateState === "function") {
             const values: Record<string, unknown> = {};
@@ -333,7 +333,7 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
           setStatus("approved");
           const kg_version_sha = (data as any).kg_version_sha;
           onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
-          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId ? { org_id: effectiveOrgId } : {}) });
+          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId && typeof effectiveOrgId === "string" ? { org_id: effectiveOrgId } : {}) });
           toast.success("Hydration Complete", {
             description: "Transitioning to Concept phase. The Concept agent will now help generate Concept Briefs.",
           });
@@ -452,7 +452,7 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
           setStatus("approved");
           const kg_version_sha = (data as any).kg_version_sha;
           onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
-          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId ? { org_id: effectiveOrgId } : {}) });
+          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId && typeof effectiveOrgId === "string" ? { org_id: effectiveOrgId } : {}) });
           toast.success("Artifact linked and enriched", {
             description: data.enrichment_applied
               ? "Artifact linked to KG and entities added."
@@ -511,7 +511,7 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
           setStatus("approved");
           const kg_version_sha = (data as any).kg_version_sha;
           onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
-          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId ? { org_id: effectiveOrgId } : {}) });
+          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId && typeof effectiveOrgId === "string" ? { org_id: effectiveOrgId } : {}) });
           toast.success("Artifact applied", {
             description: `Successfully applied ${data.filename || "artifact"} to ${data.artifact_type || "KG"}`,
           });
@@ -606,7 +606,7 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
           setStatus("approved");
           const kg_version_sha = (data as any).kg_version_sha;
           onDecisionProcessed?.(item, "approved", kg_version_sha != null ? { kg_version_sha } : undefined);
-          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId ? { org_id: effectiveOrgId } : {}) });
+          await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, { ...(kg_version_sha != null ? { kg_version_sha } : {}), ...(effectiveOrgId && typeof effectiveOrgId === "string" ? { org_id: effectiveOrgId } : {}) });
           toast.success("Enrichment applied", {
             description: "Metadata and artifact types have been saved.",
           });
@@ -765,7 +765,7 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
             option_index: effectiveOptionIndex >= 0 ? effectiveOptionIndex : undefined,
             artifact_id: (data as any).artifact_id,
             ...(kg_version_sha != null ? { kg_version_sha } : {}),
-            ...(effectiveOrgId ? { org_id: effectiveOrgId } : {}),
+            ...(effectiveOrgId && typeof effectiveOrgId === "string" ? { org_id: effectiveOrgId } : {}),
           });
           const recPhase = (data as any).recommended_next_phase as string | undefined;
           const recReason = (data as any).recommended_next_reason as string | undefined;
