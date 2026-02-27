@@ -284,10 +284,11 @@ export function NodeDetailPanel({
   const metadata = (node as Node & { metadata?: Record<string, unknown> }).metadata || {};
   const artifactTypes = (metadata.artifact_types as string[] | undefined) || [];
   const status = (metadata.status as string | undefined) ?? "accepted";
+  const isArtifactType = (t: string | undefined) => !!(t && String(t).toUpperCase() === "ARTIFACT");
   // Show Edit when we have loadable content and the node is an ARTIFACT that can be edited (draft or accepted).
-  // draft-from-existing resolves by node_id, so we don't require metadata.artifact_id.
+  // Treat type case-insensitively; also allow when we have artifact_types (in case type field differs).
   const isEditableArtifact =
-    node.type === "ARTIFACT" &&
+    (isArtifactType(node.type) || artifactTypes.length > 0) &&
     content != null &&
     !error &&
     (status === "draft" || status === "accepted");
@@ -511,6 +512,17 @@ export function NodeDetailPanel({
             >
               {editLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
               Edit
+            </UIButton>
+          )}
+          {isAdmin && (
+            <UIButton
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs shrink-0"
+              onClick={() => setConnectorConfigOpen(true)}
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Configure connector
             </UIButton>
           )}
           {editModalOpen && (
@@ -772,32 +784,7 @@ export function NodeDetailPanel({
                     projectId={scopeProjectId}
                     />
                   </div>
-                  {isAdmin && (
-                    <UIButton
-                      variant="outline"
-                      size="sm"
-                      className="h-7 gap-1.5 text-xs shrink-0"
-                      onClick={() => setConnectorConfigOpen(true)}
-                    >
-                      <Settings2 className="h-3.5 w-3.5" />
-                      Configure connector
-                    </UIButton>
-                  )}
                 </div>
-                {isAdmin && (
-                  <ConnectorConfigModal
-                    open={connectorConfigOpen}
-                    onOpenChange={setConnectorConfigOpen}
-                    artifactId={node.id}
-                    threadId={threadId}
-                    orgId={orgContextId}
-                    projectId={scopeProjectId}
-                    onSuccess={() => {
-                      setConnectorConfigOpen(false);
-                      (stream as { triggerWorkbenchRefresh?: () => void })?.triggerWorkbenchRefresh?.();
-                    }}
-                  />
-                )}
               </div>
             )}
           </>
@@ -807,6 +794,20 @@ export function NodeDetailPanel({
           </p>
         )}
       </div>
+      {isAdmin && (
+        <ConnectorConfigModal
+          open={connectorConfigOpen}
+          onOpenChange={setConnectorConfigOpen}
+          artifactId={node.id}
+          threadId={threadId}
+          orgId={orgContextId}
+          projectId={scopeProjectId}
+          onSuccess={() => {
+            setConnectorConfigOpen(false);
+            (stream as { triggerWorkbenchRefresh?: () => void })?.triggerWorkbenchRefresh?.();
+          }}
+        />
+      )}
     </div>
   );
 }
