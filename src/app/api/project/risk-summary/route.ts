@@ -15,10 +15,12 @@ export async function GET(req: Request) {
 
         const { searchParams } = new URL(req.url);
         const threadId = searchParams.get("thread_id");
+        const projectId = searchParams.get("project_id");
 
         const backendUrl = getBackendBaseUrl();
         const params = new URLSearchParams();
         if (threadId) params.set("thread_id", threadId);
+        if (projectId) params.set("project_id", projectId);
         const targetUrl = `${backendUrl}/project/risk-summary${params.toString() ? `?${params.toString()}` : ""}`;
 
         const orgContext = req.headers.get("X-Organization-Context");

@@ -549,6 +549,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 setActiveVersion(null);
             }
             if (versionSource === 'organization') params.set('version_source', 'organization');
+            if (scopeProjectId) params.set('project_id', scopeProjectId);
+            if (scopeOrgId) params.set('org_id', scopeOrgId);
             const url = `/api/kg-data?${params.toString()}`;
 
             console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version, versionSource });
@@ -617,7 +619,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
         fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchData/fetchKgHistory intentionally omitted to avoid re-run loops
-    }, [threadId, workbenchRefreshKey, activeVersion, filteredKg, compareMode, diffData]);
+    }, [threadId, scopeProjectId, scopeOrgId, workbenchRefreshKey, activeVersion, filteredKg, compareMode, diffData]);
 
     // After "Begin Enriching" we update thread state with current_trigger_id; refetch version list so the new commit shows.
     const currentTriggerId = (stream as any)?.values?.current_trigger_id;
