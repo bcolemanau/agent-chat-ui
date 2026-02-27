@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import { polygonHull as d3PolygonHull } from 'd3-polygon';
 import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitCompare, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
@@ -156,6 +157,17 @@ const typeToAgentId: Record<string, string> = (() => {
             for (const typeName of t.types) {
                 if (!(typeName in out)) out[typeName] = agent.agentId;
             }
+        }
+    }
+    return out;
+})();
+
+/** Template id (e.g. T-CONCEPT) → agent id for constellation layout. */
+const templateIdToAgentId: Record<string, string> = (() => {
+    const out: Record<string, string> = {};
+    for (const agent of MAP_LEGEND_AGENT_HIERARCHY) {
+        for (const t of agent.templates) {
+            if (t.templateId) out[t.templateId] = agent.agentId;
         }
     }
     return out;
@@ -1067,16 +1079,101 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 effectiveNodeIds.has((l.target as Node).id)
         );
 
+        // Constellation layout: ART nodes as centers per phase, satellites (REFERENCES) around them; phase hulls.
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const phaseRadius = Math.min(width, height) * 0.32;
+        const artNodeIdsByTemplateId: Record<string, string[]> = {};
+        for (const l of data?.links ?? []) {
+            const typ = (l.type ?? '').toString().trim();
+            if (typ !== 'CONTRIBUTES_TO') continue;
+            const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+            const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+            if (!src || !tgt || !String(tgt).startsWith('T-')) continue;
+            if (!artNodeIdsByTemplateId[tgt]) artNodeIdsByTemplateId[tgt] = [];
+            artNodeIdsByTemplateId[tgt].push(src);
+        }
+        const artIdToAgentId: Record<string, string> = {};
+        for (const [tplId, artIds] of Object.entries(artNodeIdsByTemplateId)) {
+            const agentId = templateIdToAgentId[tplId];
+            if (!agentId) continue;
+            for (const id of artIds) {
+                if (!(id in artIdToAgentId)) artIdToAgentId[id] = agentId;
+            }
+        }
+        const getAgentIdForNode = (n: Node) => artIdToAgentId[n.id] ?? typeToAgentId[n.type] ?? 'system';
+        let agentIdsInGraph = Array.from(new Set(effectiveNodes.map(getAgentIdForNode)));
+        if (agentIdsInGraph.length === 0) agentIdsInGraph = ['system'];
+        const phaseCenterByAgent: Record<string, { x: number; y: number }> = {};
+        agentIdsInGraph.forEach((agentId, i) => {
+            const angle = (i / Math.max(1, agentIdsInGraph.length)) * 2 * Math.PI - Math.PI / 2;
+            phaseCenterByAgent[agentId] = {
+                x: centerX + phaseRadius * Math.cos(angle),
+                y: centerY + phaseRadius * Math.sin(angle),
+            };
+        });
+        const artPositionByNodeId: Record<string, { x: number; y: number }> = {};
+        const artRadius = 55;
+        agentIdsInGraph.forEach((agentId) => {
+            const artsInPhase = effectiveNodes.filter((n) => artIdToAgentId[n.id] === agentId);
+            const phaseCenter = phaseCenterByAgent[agentId] ?? { x: centerX, y: centerY };
+            artsInPhase.forEach((n, j) => {
+                const angle = (j / Math.max(1, artsInPhase.length)) * 2 * Math.PI - Math.PI / 2;
+                artPositionByNodeId[n.id] = {
+                    x: phaseCenter.x + artRadius * Math.cos(angle),
+                    y: phaseCenter.y + artRadius * Math.sin(angle),
+                };
+            });
+        });
+        const nodeIdToOwnerArtId: Record<string, string> = {};
+        const artIdsSet = new Set(Object.keys(artIdToAgentId));
+        for (const l of effectiveValidLinks) {
+            const typ = (l.type ?? '').toString().trim();
+            if (typ !== 'REFERENCES') continue;
+            const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+            const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+            if (src && tgt && artIdsSet.has(src)) nodeIdToOwnerArtId[tgt] = src;
+        }
+        effectiveNodes.forEach((n) => {
+            const pos = artPositionByNodeId[n.id];
+            if (pos) {
+                n.fx = pos.x;
+                n.fy = pos.y;
+            } else {
+                const ownerArtId = nodeIdToOwnerArtId[n.id];
+                const target = ownerArtId ? artPositionByNodeId[ownerArtId] : phaseCenterByAgent[getAgentIdForNode(n)];
+                if (target) {
+                    n.x = target.x + (Math.random() - 0.5) * 40;
+                    n.y = target.y + (Math.random() - 0.5) * 40;
+                }
+                n.fx = null;
+                n.fy = null;
+            }
+        });
+
         const simulation = d3.forceSimulation<Node>(effectiveNodes)
-            .force('link', d3.forceLink<Node, Link>(effectiveValidLinks).id(d => d.id).distance(150))
-            .force('charge', d3.forceManyBody().strength(-800))
-            .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collide', d3.forceCollide().radius(60));
+            .force('link', d3.forceLink<Node, Link>(effectiveValidLinks).id(d => d.id).distance(120))
+            .force('charge', d3.forceManyBody().strength(-400))
+            .force('center', d3.forceCenter(centerX, centerY))
+            .force('collide', d3.forceCollide().radius(50))
+            .force('constellation-x', d3.forceX((d: Node) => {
+                if (d.fx != null) return d.fx;
+                const ownerArtId = nodeIdToOwnerArtId[d.id];
+                const target = ownerArtId ? artPositionByNodeId[ownerArtId] : phaseCenterByAgent[getAgentIdForNode(d)];
+                return target?.x ?? centerX;
+            }).strength(0.07))
+            .force('constellation-y', d3.forceY((d: Node) => {
+                if (d.fy != null) return d.fy;
+                const ownerArtId = nodeIdToOwnerArtId[d.id];
+                const target = ownerArtId ? artPositionByNodeId[ownerArtId] : phaseCenterByAgent[getAgentIdForNode(d)];
+                return target?.y ?? centerY;
+            }).strength(0.07));
         simulationRef.current = simulation;
 
         const linkKgStatus = (d: Link) => ((d as any).metadata?.status ?? 'active') as string;
         const linkIsPendingOrRejected = (d: Link) => statusFilter === 'all' && (linkKgStatus(d) === 'pending' || linkKgStatus(d) === 'rejected');
 
+        const hullGroup = g.append('g').attr('class', 'phase-hulls');
         const link = g.append('g')
             .attr('class', 'links')
             .selectAll('line')
@@ -1209,6 +1306,30 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             const targetId = (d: Link) => typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
             const linkTouchesFocus = (d: Link) => inFocusNodeIds.has(sourceId(d)) || inFocusNodeIds.has(targetId(d));
             const linkHighlighted = (d: Link) => focusedNodeId && linkTouchesFocus(d) && (isContentTraceLink(d) || isReferencesFromFocus(d));
+
+            // Update phase hulls (convex hull per agent)
+            const hullData = agentIdsInGraph.map((agentId) => {
+                const points = effectiveNodes
+                    .filter((n) => getAgentIdForNode(n) === agentId && n.x != null && n.y != null)
+                    .map((n) => [n.x!, n.y!] as [number, number]);
+                const polygon = points.length >= 3 ? d3PolygonHull(points) : null;
+                return { agentId, polygon };
+            });
+            const hullPaths = hullGroup.selectAll<SVGPathElement, { agentId: string; polygon: [number, number][] | null }>('path').data(hullData, (d) => d.agentId);
+            hullPaths.join(
+                (enter) => enter.append('path')
+                    .attr('fill', (d) => (agentColors[d.agentId] ?? '#888'))
+                    .attr('fill-opacity', 0.08)
+                    .attr('stroke', (d) => agentColors[d.agentId] ?? '#888')
+                    .attr('stroke-opacity', 0.35)
+                    .attr('stroke-width', 1.5)
+                    .attr('pointer-events', 'none'),
+                (update) => update,
+                (exit) => exit.remove()
+            ).attr('d', (d) => {
+                if (!d.polygon || d.polygon.length < 2) return '';
+                return 'M' + d.polygon.join('L') + 'Z';
+            });
 
             link
                 .attr('x1', d => (d.source as Node).x!)

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
+import { chord as d3Chord, ribbon as d3Ribbon } from "d3-chord";
 
 const BEAT_DURATION_MS = 5000;
 const CAPTIONS: { script: string; outcome: string }[] = [
@@ -213,65 +214,257 @@ export function HeroDemoScene() {
                 .force("y", d3.forceY(centerY).strength(0.02));
             simulationRef.current = sim;
         } else if (beat === 1) {
-            // Clusters: pull toward cluster centers via forceX/forceY
-            const sim = d3.forceSimulation<DemoNode>(nodes)
-                .force("charge", d3.forceManyBody().strength(-120))
-                .force(
-                    "x",
-                    d3.forceX((d: DemoNode) => clusterCenters[(d.clusterIndex ?? 0) % clusterCenters.length][0]).strength(0.08)
-                )
-                .force(
-                    "y",
-                    d3.forceY((d: DemoNode) => clusterCenters[(d.clusterIndex ?? 0) % clusterCenters.length][1]).strength(0.08)
-                );
-            simulationRef.current = sim;
+            // Teams: star schema — one leader per tribe, satellites around leader (2×3 grid of tribes)
+            const cols = 3;
+            const rows = 2;
+            const pad = Math.min(width, height) * 0.12;
+            const stageW = (width - 2 * pad) / cols;
+            const stageH = (height - 2 * pad) / rows;
+            const tribeCenters: [number, number][] = [];
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    tribeCenters.push([pad + (c + 0.5) * stageW, pad + (r + 0.5) * stageH]);
+                }
+            }
+            const starRadius = Math.min(stageW, stageH) * 0.22;
+            const byCluster = new Map<number, DemoNode[]>();
+            nodes.forEach((n) => {
+                const c = (n.clusterIndex ?? 0) % numClusters;
+                if (!byCluster.has(c)) byCluster.set(c, []);
+                byCluster.get(c)!.push(n);
+            });
+            byCluster.forEach((clusterNodes, c) => {
+                const [cx, cy] = tribeCenters[c % tribeCenters.length];
+                clusterNodes.forEach((n, i) => {
+                    if (i === 0) {
+                        n.x = cx;
+                        n.y = cy;
+                    } else {
+                        const angle = ((i - 1) / Math.max(1, clusterNodes.length - 1)) * 2 * Math.PI - Math.PI / 2;
+                        n.x = cx + starRadius * Math.cos(angle);
+                        n.y = cy + starRadius * Math.sin(angle);
+                    }
+                    n.fx = n.x;
+                    n.fy = n.y;
+                });
+            });
+            simulationRef.current = null;
         } else if (beat === 2) {
-            // Linear: left to right
-            nodes.forEach((n, i) => {
-                const idx = n.clusterIndex ?? 0;
-                const seg = width / (numClusters + 1);
-                const x = seg * (idx + 1);
-                const y = centerY + ((i % 20) - 10) * 15;
-                n.x = x;
-                n.y = y;
-                n.fx = x;
-                n.fy = y;
+            // Linear: breadcrumb-style strip — pills per stage with arrows between (like workflow strip)
+            const pad = width * 0.06;
+            const stripY = centerY;
+            const stripH = Math.min(height * 0.2, 72);
+            const arrowGap = 28;
+            const totalPillWidth = width - 2 * pad - (numClusters - 1) * arrowGap;
+            const pillW = totalPillWidth / numClusters;
+            const pillH = stripH * 0.7;
+            const byCluster = new Map<number, DemoNode[]>();
+            nodes.forEach((n) => {
+                const c = (n.clusterIndex ?? 0) % numClusters;
+                if (!byCluster.has(c)) byCluster.set(c, []);
+                byCluster.get(c)!.push(n);
+            });
+            byCluster.forEach((clusterNodes, c) => {
+                const pillLeft = pad + c * (pillW + arrowGap);
+                const pillCx = pillLeft + pillW / 2;
+                const pillCy = stripY;
+                const innerPad = 8;
+                clusterNodes.forEach((n, i) => {
+                    const cols = Math.max(1, Math.ceil(Math.sqrt(clusterNodes.length)));
+                    const row = i % cols;
+                    const col = Math.floor(i / cols);
+                    const cellW = (pillW - 2 * innerPad) / cols;
+                    const cellH = (pillH - 2 * innerPad) / Math.ceil(clusterNodes.length / cols);
+                    const jitter = (i * 7) % 5 - 2;
+                    const x = pillLeft + innerPad + (col + 0.5) * cellW + jitter;
+                    const y = pillCy - pillH / 2 + innerPad + (row + 0.5) * cellH + (i % 3) - 1;
+                    n.x = x;
+                    n.y = y;
+                    n.fx = x;
+                    n.fy = y;
+                });
             });
             simulationRef.current = null;
         } else if (beat === 3) {
-            // Circular: customer at centre
-            nodes.forEach((n, i) => {
-                const idx = n.clusterIndex ?? 0;
-                const angle = (idx / numClusters) * 2 * Math.PI + (i % 5) * 0.1;
-                n.x = centerX + radius * Math.cos(angle);
-                n.y = centerY + radius * Math.sin(angle);
-                n.fx = n.x;
-                n.fy = n.y;
-            });
+            // Agile: one clear circle around customer (nodes[0] at centre)
+            const loopRadius = radius * 0.9;
             if (nodes.length > 0) {
                 nodes[0].x = centerX;
                 nodes[0].y = centerY;
                 nodes[0].fx = centerX;
                 nodes[0].fy = centerY;
+            }
+            for (let i = 1; i < nodes.length; i++) {
+                const angle = ((i - 1) / (nodes.length - 1)) * 2 * Math.PI - Math.PI / 2;
+                nodes[i].x = centerX + loopRadius * Math.cos(angle);
+                nodes[i].y = centerY + loopRadius * Math.sin(angle);
+                nodes[i].fx = nodes[i].x;
+                nodes[i].fy = nodes[i].y;
             }
             simulationRef.current = null;
         } else {
-            // Beat 4, 5, 6: keep circular layout
-            nodes.forEach((n, i) => {
-                const idx = n.clusterIndex ?? 0;
-                const angle = (idx / numClusters) * 2 * Math.PI + (i % 5) * 0.1;
-                n.x = centerX + radius * Math.cos(angle);
-                n.y = centerY + radius * Math.sin(angle);
-                n.fx = n.x;
-                n.fy = n.y;
-            });
+            // Beat 4, 5, 6: same single circle, customer at centre
+            const loopRadius = radius * 0.9;
             if (nodes.length > 0) {
                 nodes[0].x = centerX;
                 nodes[0].y = centerY;
                 nodes[0].fx = centerX;
                 nodes[0].fy = centerY;
             }
+            for (let i = 1; i < nodes.length; i++) {
+                const angle = ((i - 1) / (nodes.length - 1)) * 2 * Math.PI - Math.PI / 2;
+                nodes[i].x = centerX + loopRadius * Math.cos(angle);
+                nodes[i].y = centerY + loopRadius * Math.sin(angle);
+                nodes[i].fx = nodes[i].x;
+                nodes[i].fy = nodes[i].y;
+            }
             simulationRef.current = null;
+        }
+
+        // Beat 2 (Linear): breadcrumb-style strip — container, pills, arrows (like workflow strip in shell)
+        if (beat === 2) {
+            const pad = width * 0.06;
+            const stripY = centerY;
+            const stripH = Math.min(height * 0.2, 72);
+            const arrowGap = 28;
+            const totalPillWidth = width - 2 * pad - (numClusters - 1) * arrowGap;
+            const pillW = totalPillWidth / numClusters;
+            const pillH = stripH * 0.7;
+            const r = 6;
+            const stripGroup = g.append("g").attr("class", "breadcrumb-strip");
+            const stripLeft = pad;
+            const stripWidth = width - 2 * pad;
+            stripGroup
+                .append("rect")
+                .attr("x", stripLeft)
+                .attr("y", stripY - stripH / 2)
+                .attr("width", stripWidth)
+                .attr("height", stripH)
+                .attr("rx", 8)
+                .attr("ry", 8)
+                .attr("fill", "rgba(30, 41, 59, 0.6)")
+                .attr("stroke", "rgba(100, 116, 139, 0.35)")
+                .attr("stroke-width", 1);
+            for (let c = 0; c < numClusters; c++) {
+                const pillLeft = pad + c * (pillW + arrowGap);
+                const pillCy = stripY;
+                const hue = 217;
+                const light = 28 + (c / Math.max(1, numClusters - 1)) * 18;
+                stripGroup
+                    .append("rect")
+                    .attr("x", pillLeft + 4)
+                    .attr("y", pillCy - pillH / 2)
+                    .attr("width", pillW - 8)
+                    .attr("height", pillH)
+                    .attr("rx", r)
+                    .attr("ry", r)
+                    .attr("fill", `hsla(${hue}, 45%, ${light}%, 0.85)`)
+                    .attr("stroke", `hsla(${hue}, 50%, 50%, 0.4)`)
+                    .attr("stroke-width", 1);
+                if (c < numClusters - 1) {
+                    const arrowX = pillLeft + pillW + arrowGap / 2;
+                    stripGroup
+                        .append("text")
+                        .attr("x", arrowX)
+                        .attr("y", pillCy)
+                        .attr("text-anchor", "middle")
+                        .attr("dominant-baseline", "central")
+                        .attr("fill", "rgba(148, 163, 184, 0.7)")
+                        .attr("font-size", 14)
+                        .attr("font-family", "system-ui, sans-serif")
+                        .text("→");
+                }
+            }
+        }
+
+        // Beat 3 (Agile): chord diagram (arcs + ribbons) + customer in centre (Option A)
+        if (beat === 3) {
+            const n = Math.max(2, numClusters);
+            const matrix = Array.from({ length: n }, () => Array(n).fill(0));
+            for (const l of links) {
+                const src = l.source as DemoNode;
+                const tgt = l.target as DemoNode;
+                const i = (src.clusterIndex ?? 0) % n;
+                const j = (tgt.clusterIndex ?? 0) % n;
+                matrix[i][j] += 1;
+            }
+            const total = matrix.flat().reduce((a, b) => a + b, 0);
+            if (total === 0) {
+                for (let i = 0; i < n; i++) matrix[i][(i + 1) % n] = 1;
+            }
+            const chordRadius = Math.min(width, height) * 0.38;
+            const innerRadius = chordRadius * 0.52;
+            const chordLayout = d3Chord().padAngle(0.02)(matrix);
+            const chordGroup = g.append("g").attr("class", "chord-agile").attr("transform", `translate(${centerX},${centerY})`);
+            const arcGen = d3.arc<{ startAngle: number; endAngle: number; index: number }>()
+                .innerRadius(innerRadius)
+                .outerRadius(chordRadius);
+            const ribbonGen = d3Ribbon().radius(innerRadius);
+            const phaseColors = ["#94a3b8", "#0ea5e9", "#ec4899", "#eab308", "#64748b"];
+            chordGroup
+                .selectAll("path.ribbon")
+                .data(chordLayout)
+                .enter()
+                .append("path")
+                .attr("class", "ribbon")
+                .attr("fill", (d) => phaseColors[d.source.index % phaseColors.length])
+                .attr("fill-opacity", 0.45)
+                .attr("stroke", "rgba(0,0,0,0.2)")
+                .attr("stroke-width", 0.5)
+                .attr("d", ribbonGen as any);
+            chordGroup
+                .selectAll("path.arc")
+                .data((chordLayout as any).groups)
+                .enter()
+                .append("path")
+                .attr("class", "arc")
+                .attr("fill", (d: { index: number }) => phaseColors[d.index % phaseColors.length])
+                .attr("fill-opacity", 0.25)
+                .attr("stroke", (d: { index: number }) => phaseColors[d.index % phaseColors.length])
+                .attr("stroke-opacity", 0.6)
+                .attr("stroke-width", 1)
+                .attr("d", arcGen as any);
+            const centreRadius = chordRadius * 0.32;
+            chordGroup.append("circle").attr("class", "chord-centre").attr("r", centreRadius).attr("fill", "rgba(15,23,42,0.9)").attr("stroke", "rgba(228,179,24,0.6)").attr("stroke-width", 2);
+            chordGroup
+                .append("text")
+                .attr("class", "chord-centre-label")
+                .attr("text-anchor", "middle")
+                .attr("dominant-baseline", "middle")
+                .attr("fill", "rgba(228,179,24,0.95)")
+                .attr("font-size", 14)
+                .attr("font-weight", "600")
+                .text("Customer");
+        }
+
+        // Beat 1 (Teams): star–satellite links (leader to each satellite per tribe)
+        if (beat === 1) {
+            const byCluster = new Map<number, DemoNode[]>();
+            nodes.forEach((n) => {
+                const c = (n.clusterIndex ?? 0) % numClusters;
+                if (!byCluster.has(c)) byCluster.set(c, []);
+                byCluster.get(c)!.push(n);
+            });
+            const starLinks: { source: DemoNode; target: DemoNode }[] = [];
+            byCluster.forEach((clusterNodes) => {
+                if (clusterNodes.length < 2) return;
+                const leader = clusterNodes[0];
+                for (let i = 1; i < clusterNodes.length; i++) {
+                    starLinks.push({ source: leader, target: clusterNodes[i] });
+                }
+            });
+            const linkGroup = g.append("g").attr("class", "links links-star");
+            linkGroup
+                .selectAll("line")
+                .data(starLinks)
+                .enter()
+                .append("line")
+                .attr("stroke", "rgba(148, 163, 184, 0.5)")
+                .attr("stroke-width", 1)
+                .attr("x1", (d) => d.source.x ?? 0)
+                .attr("y1", (d) => d.source.y ?? 0)
+                .attr("x2", (d) => d.target.x ?? 0)
+                .attr("y2", (d) => d.target.y ?? 0);
         }
 
         // Draw links only in beat 5 (Ricochets)
@@ -327,7 +520,7 @@ export function HeroDemoScene() {
             .attr("cx", (d) => d.x ?? centerX)
             .attr("cy", (d) => d.y ?? centerY)
             .style("filter", (d) => (d.id === customerId && isZoomBeat) || (d.id === savedDecisionId && showSavedHighlight) ? "drop-shadow(0 0 8px #E5B318)" : "none")
-            .style("opacity", (d) => (isZoomBeat && d.id !== customerId ? 0.2 : 1));
+            .style("opacity", (d) => (beat === 3 ? 0 : isZoomBeat && d.id !== customerId ? 0.2 : 1));
 
         const tick = () => {
             nodeEls.attr("cx", (d) => d.x ?? centerX).attr("cy", (d) => d.y ?? centerY);
