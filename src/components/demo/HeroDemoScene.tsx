@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
+import type { Chords } from "d3-chord";
 import { chord as d3Chord, ribbon as d3Ribbon } from "d3-chord";
 
 const BEAT_DURATION_MS = 5000;
@@ -394,7 +395,7 @@ export function HeroDemoScene() {
             }
             const chordRadius = Math.min(width, height) * 0.38;
             const innerRadius = chordRadius * 0.52;
-            const chordLayout = d3Chord().padAngle(0.02)(matrix);
+            const chordLayout: Chords = d3Chord().padAngle(0.02)(matrix);
             const chordGroup = g.append("g").attr("class", "chord-agile").attr("transform", `translate(${centerX},${centerY})`);
             const arcGen = d3.arc<{ startAngle: number; endAngle: number; index: number }>()
                 .innerRadius(innerRadius)
@@ -411,19 +412,19 @@ export function HeroDemoScene() {
                 .attr("fill-opacity", 0.45)
                 .attr("stroke", "rgba(0,0,0,0.2)")
                 .attr("stroke-width", 0.5)
-                .attr("d", ribbonGen as any);
+                .attr("d", ribbonGen as (d: unknown) => string | null);
             chordGroup
                 .selectAll("path.arc")
-                .data((chordLayout as any).groups)
+                .data(chordLayout.groups)
                 .enter()
                 .append("path")
                 .attr("class", "arc")
-                .attr("fill", (d: { index: number }) => phaseColors[d.index % phaseColors.length])
+                .attr("fill", (d) => phaseColors[d.index % phaseColors.length])
                 .attr("fill-opacity", 0.25)
-                .attr("stroke", (d: { index: number }) => phaseColors[d.index % phaseColors.length])
+                .attr("stroke", (d) => phaseColors[d.index % phaseColors.length])
                 .attr("stroke-opacity", 0.6)
                 .attr("stroke-width", 1)
-                .attr("d", arcGen as any);
+                .attr("d", arcGen as (d: unknown) => string | null);
             const centreRadius = chordRadius * 0.32;
             chordGroup.append("circle").attr("class", "chord-centre").attr("r", centreRadius).attr("fill", "rgba(15,23,42,0.9)").attr("stroke", "rgba(228,179,24,0.6)").attr("stroke-width", 2);
             chordGroup
