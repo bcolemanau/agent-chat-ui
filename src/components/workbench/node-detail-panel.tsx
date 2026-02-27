@@ -28,11 +28,18 @@ interface Node {
   metadata?: Record<string, any>;
 }
 
+/**
+ * Shared detail view for a single node: used when selecting a node on the map view
+ * or in the artifacts list (artifact pane). Shows content, history, and an Edit
+ * button for editable ARTIFACT nodes (draft or accepted with artifact_id).
+ */
 interface NodeDetailPanelProps {
   node: Node | null;
   onClose: () => void;
   position?: "left" | "right" | "bottom";
   threadId?: string | null;
+  /** When the map is showing a specific KG version (timeline/compare), pass it so content is loaded from that version. */
+  contentVersion?: string | null;
 }
 
 interface ArtifactContent {
@@ -46,7 +53,8 @@ export function NodeDetailPanel({
   node, 
   onClose, 
   position = "right",
-  threadId 
+  threadId,
+  contentVersion,
 }: NodeDetailPanelProps) {
   const stream = useStreamContext();
   const { orgId: orgContextId } = useOrgContext();
@@ -105,16 +113,22 @@ export function NodeDetailPanel({
       try {
         const params = new URLSearchParams({ node_id: node.id });
         if (threadId) params.set("thread_id", threadId);
-        if (selectedVersion) params.set("version", selectedVersion);
+        // Prefer panel history selection; else use map's active KG version so content matches the versioned view
+        const versionToSend = selectedVersion ?? contentVersion ?? undefined;
+        if (versionToSend) params.set("version", versionToSend);
         if (scopeProjectId) params.set("project_id", scopeProjectId);
         if (scopeOrgId) params.set("org_id", scopeOrgId);
+        // Backend requires project_id or phase_id for scope; when on org-only map pass phase_id=orgId
+        if (!scopeProjectId && scopeOrgId) params.set("phase_id", scopeOrgId);
         const url = `/api/artifact/content?${params.toString()}`;
 
         console.log("[NodeDetailPanel] [BRANCH] Fetching content from URL:", url);
         const res = await apiFetch(url);
         if (!res.ok) {
-          console.error("[NodeDetailPanel] [BRANCH] Fetch failed:", res.status, res.statusText);
-          throw new Error(`Failed to fetch content: ${res.statusText}`);
+          const errBody = await res.json().catch(() => ({}));
+          const detail = (errBody as { detail?: string }).detail ?? (errBody as { error?: string }).error ?? res.statusText;
+          console.error("[NodeDetailPanel] [BRANCH] Fetch failed:", res.status, detail);
+          throw new Error(detail || `Failed to fetch content: ${res.statusText}`);
         }
 
         const data = await res.json();
@@ -138,7 +152,7 @@ export function NodeDetailPanel({
     };
 
     fetchContent();
-  }, [node, threadId, selectedVersion, scopeProjectId, scopeOrgId]);
+  }, [node, threadId, selectedVersion, contentVersion, scopeProjectId, scopeOrgId]);
 
   // Fetch artifact history for ARTIFACT nodes
   useEffect(() => {
@@ -637,8 +651,13 @@ export function NodeDetailPanel({
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : error ? (
-          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg space-y-2">
             <p className="text-sm text-destructive">{error}</p>
+            {(!scopeProjectId && !scopeOrgId) || /scope|project_id|phase_id/i.test(error) ? (
+              <p className="text-xs text-muted-foreground">
+                Open this project from the project map (e.g. org → project → map) so artifact content can load with the correct scope.
+              </p>
+            ) : null}
           </div>
         ) : historicalContent ? (
           <div className="space-y-4">

@@ -297,6 +297,9 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         const params = new URLSearchParams();
         const activeAgent = (stream as any)?.values?.active_agent;
         if (activeAgent) params.set('active_node', activeAgent);
+        // #region agent log
+        fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1fd1dd'},body:JSON.stringify({sessionId:'1fd1dd',location:'world-map-view.tsx:workflowFetch',message:'Map workflow fetch params',data:{scopeProjectId,scopeOrgId,hasProjectIdInParams:params.has('project_id'),paramsString:params.toString()},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         apiFetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ''}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: { nodes?: { id: string; label: string }[]; active_node?: string } | null) => {
@@ -1882,6 +1885,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             onClose={() => setSelectedNode(null)}
                             position="bottom"
                             threadId={threadId}
+                            contentVersion={activeVersion}
                         />
                     </div>
                 </div>

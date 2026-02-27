@@ -44,8 +44,16 @@ export async function GET(req: Request) {
         const resp = await fetch(targetUrl, { headers });
 
         if (!resp.ok) {
-            await resp.text();
-            return NextResponse.json({ error: "Backend error" }, { status: resp.status });
+            const text = await resp.text();
+            let body: { error?: string; detail?: string } = { error: "Backend error" };
+            try {
+                const parsed = JSON.parse(text) as { detail?: string; error?: string };
+                if (parsed.detail) body = { error: parsed.detail, detail: parsed.detail };
+                else if (parsed.error) body = { error: parsed.error };
+            } catch {
+                if (text) body = { error: text.slice(0, 200) };
+            }
+            return NextResponse.json(body, { status: resp.status });
         }
 
         const data = await resp.json();
