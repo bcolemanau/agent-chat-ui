@@ -99,6 +99,9 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         const params = new URLSearchParams();
         if (activeAgent) params.set("active_node", activeAgent);
         if (effectiveProjectIdForScope) params.set("project_id", effectiveProjectIdForScope);
+        // #region agent log
+        fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1fd1dd'},body:JSON.stringify({sessionId:'1fd1dd',location:'shell.tsx:workflowFetch',message:'Shell workflow fetch params',data:{effectiveProjectIdForScope,orgId,hasProjectIdInParams:params.has('project_id'),paramsString:params.toString()},hypothesisId:'H2,H4',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         apiFetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: WorkflowDiagramStrip | null) => {

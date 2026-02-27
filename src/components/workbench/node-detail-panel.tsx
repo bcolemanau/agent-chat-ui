@@ -284,10 +284,13 @@ export function NodeDetailPanel({
   const metadata = (node as Node & { metadata?: Record<string, unknown> }).metadata || {};
   const artifactTypes = (metadata.artifact_types as string[] | undefined) || [];
   const status = (metadata.status as string | undefined) ?? "accepted";
-  const hasArtifactId = !!(metadata.artifact_id as string | undefined);
+  // Show Edit when we have loadable content and the node is an ARTIFACT that can be edited (draft or accepted).
+  // draft-from-existing resolves by node_id, so we don't require metadata.artifact_id.
   const isEditableArtifact =
     node.type === "ARTIFACT" &&
-    ((status === "accepted" && hasArtifactId) || status === "draft");
+    content != null &&
+    !error &&
+    (status === "draft" || status === "accepted");
 
   const handleStartEdit = async () => {
     if (!node) return;
