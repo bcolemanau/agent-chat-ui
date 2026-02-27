@@ -5,30 +5,13 @@ import * as d3 from "d3";
 
 const BEAT_DURATION_MS = 5000;
 const CAPTIONS: { script: string; outcome: string }[] = [
-    {
-        script: "We start with the noise of the modern enterprise. Thousands of unlinked individuals, ideas and requirements.",
-        outcome: "Chaos — no connection.",
-    },
-    {
-        script: "First, tribes form — marketing, sales, product, engineering, delivery, service. Then we organize: first in a linear pipeline.",
-        outcome: "Tribes and workflows — but still no shared context at the seams.",
-    },
-    {
-        script: "Then in a loop around the customer.",
-        outcome: "One place to connect.",
-    },
-    {
-        script: "Decisions and discussions fly across the org — between people and between teams. Most are ephemeral. Few are captured.",
-        outcome: "Decisions everywhere — but where do they live?",
-    },
-    {
-        script: "We built it to protect this one thing. This decision was saved from the chaos.",
-        outcome: "One decision — saved, traceable, in context.",
-    },
-    {
-        script: "Innovation is saying no to 1,000 things. What are you saying yes and no to today?",
-        outcome: "Reflexion: one place where your decisions have context.",
-    },
+    { script: "We start with individual ideas and conversations…", outcome: "Chaos — no connection." },
+    { script: "First, tribes form around individuals and they form group identity, language and tools.", outcome: "Tribes — but still no shared context at the seams." },
+    { script: "Then we organize: first in a linear pipeline.", outcome: "One workflow — many seams." },
+    { script: "Then in a loop around the customer.", outcome: "One place to connect." },
+    { script: "Market and technology forces wash over the organization creating opportunities, threats and more change…", outcome: "One decision — saved, traceable, in context." },
+    { script: "Innovation is saying no to 1,000 things. (Steve Jobs)", outcome: "One place where your decisions have context." },
+    { script: "OrchSync — what are you saying yes and no to today?", outcome: "OrchSync: one place where your decisions have context." },
 ];
 
 interface DemoNode extends d3.SimulationNodeDatum {
@@ -291,8 +274,8 @@ export function HeroDemoScene() {
             simulationRef.current = null;
         }
 
-        // Draw links only from beat 3 onward (ricochets)
-        if (beat >= 3 && links.length > 0) {
+        // Draw links only in beat 5 (Ricochets)
+        if (beat >= 5 && links.length > 0) {
             const linkGroup = g.append("g").attr("class", "links");
             const linkEls = linkGroup
                 .selectAll("line")
@@ -300,7 +283,7 @@ export function HeroDemoScene() {
                 .enter()
                 .append("line")
                 .attr("stroke", "#64748b")
-                .attr("stroke-opacity", beat === 3 ? 0.4 : 0.2)
+                .attr("stroke-opacity", 0.4)
                 .attr("stroke-width", 1);
             const drawLinks = () => {
                 linkEls
@@ -313,18 +296,22 @@ export function HeroDemoScene() {
             else drawLinks();
         }
 
-        // Nodes
+        // Nodes: customer = centre node (nodes[0]); saved decision = first ARTIFACT (highlight in Forces + Ricochets)
         const nodeGroup = g.append("g").attr("class", "nodes");
-        const goldenId = graph.nodes.find((n) => n.type === "ARTIFACT")?.id ?? graph.nodes[0]?.id;
+        const customerId = graph.nodes[0]?.id;
+        const savedDecisionId = graph.nodes.find((n) => n.type === "ARTIFACT")?.id ?? graph.nodes[0]?.id;
+        const showSavedHighlight = beat === 4 || beat === 5; // Forces and Ricochets
+        const isZoomBeat = beat === 6; // Zoom to customer
 
         const nodeEls = nodeGroup
             .selectAll("circle")
             .data(nodes)
             .enter()
             .append("circle")
-            .attr("r", (d) => (d.id === goldenId && beat >= 4 ? 14 : 6))
+            .attr("r", (d) => (d.id === customerId && isZoomBeat ? 14 : d.id === savedDecisionId && showSavedHighlight ? 14 : 6))
             .attr("fill", (d) => {
-                if (d.id === goldenId && beat >= 4) return "#E5B318";
+                if (d.id === customerId && isZoomBeat) return "#E5B318";
+                if (d.id === savedDecisionId && showSavedHighlight) return "#E5B318";
                 const colors: Record<string, string> = {
                     DOMAIN: "#64748b",
                     REQ: "#fbbf24",
@@ -335,12 +322,12 @@ export function HeroDemoScene() {
                 };
                 return colors[d.type] ?? "#94a3b8";
             })
-            .attr("stroke", (d) => (d.id === goldenId && beat >= 4 ? "#fff" : "rgba(0,0,0,0.3)"))
-            .attr("stroke-width", (d) => (d.id === goldenId && beat >= 4 ? 2 : 1))
+            .attr("stroke", (d) => (d.id === customerId && isZoomBeat) || (d.id === savedDecisionId && showSavedHighlight) ? "#fff" : "rgba(0,0,0,0.3)")
+            .attr("stroke-width", (d) => (d.id === customerId && isZoomBeat) || (d.id === savedDecisionId && showSavedHighlight) ? 2 : 1)
             .attr("cx", (d) => d.x ?? centerX)
             .attr("cy", (d) => d.y ?? centerY)
-            .style("filter", (d) => (d.id === goldenId && beat >= 4 ? "drop-shadow(0 0 8px #E5B318)" : "none"))
-            .style("opacity", (d) => (beat === 6 && d.id !== goldenId ? 0.2 : 1));
+            .style("filter", (d) => (d.id === customerId && isZoomBeat) || (d.id === savedDecisionId && showSavedHighlight) ? "drop-shadow(0 0 8px #E5B318)" : "none")
+            .style("opacity", (d) => (isZoomBeat && d.id !== customerId ? 0.2 : 1));
 
         const tick = () => {
             nodeEls.attr("cx", (d) => d.x ?? centerX).attr("cy", (d) => d.y ?? centerY);
@@ -351,12 +338,12 @@ export function HeroDemoScene() {
             simulationRef.current.alpha(0.5).restart();
         }
 
-        // Beat 6: zoom to golden (transition the inner g transform)
-        if (beat === 6 && goldenId) {
-            const golden = nodes.find((n) => n.id === goldenId);
-            if (golden && (golden.x != null || golden.fx != null)) {
-                const gx = golden.x ?? golden.fx ?? centerX;
-                const gy = golden.y ?? golden.fy ?? centerY;
+        // Beat 7 (index 6): zoom to customer (centre node)
+        if (beat === 6 && customerId) {
+            const customer = nodes.find((n) => n.id === customerId);
+            if (customer && (customer.x != null || customer.fx != null)) {
+                const gx = customer.x ?? customer.fx ?? centerX;
+                const gy = customer.y ?? customer.fy ?? centerY;
                 const scale = 8;
                 const tx = width / 2 - gx * scale;
                 const ty = height / 2 - gy * scale;
@@ -365,6 +352,39 @@ export function HeroDemoScene() {
                     .ease(d3.easeCubicOut)
                     .attr("transform", `translate(${tx},${ty}) scale(${scale})`);
             }
+        }
+
+        // Beat 5 (index 4): market/technology forces overlay (expanding waves from left and right)
+        if (beat === 4) {
+            let overlay = svg.select<SVGGElement>("g.forces-overlay");
+            if (overlay.empty()) overlay = svg.append("g").attr("class", "forces-overlay");
+            overlay.selectAll("*").remove();
+            const baseRadius = Math.min(width, height) * 0.35;
+            const waveOrigins: { cx: number; cy: number }[] = [
+                { cx: -width * 0.15, cy: height * 0.25 },
+                { cx: width * 1.15, cy: height * 0.75 },
+            ];
+            waveOrigins.forEach((origin) => {
+                [0, 600, 1200].forEach((delay, di) => {
+                    const circle = overlay!.append("circle")
+                        .attr("cx", origin.cx)
+                        .attr("cy", origin.cy)
+                        .attr("r", baseRadius * 0.4)
+                        .attr("fill", "none")
+                        .attr("stroke", "rgba(0, 242, 255, 0.6)")
+                        .attr("stroke-width", 2 + di)
+                        .style("opacity", 0);
+                    circle
+                        .transition().delay(delay).duration(2000)
+                        .attr("r", baseRadius * 1.8)
+                        .style("opacity", 0.7)
+                        .transition().duration(1200)
+                        .style("opacity", 0)
+                        .remove();
+                });
+            });
+        } else {
+            svg.select("g.forces-overlay").remove();
         }
 
         return () => {
