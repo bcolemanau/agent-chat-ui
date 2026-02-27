@@ -50,8 +50,9 @@ export function NodeDetailPanel({
 }: NodeDetailPanelProps) {
   const stream = useStreamContext();
   const { orgId: orgContextId } = useOrgContext();
-  const { projectId: projectIdFromRoute } = useRouteScope();
+  const { projectId: projectIdFromRoute, orgId: orgIdFromRoute } = useRouteScope();
   const scopeProjectId = projectIdFromRoute ?? undefined;
+  const scopeOrgId = orgIdFromRoute ?? undefined;
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,9 +103,12 @@ export function NodeDetailPanel({
       setLoading(true);
       setError(null);
       try {
-        let url = `/api/artifact/content?node_id=${node.id}`;
-        if (threadId) url += `&thread_id=${threadId}`;
-        if (selectedVersion) url += `&version=${selectedVersion}`;
+        const params = new URLSearchParams({ node_id: node.id });
+        if (threadId) params.set("thread_id", threadId);
+        if (selectedVersion) params.set("version", selectedVersion);
+        if (scopeProjectId) params.set("project_id", scopeProjectId);
+        if (scopeOrgId) params.set("org_id", scopeOrgId);
+        const url = `/api/artifact/content?${params.toString()}`;
 
         console.log("[NodeDetailPanel] [BRANCH] Fetching content from URL:", url);
         const res = await apiFetch(url);
@@ -134,7 +138,7 @@ export function NodeDetailPanel({
     };
 
     fetchContent();
-  }, [node, threadId, selectedVersion]);
+  }, [node, threadId, selectedVersion, scopeProjectId, scopeOrgId]);
 
   // Fetch artifact history for ARTIFACT nodes
   useEffect(() => {
@@ -149,8 +153,11 @@ export function NodeDetailPanel({
       console.log("[NodeDetailPanel] [BRANCH] Starting fetchHistory", { nodeId: node.id });
       setLoadingHistory(true);
       try {
-        let url = `/api/artifact/history?node_id=${node.id}`;
-        if (threadId) url += `&thread_id=${threadId}`;
+        const params = new URLSearchParams({ node_id: node.id });
+        if (threadId) params.set("thread_id", threadId);
+        if (scopeProjectId) params.set("project_id", scopeProjectId);
+        if (scopeOrgId) params.set("org_id", scopeOrgId);
+        const url = `/api/artifact/history?${params.toString()}`;
 
         console.log("[NodeDetailPanel] [BRANCH] Fetching history from URL:", url);
         const res = await apiFetch(url);
@@ -172,7 +179,7 @@ export function NodeDetailPanel({
     };
 
     fetchHistory();
-  }, [node, threadId]);
+  }, [node, threadId, scopeProjectId, scopeOrgId]);
 
   // Fetch nodes for reference picker (edit mode) — hooks must be before any early return
   const fetchPickerNodes = useCallback(async () => {
@@ -180,6 +187,8 @@ export function NodeDetailPanel({
     try {
       const params = new URLSearchParams();
       if (threadId) params.set("thread_id", threadId);
+      if (scopeProjectId) params.set("project_id", scopeProjectId);
+      if (scopeOrgId) params.set("org_id", scopeOrgId);
       if (node?.id) params.set("source_node_id", node.id);
       if (pickerSearch.trim()) params.set("search", pickerSearch.trim());
       const url = `/api/kg/nodes-for-picker?${params.toString()}`;
@@ -193,7 +202,7 @@ export function NodeDetailPanel({
     } finally {
       setPickerLoading(false);
     }
-  }, [threadId, node?.id, pickerSearch]);
+  }, [threadId, scopeProjectId, scopeOrgId, node?.id, pickerSearch]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -273,7 +282,13 @@ export function NodeDetailPanel({
       const res = await apiFetch("/api/artifact/draft-from-existing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ node_id: node.id, thread_id: threadId ?? undefined }),
+        body: JSON.stringify({
+          node_id: node.id,
+          thread_id: threadId ?? undefined,
+          project_id: scopeProjectId ?? undefined,
+          phase_id: scopeProjectId ?? undefined,
+          org_id: scopeOrgId ?? undefined,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -310,7 +325,14 @@ export function NodeDetailPanel({
       const res = await fetch("/api/artifact/draft-content", {
         method: "POST",
         headers,
-        body: JSON.stringify({ cache_key: editCacheKey, thread_id: threadId ?? undefined, content: editDraftContent }),
+        body: JSON.stringify({
+          cache_key: editCacheKey,
+          thread_id: threadId ?? undefined,
+          content: editDraftContent,
+          project_id: scopeProjectId ?? undefined,
+          phase_id: scopeProjectId ?? undefined,
+          org_id: scopeOrgId ?? undefined,
+        }),
       });
       if (!res.ok) throw new Error("Failed to save draft");
       toast.success("Draft saved");
@@ -394,6 +416,8 @@ export function NodeDetailPanel({
           target_id: selected.id,
           link_type: "REFERENCES",
           thread_id: threadId ?? undefined,
+          project_id: scopeProjectId ?? undefined,
+          org_id: scopeOrgId ?? undefined,
         }),
       })
         .then((res) => {
@@ -687,10 +711,11 @@ export function NodeDetailPanel({
                       onClick={async () => {
                         setSelectedVersion(v.id);
                         try {
-                          let url = `/api/artifact/content?node_id=${node.id}&version=${v.id}`;
-                          if (threadId) url += `&thread_id=${threadId}`;
-
-                          const res = await apiFetch(url);
+                          const params = new URLSearchParams({ node_id: node.id, version: v.id });
+                          if (threadId) params.set("thread_id", threadId);
+                          if (scopeProjectId) params.set("project_id", scopeProjectId);
+                          if (scopeOrgId) params.set("org_id", scopeOrgId);
+                          const res = await apiFetch(`/api/artifact/content?${params.toString()}`);
                           if (res.ok) {
                             const data = await res.json();
                             setHistoricalContent(data.content);

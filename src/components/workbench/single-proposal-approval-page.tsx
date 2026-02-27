@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useStreamContext } from "@/providers/Stream";
 import { useQueryState } from "nuqs";
+import { useRouteScope } from "@/hooks/use-route-scope";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { contentRendererRegistry } from "./content-renderers";
@@ -67,6 +68,7 @@ export function SingleProposalApprovalPage({
   pageTitle = "Proposal",
 }: SingleProposalApprovalPageProps) {
   const stream = useStreamContext();
+  const { projectId: scopeProjectId, orgId: scopeOrgId } = useRouteScope();
   const [threadIdFromUrl, setThreadId] = useQueryState("threadId");
   const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
 
@@ -76,7 +78,8 @@ export function SingleProposalApprovalPage({
   const [isApplying, setIsApplying] = useState(false);
 
   const loadPending = useCallback(async () => {
-    if (!threadId?.trim()) {
+    const hasScope = threadId?.trim() || (scopeProjectId && scopeOrgId);
+    if (!hasScope) {
       setItem(null);
       setPreviewData(null);
       setIsLoading(false);
@@ -84,11 +87,14 @@ export function SingleProposalApprovalPage({
     }
     setIsLoading(true);
     try {
-      const params = new URLSearchParams({ thread_id: threadId });
+      const params = new URLSearchParams();
+      if (threadId) params.set("thread_id", threadId);
+      if (scopeProjectId) params.set("project_id", scopeProjectId);
+      if (scopeOrgId) params.set("org_id", scopeOrgId);
       const headers: Record<string, string> = {};
       const orgContext = localStorage.getItem("reflexion_org_context");
       if (orgContext) headers["X-Organization-Context"] = orgContext;
-      const res = await fetch(`/api/decisions?${params}`, { headers });
+      const res = await fetch(`/api/decisions?${params.toString()}`, { headers });
       if (!res.ok) {
         setItem(null);
         setPreviewData(null);
@@ -113,7 +119,7 @@ export function SingleProposalApprovalPage({
     } finally {
       setIsLoading(false);
     }
-  }, [threadId, toolName]);
+  }, [threadId, scopeProjectId, scopeOrgId, toolName]);
 
   useEffect(() => {
     loadPending();
@@ -139,6 +145,8 @@ export function SingleProposalApprovalPage({
       try {
         const draftParams = new URLSearchParams({ cache_key: cacheKey, option_index: "-1" });
         draftParams.set("thread_id", threadId);
+        if (scopeProjectId) draftParams.set("project_id", scopeProjectId);
+        if (scopeOrgId) draftParams.set("org_id", scopeOrgId);
         const draftRes = await fetch(`/api/artifact/draft-content?${draftParams.toString()}`, { headers });
         if (draftRes.ok) {
           const draftData = (await draftRes.json()) as { content?: string };
@@ -155,6 +163,8 @@ export function SingleProposalApprovalPage({
           cache_key: cacheKey,
           option_index: -1,
           thread_id: threadId,
+          project_id: scopeProjectId ?? undefined,
+          org_id: scopeOrgId ?? undefined,
           artifact_type: artifactType,
           ...(draftContent != null ? { draft_content: draftContent } : {}),
         }),

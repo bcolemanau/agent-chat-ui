@@ -50,14 +50,18 @@ async function resolveThreadIdToProjectId(threadId: string | undefined): Promise
   }
 }
 
-/** Fetch latest KG version (commit sha) for a thread so we can link the decision to the version it produced. */
-async function fetchLatestKgVersionSha(threadId: string | undefined): Promise<string | undefined> {
-  if (!threadId) return undefined;
+/** Fetch latest KG version (commit sha) for a thread/project so we can link the decision to the version it produced. Prefer project_id when on project URL. */
+async function fetchLatestKgVersionSha(threadId: string | undefined, projectId: string | undefined): Promise<string | undefined> {
+  const scopeId = projectId ?? threadId;
+  if (!scopeId) return undefined;
   try {
     const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
     const headers: Record<string, string> = {};
     if (orgContext) headers["X-Organization-Context"] = orgContext;
-    const res = await fetch(`/api/project/history?thread_id=${encodeURIComponent(threadId)}`, { headers });
+    const params = new URLSearchParams();
+    if (projectId) params.set("project_id", projectId);
+    else if (threadId) params.set("thread_id", threadId);
+    const res = await fetch(`/api/project/history?${params.toString()}`, { headers });
     if (!res.ok) return undefined;
     const data = await res.json();
     const versions = data?.versions;
@@ -756,6 +760,8 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
             try {
               const draftParams = new URLSearchParams({ cache_key: cacheKey, option_index: String(typeof optionIndex === "number" ? optionIndex : 0) });
               if (effectiveProjectId) draftParams.set("thread_id", effectiveProjectId);
+              if (scopeProjectId) draftParams.set("project_id", scopeProjectId);
+              if (scopeOrgId) draftParams.set("org_id", scopeOrgId);
               const draftRes = await fetch(`/api/artifact/draft-content?${draftParams.toString()}`, { headers });
               if (draftRes.ok) {
                 const draftData = (await draftRes.json()) as { content?: string };
@@ -773,6 +779,8 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
               cache_key: cacheKey,
               option_index: typeof optionIndex === "number" ? optionIndex : -1,
               thread_id: effectiveProjectId,
+              project_id: scopeProjectId ?? effectiveProjectId,
+              org_id: scopeOrgId,
               artifact_type: artifactType,
               ...(draftContent != null ? { draft_content: draftContent } : {}),
             }),

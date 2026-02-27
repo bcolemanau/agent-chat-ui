@@ -17,6 +17,9 @@ export async function POST(req: Request) {
     const body = await req.json();
     const nodeId = body?.node_id;
     const threadId = body?.thread_id ?? null;
+    const projectId = body?.project_id ?? null;
+    const phaseId = body?.phase_id ?? null;
+    const orgId = body?.org_id ?? null;
 
     if (!nodeId || typeof nodeId !== "string" || !nodeId.trim()) {
       return NextResponse.json({ error: "node_id required" }, { status: 400 });
@@ -36,10 +39,15 @@ export async function POST(req: Request) {
       headers["X-Organization-Context"] = orgContext;
     }
 
+    const payload: Record<string, unknown> = { node_id: nodeId.trim(), thread_id: threadId };
+    if (projectId != null) payload.project_id = projectId;
+    if (phaseId != null) payload.phase_id = phaseId;
+    if (orgId != null) payload.org_id = orgId;
+
     const resp = await fetch(targetUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({ node_id: nodeId.trim(), thread_id: threadId }),
+      body: JSON.stringify(payload),
     });
 
     if (!resp.ok) {

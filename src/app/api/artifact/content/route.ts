@@ -14,6 +14,9 @@ export async function GET(req: Request) {
         const nodeId = searchParams.get("node_id");
         const version = searchParams.get("version");
         const threadId = searchParams.get("thread_id") || "default";
+        const projectId = searchParams.get("project_id");
+        const phaseId = searchParams.get("phase_id");
+        const orgId = searchParams.get("org_id");
 
         if (!nodeId) {
             return NextResponse.json({ error: "Missing node_id" }, { status: 400 });
@@ -23,6 +26,9 @@ export async function GET(req: Request) {
 
         let targetUrl = `${backendUrl}/artifact/content?node_id=${nodeId}&thread_id=${threadId}`;
         if (version) targetUrl += `&version=${version}`;
+        if (projectId) targetUrl += `&project_id=${encodeURIComponent(projectId)}`;
+        if (phaseId) targetUrl += `&phase_id=${encodeURIComponent(phaseId)}`;
+        if (orgId) targetUrl += `&org_id=${encodeURIComponent(orgId)}`;
 
         const orgContext = req.headers.get("X-Organization-Context");
 
