@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import type { Chords } from "d3-chord";
 import { chord as d3Chord, ribbon as d3Ribbon } from "d3-chord";
+import { polygonHull as d3PolygonHull } from "d3-polygon";
 
 const BEAT_DURATION_MS = 5000;
 const CAPTIONS: { script: string; outcome: string }[] = [
@@ -11,6 +12,7 @@ const CAPTIONS: { script: string; outcome: string }[] = [
     { script: "First, tribes form around individuals and they form group identity, language and tools.", outcome: "Tribes — but still no shared context at the seams." },
     { script: "Then we organize: first in a linear pipeline.", outcome: "One workflow — many seams." },
     { script: "Then in a loop around the customer.", outcome: "One place to connect." },
+    { script: "Flows between phases become visible.", outcome: "Connections visible." },
     { script: "Market and technology forces wash over the organization creating opportunities, threats and more change…", outcome: "One decision — saved, traceable, in context." },
     { script: "Innovation is saying no to 1,000 things. (Steve Jobs)", outcome: "One place where your decisions have context." },
     { script: "OrchSync — what are you saying yes and no to today?", outcome: "OrchSync: one place where your decisions have context." },
@@ -229,9 +231,10 @@ export function HeroDemoScene() {
         }
 
         if (beat === 0) {
-            // Chaos: weak force, no links
+            // Chaos: same force-directed graph as map (link force from actual KG), links not drawn
             const sim = d3.forceSimulation<DemoNode>(nodes)
-                .force("charge", d3.forceManyBody().strength(-30))
+                .force("link", d3.forceLink<DemoNode, DemoLink>(links).id((d) => d.id).distance(120).strength(0.35))
+                .force("charge", d3.forceManyBody().strength(-80))
                 .force("center", d3.forceCenter(centerX, centerY))
                 .force("x", d3.forceX(centerX).strength(0.02))
                 .force("y", d3.forceY(centerY).strength(0.02));
@@ -309,7 +312,7 @@ export function HeroDemoScene() {
             });
             simulationRef.current = null;
         } else if (beat === 3) {
-            // Agile: one clear circle around customer (nodes[0] at centre)
+            // Agile circle with hulls: customer at centre, nodes on circle by phase (arc per phase)
             const loopRadius = radius * 0.9;
             if (nodes.length > 0) {
                 nodes[0].x = centerX;
@@ -317,16 +320,28 @@ export function HeroDemoScene() {
                 nodes[0].fx = centerX;
                 nodes[0].fy = centerY;
             }
-            for (let i = 1; i < nodes.length; i++) {
-                const angle = ((i - 1) / (nodes.length - 1)) * 2 * Math.PI - Math.PI / 2;
-                nodes[i].x = centerX + loopRadius * Math.cos(angle);
-                nodes[i].y = centerY + loopRadius * Math.sin(angle);
-                nodes[i].fx = nodes[i].x;
-                nodes[i].fy = nodes[i].y;
-            }
+            const byClusterCircle = new Map<number, DemoNode[]>();
+            nodes.forEach((n) => {
+                const c = (n.clusterIndex ?? 0) % numClusters;
+                if (!byClusterCircle.has(c)) byClusterCircle.set(c, []);
+                byClusterCircle.get(c)!.push(n);
+            });
+            byClusterCircle.forEach((clusterNodes, c) => {
+                const startAngle = (c / numClusters) * 2 * Math.PI - Math.PI / 2;
+                const endAngle = ((c + 1) / numClusters) * 2 * Math.PI - Math.PI / 2;
+                const onArc = clusterNodes.filter((n) => n !== nodes[0]);
+                const nArc = onArc.length;
+                onArc.forEach((n, i) => {
+                    const angle = nArc <= 1 ? startAngle : startAngle + (i / (nArc - 1)) * (endAngle - startAngle);
+                    n.x = centerX + loopRadius * Math.cos(angle);
+                    n.y = centerY + loopRadius * Math.sin(angle);
+                    n.fx = n.x;
+                    n.fy = n.y;
+                });
+            });
             simulationRef.current = null;
         } else {
-            // Beat 4, 5, 6: same single circle, customer at centre
+            // Beat 4, 5, 6, 7: same single circle (chord / forces / ricochets / zoom), customer at centre
             const loopRadius = radius * 0.9;
             if (nodes.length > 0) {
                 nodes[0].x = centerX;
@@ -348,6 +363,31 @@ export function HeroDemoScene() {
         nodes.forEach((n) => {
             if (n.x != null && n.y != null) lastPositionsRef.current.set(n.id, { x: n.x, y: n.y });
         });
+
+        // Phase hulls (beats 1, 2, 3): convex hull per phase so tribes / pipeline / agile circle show as blobs
+        const phaseColors = ["#94a3b8", "#0ea5e9", "#ec4899", "#eab308", "#64748b"];
+        if (beat === 1 || beat === 2 || beat === 3) {
+            const hullGroup = g.append("g").attr("class", "phase-hulls");
+            for (let c = 0; c < numClusters; c++) {
+                const points = nodes
+                    .filter((n) => (n.clusterIndex ?? 0) % numClusters === c && n.x != null && n.y != null)
+                    .map((n) => [n.x!, n.y!] as [number, number]);
+                if (points.length >= 3) {
+                    const hull = d3PolygonHull(points);
+                    if (hull) {
+                        const pathD = "M" + hull.map((p) => p.join(",")).join("L") + "Z";
+                        hullGroup
+                            .append("path")
+                            .attr("d", pathD)
+                            .attr("fill", phaseColors[c % phaseColors.length])
+                            .attr("fill-opacity", 0.12)
+                            .attr("stroke", phaseColors[c % phaseColors.length])
+                            .attr("stroke-opacity", 0.35)
+                            .attr("stroke-width", 1);
+                    }
+                }
+            }
+        }
 
         // Beat 2 (Linear): breadcrumb-style strip — container, pills, arrows (like workflow strip in shell)
         if (beat === 2) {
@@ -405,8 +445,8 @@ export function HeroDemoScene() {
             }
         }
 
-        // Beat 3 (Agile): chord diagram (arcs + ribbons) + customer in centre (Option A)
-        if (beat === 3) {
+        // Beat 4 (Chord): chord diagram (arcs + ribbons) + customer in centre
+        if (beat === 4) {
             const n = Math.max(2, numClusters);
             const matrix = Array.from({ length: n }, () => Array(n).fill(0));
             for (const l of links) {
@@ -496,8 +536,8 @@ export function HeroDemoScene() {
             linkGroup.transition().delay(TRANSITION_MS).duration(300).style("opacity", 1);
         }
 
-        // Draw links only in beat 5 (Ricochets)
-        if (beat >= 5 && links.length > 0) {
+        // Draw links only in beat 6 (Ricochets)
+        if (beat >= 6 && links.length > 0) {
             const linkGroup = g.append("g").attr("class", "links");
             const linkEls = linkGroup
                 .selectAll("line")
@@ -522,8 +562,8 @@ export function HeroDemoScene() {
         const nodeGroup = g.append("g").attr("class", "nodes");
         const customerId = graph.nodes[0]?.id;
         const savedDecisionId = graph.nodes.find((n) => n.type === "ARTIFACT")?.id ?? graph.nodes[0]?.id;
-        const showSavedHighlight = beat === 4 || beat === 5; // Forces and Ricochets
-        const isZoomBeat = beat === 6; // Zoom to customer
+        const showSavedHighlight = beat === 5 || beat === 6; // Forces and Ricochets
+        const isZoomBeat = beat === 7; // Zoom to customer
 
         const nodeEls = nodeGroup
             .selectAll("circle")
@@ -555,7 +595,7 @@ export function HeroDemoScene() {
                 return from?.y ?? d.y ?? centerY;
             })
             .style("filter", (d) => (d.id === customerId && isZoomBeat) || (d.id === savedDecisionId && showSavedHighlight) ? "drop-shadow(0 0 8px #E5B318)" : "none")
-            .style("opacity", (d) => (beat === 3 ? 0 : isZoomBeat && d.id !== customerId ? 0.2 : 1));
+            .style("opacity", (d) => (beat === 4 ? 0 : isZoomBeat && d.id !== customerId ? 0.2 : 1));
 
         // Animate nodes from previous view to current layout (same KG moving through views)
         if (beat > 0) {
@@ -581,8 +621,8 @@ export function HeroDemoScene() {
             simulationRef.current.alpha(0.5).restart();
         }
 
-        // Beat 7 (index 6): zoom to customer (centre node)
-        if (beat === 6 && customerId) {
+        // Beat 8 (index 7): zoom to customer (centre node)
+        if (beat === 7 && customerId) {
             const customer = nodes.find((n) => n.id === customerId);
             if (customer && (customer.x != null || customer.fx != null)) {
                 const gx = customer.x ?? customer.fx ?? centerX;
@@ -597,8 +637,8 @@ export function HeroDemoScene() {
             }
         }
 
-        // Beat 5 (index 4): market/technology forces overlay (expanding waves from left and right)
-        if (beat === 4) {
+        // Beat 6 (index 5): market/technology forces overlay (expanding waves from left and right)
+        if (beat === 5) {
             let overlay = svg.select<SVGGElement>("g.forces-overlay");
             if (overlay.empty()) overlay = svg.append("g").attr("class", "forces-overlay");
             overlay.selectAll("*").remove();

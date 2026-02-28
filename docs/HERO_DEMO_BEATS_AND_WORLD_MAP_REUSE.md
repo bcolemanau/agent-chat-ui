@@ -1,12 +1,12 @@
 # Hero Demo: Beats, KG Use, and World Map Reuse
 
-This document is the source of truth for the Reflexion/OrchSync hero demo (7 beats, KG-driven) and how the same patterns feed into the **world map view**. We will iterate on the demo first, then push these ideas into the world map.
+This document is the source of truth for the Reflexion/OrchSync hero demo (8 beats, KG-driven) and how the same patterns feed into the **world map view**. We will iterate on the demo first, then push these ideas into the world map.
 
 **Data source:** Base NPD model via `GET /kg/data/base` (or `/api/demo/kg`). Same shape as `GET /kg/data`: `nodes`, `links`, `metadata.entity_counts`, `metadata.phase_grouping`, `metadata.link_type_counts`.
 
 ---
 
-## 1. Consolidated beats (7)
+## 1. Consolidated beats (8)
 
 | # | Id | Script | Outcome | Current animation | Proposed animation | KG use |
 |---|-----|--------|---------|-------------------|-------------------|--------|
@@ -57,9 +57,21 @@ If we implement the hero demo with shared patterns and the same KG contract, mos
 
 ---
 
-## 4. Workflow
+## 4. What’s in the Map view (pushed from this doc)
 
-1. **Iterate in the demo** — Implement and tune the 7 beats (narrative, visuals, KG use) in `HeroDemoScene` and `/demo` using the table above.
+So that the demo and the Map feel like the same model, several ideas from this doc have been implemented in **WorldMapView** (the “Map” tab in the workbench). That’s intentional reuse, not accidental bleed:
+
+- **Constellation layout** — Phase centres from `phase_grouping`; ART / anchor nodes can be fixed; other nodes are pulled toward their phase (or artifact) via `constellation-x` / `constellation-y` force. Same notion of “tribes” and structure as the demo.
+- **Convex hulls** — One hull per phase/agent (via `d3-polygon`), so clusters are visible at a glance. Same hull pattern as in the demo (beats 2–4).
+- **Same KG shape** — Map uses `/api/kg-data` (project/thread-scoped); demo uses `/api/demo/kg` (base NPD). Both use `nodes`, `links`, `metadata.phase_grouping` and the same force-directed simulation style.
+
+If the Map view looks more “structured” (clusters, hulls) than a raw force graph, that’s from this reuse. The demo reuses the **actual KG** and the same kind of **force-directed graph** (Beat 1: link force drives layout even when links aren’t drawn) so continuity and movement carry across demo and map.
+
+---
+
+## 5. Workflow
+
+1. **Iterate in the demo** — Implement and tune the 8 beats (narrative, visuals, KG use) in `HeroDemoScene` and `/demo` using the table above.
 2. **Push to world map** — Extract shared layout, hull, zoom, and (optionally) force/trigger patterns into reusable pieces and adopt them in `WorldMapView`.
 
 This doc will be updated as the demo and map evolve.
