@@ -90,14 +90,19 @@ function assignClusters(
     });
 }
 
+const TRANSITION_MS = 900;
+
 export function HeroDemoScene() {
     const containerRef = useRef<HTMLDivElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const [graph, setGraph] = useState<GraphData | null>(null);
+    const [dataSource, setDataSource] = useState<"kg" | "synthetic">("kg");
     const [beat, setBeat] = useState(0);
     const [playing, setPlaying] = useState(false);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const simulationRef = useRef<d3.Simulation<DemoNode, DemoLink> | null>(null);
+    const lastPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+    const graphIdRef = useRef<string | null>(null);
 
     // Fetch base KG or use synthetic
     useEffect(() => {
@@ -118,6 +123,7 @@ export function HeroDemoScene() {
                 }));
                 const phase_grouping = data.metadata?.phase_grouping ?? [];
                 assignClusters(nodes, phase_grouping);
+                setDataSource("kg");
                 setGraph({
                     nodes,
                     links: links as DemoLink[],
@@ -126,6 +132,7 @@ export function HeroDemoScene() {
             })
             .catch(() => {
                 if (!cancelled) {
+                    setDataSource("synthetic");
                     const fallback = buildSyntheticGraph();
                     assignClusters(fallback.nodes, fallback.metadata.phase_grouping ?? []);
                     setGraph(fallback);
@@ -156,6 +163,7 @@ export function HeroDemoScene() {
     const play = useCallback(() => setPlaying(true), []);
     const pause = useCallback(() => setPlaying(false), []);
     const restart = useCallback(() => {
+        lastPositionsRef.current.clear();
         setBeat(0);
         setPlaying(true);
     }, []);
@@ -193,10 +201,24 @@ export function HeroDemoScene() {
             target: nodeById.get(typeof l.target === "string" ? l.target : (l.target as DemoNode).id)!,
         }));
 
-        // Initialize positions if missing
+        // Persist positions across beats so we can transition; clear when graph changes
+        const graphKey = graph.nodes.map((n) => n.id).join(",");
+        if (graphIdRef.current !== graphKey) {
+            graphIdRef.current = graphKey;
+            lastPositionsRef.current.clear();
+        }
+        const fromPositions = new Map(lastPositionsRef.current);
+
+        // Initialize positions if missing (first time or no previous)
         nodes.forEach((n, i) => {
-            if (n.x == null) n.x = centerX + (Math.random() - 0.5) * width * 0.8;
-            if (n.y == null) n.y = centerY + (Math.random() - 0.5) * height * 0.8;
+            const prev = fromPositions.get(n.id);
+            if (prev) {
+                n.x = prev.x;
+                n.y = prev.y;
+            } else if (n.x == null || n.y == null) {
+                n.x = centerX + (Math.random() - 0.5) * width * 0.8;
+                n.y = centerY + (Math.random() - 0.5) * height * 0.8;
+            }
         });
 
         const radius = Math.min(width, height) * 0.35;
@@ -322,6 +344,11 @@ export function HeroDemoScene() {
             simulationRef.current = null;
         }
 
+        // Persist current layout for next beat's "from" position
+        nodes.forEach((n) => {
+            if (n.x != null && n.y != null) lastPositionsRef.current.set(n.id, { x: n.x, y: n.y });
+        });
+
         // Beat 2 (Linear): breadcrumb-style strip — container, pills, arrows (like workflow strip in shell)
         if (beat === 2) {
             const pad = width * 0.06;
@@ -438,7 +465,7 @@ export function HeroDemoScene() {
                 .text("Customer");
         }
 
-        // Beat 1 (Teams): star–satellite links (leader to each satellite per tribe)
+        // Beat 1 (Teams): star–satellite links (leader to each satellite per tribe); fade in after nodes move
         if (beat === 1) {
             const byCluster = new Map<number, DemoNode[]>();
             nodes.forEach((n) => {
@@ -454,7 +481,7 @@ export function HeroDemoScene() {
                     starLinks.push({ source: leader, target: clusterNodes[i] });
                 }
             });
-            const linkGroup = g.append("g").attr("class", "links links-star");
+            const linkGroup = g.append("g").attr("class", "links links-star").style("opacity", 0);
             linkGroup
                 .selectAll("line")
                 .data(starLinks)
@@ -466,6 +493,7 @@ export function HeroDemoScene() {
                 .attr("y1", (d) => d.source.y ?? 0)
                 .attr("x2", (d) => d.target.x ?? 0)
                 .attr("y2", (d) => d.target.y ?? 0);
+            linkGroup.transition().delay(TRANSITION_MS).duration(300).style("opacity", 1);
         }
 
         // Draw links only in beat 5 (Ricochets)
@@ -518,13 +546,34 @@ export function HeroDemoScene() {
             })
             .attr("stroke", (d) => (d.id === customerId && isZoomBeat) || (d.id === savedDecisionId && showSavedHighlight) ? "#fff" : "rgba(0,0,0,0.3)")
             .attr("stroke-width", (d) => (d.id === customerId && isZoomBeat) || (d.id === savedDecisionId && showSavedHighlight) ? 2 : 1)
-            .attr("cx", (d) => d.x ?? centerX)
-            .attr("cy", (d) => d.y ?? centerY)
+            .attr("cx", (d) => {
+                const from = fromPositions.get(d.id);
+                return from?.x ?? d.x ?? centerX;
+            })
+            .attr("cy", (d) => {
+                const from = fromPositions.get(d.id);
+                return from?.y ?? d.y ?? centerY;
+            })
             .style("filter", (d) => (d.id === customerId && isZoomBeat) || (d.id === savedDecisionId && showSavedHighlight) ? "drop-shadow(0 0 8px #E5B318)" : "none")
             .style("opacity", (d) => (beat === 3 ? 0 : isZoomBeat && d.id !== customerId ? 0.2 : 1));
 
+        // Animate nodes from previous view to current layout (same KG moving through views)
+        if (beat > 0) {
+            nodeEls
+                .transition()
+                .duration(TRANSITION_MS)
+                .ease(d3.easeCubicInOut)
+                .attr("cx", (d) => d.x ?? centerX)
+                .attr("cy", (d) => d.y ?? centerY);
+        }
+
         const tick = () => {
             nodeEls.attr("cx", (d) => d.x ?? centerX).attr("cy", (d) => d.y ?? centerY);
+            if (beat === 0) {
+                nodes.forEach((n) => {
+                    if (n.x != null && n.y != null) lastPositionsRef.current.set(n.id, { x: n.x, y: n.y });
+                });
+            }
             g.selectAll<SVGLineElement, { source: DemoNode; target: DemoNode }>("line").attr("x1", (d) => d.source.x ?? 0).attr("y1", (d) => d.source.y ?? 0).attr("x2", (d) => d.target.x ?? 0).attr("y2", (d) => d.target.y ?? 0);
         };
         if (simulationRef.current) {
@@ -626,8 +675,11 @@ export function HeroDemoScene() {
                     Restart
                 </button>
             </div>
-            <div className="absolute left-4 top-2 text-xs text-white/50">
-                Beat {beat + 1} / {CAPTIONS.length}
+            <div className="absolute left-4 top-2 flex flex-col gap-0.5 text-xs text-white/50">
+                <span>Beat {beat + 1} / {CAPTIONS.length}</span>
+                <span className="text-white/40">
+                    {dataSource === "kg" ? "Base NPD model" : "Synthetic data"}
+                </span>
             </div>
         </div>
     );
