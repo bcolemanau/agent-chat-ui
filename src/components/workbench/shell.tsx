@@ -105,6 +105,9 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
         apiFetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ""}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: WorkflowDiagramStrip | null) => {
+                // #region agent log
+                fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1fd1dd'},body:JSON.stringify({sessionId:'1fd1dd',location:'shell.tsx:workflowResponse',message:'Workflow API response',data:{workflow_id:data?.workflow_id,name:data?.name,hasNodes:Boolean(data?.nodes?.length)},hypothesisId:'H4,H5',timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
                 if (!cancelled && data?.nodes) {
                     setWorkflowStrip({
                         workflow_id: data.workflow_id,

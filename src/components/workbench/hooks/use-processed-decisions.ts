@@ -231,8 +231,26 @@ export function useProcessedDecisions(projectId: string | undefined, orgId: stri
     setResolvedId(projectId);
     const fromApi = await loadFromApi(projectId, orgId);
     if (fromApi !== null) {
-      setProcessed(fromApi.processed);
       setOrgPhase(fromApi.orgPhase);
+      // Preserve kg_version_sha from local/apply response when API doesn't return it (single-commit path)
+      setProcessed((prev) => {
+        const prevById = new Map(prev.map((p) => [p.id, p]));
+        return fromApi.processed.map((r) => {
+          const existing = prevById.get(r.id);
+          if (!existing) return r;
+          const keepKg =
+            existing.kg_version_sha && (r.kg_version_sha == null || r.kg_version_sha === "");
+          const keepProposed =
+            existing.proposed_kg_version_sha &&
+            (r.proposed_kg_version_sha == null || r.proposed_kg_version_sha === "");
+          if (!keepKg && !keepProposed) return r;
+          return {
+            ...r,
+            ...(keepKg ? { kg_version_sha: existing.kg_version_sha } : {}),
+            ...(keepProposed ? { proposed_kg_version_sha: existing.proposed_kg_version_sha } : {}),
+          };
+        });
+      });
     } else {
       setProcessed(loadFromStorage(projectId));
       setOrgPhase(null);

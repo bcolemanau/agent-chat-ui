@@ -4,6 +4,8 @@ This document is the source of truth for the Reflexion/OrchSync hero demo (8 bea
 
 **Data source:** Base NPD model via `GET /kg/data/base` (or `/api/demo/kg`). Same shape as `GET /kg/data`: `nodes`, `links`, `metadata.entity_counts`, `metadata.phase_grouping`, `metadata.link_type_counts`.
 
+**Local demo (real KG, force-directed from Beat 1):** The first beat uses the real KG’s links for layout (force-directed, links not drawn — “Chaos”). If you see 401 or synthetic/unconnected dots, the UI is calling a backend that requires auth for `/kg/data/base`. Point the UI at your local Reflexion API: set `LANGGRAPH_API_URL=http://localhost:8080` in the agent-chat-ui env (e.g. `.env.local`) when running the UI (e.g. `npm run dev`), and ensure the Reflexion API is running with the allowlist that permits unauthenticated `GET /kg/data/base`.
+
 ---
 
 ## 1. Consolidated beats (8)

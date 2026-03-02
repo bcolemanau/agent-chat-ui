@@ -75,7 +75,21 @@ async function fetchLatestKgVersionSha(threadId: string | undefined, projectId: 
 /** Response from POST /decisions when backend returns new thread after phase-change conclude. */
 export type PersistDecisionResponse = { ok?: boolean; id?: string; new_thread_id?: string } | undefined;
 
-const ORG_PHASE_TYPES = new Set(["propose_organization", "organization_from_upload", "create_organization"]);
+const ORG_PHASE_TYPES = new Set(["propose_organization", "create_organization"]);
+function isOrgPhaseType(item: UnifiedPreviewItem): boolean {
+  const type = (item.type || "").trim();
+  if (ORG_PHASE_TYPES.has(type)) return true;
+  if (type === "phase_artifact_from_upload")
+    return ((item.data?.args as Record<string, unknown>)?.artifact_type as string)?.toLowerCase() === "organization";
+  return false;
+}
+function isProjectPhaseType(item: UnifiedPreviewItem): boolean {
+  const type = (item.type || "").trim();
+  if (type === "propose_project") return true;
+  if (type === "phase_artifact_from_upload")
+    return ((item.data?.args as Record<string, unknown>)?.artifact_type as string)?.toLowerCase() === "project";
+  return false;
+}
 
 /** Persist decision record to backend for lineage / audit (survives refresh, enables revisit and retries).
  * Returns response body so caller can switch to new_thread_id when phase-change conclude ran.
@@ -88,7 +102,7 @@ async function persistDecision(
   stream?: { values?: { workflow_run_id?: string } }
 ): Promise<PersistDecisionResponse> {
   try {
-    const isOrgPhase = ORG_PHASE_TYPES.has((item.type || "").trim());
+    const isOrgPhase = isOrgPhaseType(item);
     const orgId = extra.org_id ?? (item.data?.args as Record<string, unknown>)?.org_id;
     const projectId = (extra.project_id ?? (await resolveThreadIdToProjectId(threadId)) ?? threadId ?? "default") as string;
 
@@ -247,9 +261,8 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
     });
 
     // Preview-only tools: apply via API endpoints, not graph resume (no HITL/interrupts)
-    // propose_project / project_from_upload (epic #84): apply via POST /decisions/apply
-    const projectProposalTypes = ["propose_project", "project_from_upload"] as const;
-    if (projectProposalTypes.includes(item.type as (typeof projectProposalTypes)[number])) {
+    // propose_project / phase_artifact_from_upload (project): apply via POST /decisions/apply
+    if (isProjectPhaseType(item)) {
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
@@ -274,9 +287,9 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
             method: "POST",
             headers,
             body: JSON.stringify({
-              proposal_type: item.type,
+              proposal_type: "phase_artifact_from_upload",
               decision_id: item.id,
-              payload,
+              payload: { ...payload, thread_id: effectiveProjectId },
             }),
           });
           if (!res.ok) {
@@ -524,7 +537,6 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
               project_id: effectiveProjectId,
               thread_id: effectiveProjectId,
               trigger_id: item.data?.args?.trigger_id ?? item.data?.preview_data?.trigger_id,
-              ...(item.data?.args?.proposal_data != null && { proposal_data: item.data.args.proposal_data }),
             }),
           });
           if (!res.ok) {
@@ -829,9 +841,9 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
       }
     }
 
-    // Admin proposals: propose_organization, organization_from_upload, propose_user_add, propose_user_edit, propose_user_remove
-    const adminTypes = ["propose_organization", "organization_from_upload", "propose_user_add", "propose_user_edit", "propose_user_remove"] as const;
-    if (adminTypes.includes(item.type as (typeof adminTypes)[number])) {
+    // Admin proposals: propose_organization, phase_artifact_from_upload (org), propose_user_*
+    const adminTypes = ["propose_organization", "propose_user_add", "propose_user_edit", "propose_user_remove"] as const;
+    if (adminTypes.includes(item.type as (typeof adminTypes)[number]) || isOrgPhaseType(item)) {
       if (decisionType === "reject") {
         setStatus("rejected");
         onDecisionProcessed?.(item, "rejected");
@@ -845,26 +857,27 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
         const proposalType =
           item.type === "propose_organization"
             ? "create_organization"
-            : item.type === "organization_from_upload"
-              ? "organization_from_upload"
+            : item.type === "phase_artifact_from_upload" && (args.artifact_type as string)?.toLowerCase() === "organization"
+              ? "phase_artifact_from_upload"
               : item.type === "propose_user_add"
                 ? "add_user"
                 : item.type === "propose_user_edit"
                   ? "update_user_roles"
                   : "remove_user";
         const orgId = (args.org_id ?? args.id) as string | undefined;
+        // phase_artifact_from_upload (org): apply by decision_id only (proposal_data loaded from decision)
         const payload: Record<string, unknown> =
-          proposalType === "create_organization" || proposalType === "organization_from_upload"
-            ? {
-                org_id: orgId,
-                name: args.name,
-                description: args.description,
-                organization_content: args.organization_content,
-                organization_data: args.organization_data,
-                provisioning_state: args.provisioning_state,
-                decision_id: item.id,
-              }
-            : proposalType === "add_user"
+          proposalType === "phase_artifact_from_upload"
+            ? { org_id: orgId, decision_id: item.id, thread_id: effectiveProjectId }
+            : proposalType === "create_organization"
+              ? {
+                  org_id: orgId,
+                  name: args.name,
+                  description: args.description,
+                  provisioning_state: args.provisioning_state,
+                  decision_id: item.id,
+                }
+              : proposalType === "add_user"
               ? { org_id: args.org_id, email: args.email, roles: args.roles ?? [] }
               : proposalType === "update_user_roles"
                 ? { org_id: args.org_id, user_email: args.user_email, roles: args.roles ?? [] }
@@ -889,13 +902,13 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
           await persistAndMaybeSwitchThread(item, "approved", effectiveProjectId, {
             ...basePersistExtra,
             ...(orgKgVersionSha != null ? { kg_version_sha: orgKgVersionSha } : {}),
-            ...(proposalType === "create_organization" || proposalType === "organization_from_upload"
+            ...(proposalType === "create_organization" || proposalType === "phase_artifact_from_upload"
               ? { org_id: orgId }
               : {}),
           });
           toast.success("Applied", {
             description:
-              proposalType === "create_organization" || proposalType === "organization_from_upload"
+              proposalType === "create_organization" || proposalType === "phase_artifact_from_upload"
                 ? `Organization ${args.name ?? args.org_id} created.`
                 : proposalType === "add_user"
                   ? `User added to ${args.org_id}.`
@@ -905,7 +918,7 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
           });
           (stream as any).triggerWorkbenchRefresh?.();
           // Org picker listens for this; refresh so the new org appears
-          if (proposalType === "create_organization" || proposalType === "organization_from_upload") {
+          if (proposalType === "create_organization" || proposalType === "phase_artifact_from_upload") {
             window.dispatchEvent(new Event("organizationsUpdated"));
           }
         } catch (error: any) {
@@ -930,7 +943,7 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
   const getTypeBadgeColor = (type: string) => {
     switch (type) {
       case "propose_project":
-      case "project_from_upload":
+      case "phase_artifact_from_upload":
         return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
       case "generate_project_configuration_summary":
       case "propose_hydration_complete":
@@ -947,7 +960,6 @@ export function ApprovalCard({ item, stream, scopeProjectId, scopeOrgId, onDecis
       case "artifact_edit":
         return "bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200";
       case "propose_organization":
-      case "organization_from_upload":
       case "propose_user_add":
       case "propose_user_edit":
       case "propose_user_remove":

@@ -41,6 +41,12 @@ interface GraphData {
         entity_counts?: Record<string, number>;
         phase_grouping?: { agent_id: string; agent_name: string; types: string[] }[];
         link_type_counts?: Record<string, number>;
+        /** Demo/KG source label (e.g. "base", "fallback") */
+        source?: string;
+        /** Scope (e.g. "demo") */
+        scope?: string;
+        /** Backend or data version for display */
+        version?: string;
     };
 }
 
@@ -112,7 +118,14 @@ export function HeroDemoScene() {
         fetch("/api/demo/kg")
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error("fetch failed"))))
             .then((data: GraphData) => {
-                if (cancelled || !data?.nodes?.length) return;
+                if (cancelled) return;
+                if (!data?.nodes?.length) {
+                    setDataSource("synthetic");
+                    const fallback = buildSyntheticGraph();
+                    assignClusters(fallback.nodes, fallback.metadata.phase_grouping ?? []);
+                    setGraph(fallback);
+                    return;
+                }
                 const nodes = data.nodes.map((n) => ({
                     id: n.id,
                     type: n.type || "ARTIFACT",
@@ -717,8 +730,19 @@ export function HeroDemoScene() {
             </div>
             <div className="absolute left-4 top-2 flex flex-col gap-0.5 text-xs text-white/50">
                 <span>Beat {beat + 1} / {CAPTIONS.length}</span>
-                <span className="text-white/40">
+                <span className="text-white/70">
                     {dataSource === "kg" ? "Base NPD model" : "Synthetic data"}
+                </span>
+                <span className="text-white/40 font-mono" title="Data source and version">
+                    {dataSource === "kg" && graph.metadata
+                        ? [
+                            graph.metadata.source && `source: ${graph.metadata.source}`,
+                            graph.metadata.scope && `scope: ${graph.metadata.scope}`,
+                            graph.metadata.version && `version: ${graph.metadata.version}`,
+                          ]
+                              .filter(Boolean)
+                              .join(" · ")
+                        : "fallback when backend unavailable or empty"}
                 </span>
             </div>
         </div>

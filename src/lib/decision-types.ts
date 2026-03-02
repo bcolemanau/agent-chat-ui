@@ -1,12 +1,9 @@
 /**
  * Decision types that conclude the phase (thread boundary). Mirrors backend kg_decision_pair.PHASE_CHANGE_DECISION_TYPES.
- * Used to show "Phase boundary" badge in Decisions panel when backend does not send is_phase_change (e.g. org fork rows).
+ * phase_artifact_from_upload is generic (org vs project from args.artifact_type); only propose_organization/create_organization are phase-change.
  */
 export const PHASE_CHANGE_DECISION_TYPES = new Set([
-  "propose_project",
-  "project_from_upload",
   "propose_organization",
-  "organization_from_upload",
   "create_organization",
 ]);
 
@@ -22,7 +19,6 @@ export function isPhaseChangeDecisionType(type: string): boolean {
  */
 export const DEFAULT_ORG_PHASE_TYPES = new Set([
   "create_organization",
-  "organization_from_upload",
   "propose_organization",
   "add_user",
   "update_user_roles",

@@ -1,0 +1,26 @@
+# Cloud Build for agent-chat-ui. Run: gcloud builds submit --config=cloudbuild.yaml .
+# Pass: --substitutions=_NEXT_PUBLIC_GCP_PROXY_CHAT_ENABLED=true,_TAG=latest
+substitutions:
+  _SERVICE_NAME: agent-chat-ui
+  _TAG: latest
+  _NEXT_PUBLIC_GCP_PROXY_CHAT_ENABLED: 'true'
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_GCP_PROXY_CHAT_ENABLED=${_NEXT_PUBLIC_GCP_PROXY_CHAT_ENABLED}'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/${_SERVICE_NAME}:${_TAG}'
+      - '.'
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/${PROJECT_ID}/${_SERVICE_NAME}:${_TAG}'
+
+images:
+  - 'gcr.io/${PROJECT_ID}/${_SERVICE_NAME}:${_TAG}'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

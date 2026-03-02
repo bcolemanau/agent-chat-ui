@@ -23,15 +23,19 @@ declare module "next-auth/jwt" {
 // Get the secret - prefer REFLEXION_JWT_SECRET, fallback to NEXTAUTH_SECRET for backward compatibility
 const authSecret = process.env.REFLEXION_JWT_SECRET || process.env.NEXTAUTH_SECRET;
 
-// Debug logging: in dev always; in production only when AUTH_DEBUG=true (e.g. in container)
+// Debug logging: once per process to avoid terminal spam when auth module is re-evaluated
 const authDebug = process.env.NODE_ENV !== "production" || process.env.AUTH_DEBUG === "true";
-if (authDebug) {
-    console.log("[AUTH DEBUG] NEXTAUTH_URL:", process.env.NEXTAUTH_URL || "NOT SET");
+const hasGoogleCreds = Boolean(process.env.AUTH_GOOGLE_ID?.trim() && process.env.AUTH_GOOGLE_SECRET?.trim());
+let authDebugLogged = false;
+if (authDebug && !authDebugLogged) {
+    authDebugLogged = true;
+    console.log("[AUTH DEBUG] NEXTAUTH_URL:", process.env.NEXTAUTH_URL || "NOT SET (set to e.g. http://localhost:3003 if dev port is not 3000)");
     console.log("[AUTH DEBUG] REFLEXION_JWT_SECRET:", process.env.REFLEXION_JWT_SECRET ? "Set" : "MISSING");
     console.log("[AUTH DEBUG] NEXTAUTH_SECRET (fallback):", process.env.NEXTAUTH_SECRET ? "Set" : "MISSING");
-    console.log("[AUTH DEBUG] Using secret:", authSecret ? "Set" : "MISSING - AUTH WILL FAIL");
+    console.log("[AUTH DEBUG] Using secret:", authSecret ? "Set" : "MISSING - set NEXTAUTH_SECRET or REFLEXION_JWT_SECRET in .env.local");
+    console.log("[AUTH DEBUG] AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET:", hasGoogleCreds ? "Set" : "MISSING");
     if (authSecret && authSecret.length >= 4) {
-        console.log("[AUTH DEBUG] JWT signing secret: len=%s, last4=%s (must match backend REFLEXION_JWT_SECRET)", authSecret.length, authSecret.slice(-4));
+        console.log("[AUTH DEBUG] JWT secret: len=%s (match backend REFLEXION_JWT_SECRET if using backend auth)", authSecret.length);
     }
 }
 
@@ -55,13 +59,25 @@ export const authOptions: NextAuthOptions = {
             console.warn("[next-auth][warn]", code);
         },
         debug(code: string, metadata?: unknown) {
-            if (authDebug) console.debug("[next-auth][debug]", code, metadata);
+            if (!authDebug) return;
+            // Redact secrets so they never appear in logs
+            const safe =
+                metadata && typeof metadata === "object" && !Array.isArray(metadata)
+                    ? Object.fromEntries(
+                        Object.entries(metadata as Record<string, unknown>).map(([k, v]) =>
+                            /secret|password|credential/i.test(k) ? [k, "[REDACTED]"] : [k, v]
+                        )
+                    )
+                    : metadata;
+            console.debug("[next-auth][debug]", code, safe);
         },
     },
+    // Google OAuth: set AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET in .env.local (from Google Cloud Console → Credentials → OAuth 2.0 Client).
+    // If either is missing you get: SIGNIN_OAUTH_ERROR { error: [TypeError: client_id is required], providerId: 'google' }
     providers: [
         GoogleProvider({
-            clientId: process.env.AUTH_GOOGLE_ID!,
-            clientSecret: process.env.AUTH_GOOGLE_SECRET!,
+            clientId: process.env.AUTH_GOOGLE_ID || "",
+            clientSecret: process.env.AUTH_GOOGLE_SECRET || "",
             authorization: {
                 params: {
                     prompt: "consent",

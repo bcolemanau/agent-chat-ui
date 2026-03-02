@@ -189,12 +189,17 @@ function getAgentColorForNodeType(nodeType: string): string {
     return agentId ? agentColors[agentId] ?? '#888' : '#888';
 }
 
+/** Row shape for decisions list used by map (version badge, diff). */
+type KgDecisionRow = { id: string; type: string; title: string; status?: string; kg_version_sha?: string; proposed_kg_version_sha?: string };
+
 export interface WorldMapViewProps {
     /** When true, the decisions table on the left is the timeline; hide the built-in timeline panel. */
     embeddedInDecisions?: boolean;
+    /** When provided (e.g. from decisions panel), merge kg_version_sha/proposed_kg_version_sha so map shows "Decision" badge for single-commit-applied decisions. */
+    decisionsWithVersionSha?: { id: string; kg_version_sha?: string; proposed_kg_version_sha?: string }[];
 }
 
-export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps = {}) {
+export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersionSha }: WorldMapViewProps = {}) {
     const stream = useStreamContext();
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
     const [compareParam] = useQueryState("compare"); // When "1" or "true", open timeline (header "Compare on map")
@@ -216,7 +221,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const scopeOrgId = orgIdFromRoute ?? undefined;
 
     const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
-    const [kgDecisions, setKgDecisions] = useState<{ id: string; type: string; title: string; status?: string; kg_version_sha?: string }[]>([]);
+    const [kgDecisions, setKgDecisions] = useState<KgDecisionRow[]>([]);
     const [_historyOpen, _setHistoryOpen] = useState(false);
 
     const [showHistory, setShowHistory] = useState(false);
@@ -370,6 +375,27 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
     }, [selectedTimelineVersionId, timelineVersionDiff, loadingTimelineDiff]);
 
+    // When decisions panel passes SHAs (e.g. after apply), merge into kgDecisions so "Decision" badge and diff work
+    useEffect(() => {
+        if (!decisionsWithVersionSha?.length) return;
+        setKgDecisions((prev) => {
+            if (!prev.length) return prev;
+            const byId = new Map(decisionsWithVersionSha.map((d) => [d.id, d]));
+            return prev.map((r): KgDecisionRow => {
+                const local = byId.get(r.id ?? "");
+                if (!local) return r;
+                const hasKg = local.kg_version_sha && (r.kg_version_sha == null || r.kg_version_sha === "");
+                const hasProposed = local.proposed_kg_version_sha && (r.proposed_kg_version_sha == null || r.proposed_kg_version_sha === "");
+                if (!hasKg && !hasProposed) return r;
+                return {
+                    ...r,
+                    ...(hasKg ? { kg_version_sha: local.kg_version_sha } : {}),
+                    ...(hasProposed ? { proposed_kg_version_sha: local.proposed_kg_version_sha } : {}),
+                };
+            });
+        });
+    }, [decisionsWithVersionSha]);
+
     /** ART node ids by template id (CONTRIBUTES_TO: ART → T-*) for focus-from-hierarchy. */
     const artNodeIdsByTemplateId = useMemo(() => {
         const map: Record<string, string[]> = {};
@@ -449,7 +475,23 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 // Backend returns { decisions, org_phase } when org has NPDDecision; otherwise a plain array
                 const projectList = Array.isArray(data) ? data : (data?.decisions ?? []);
                 const orgList = data?.org_phase?.decisions ?? [];
-                const merged = [...orgList, ...projectList].filter((r: { id?: string }) => r && r.id);
+                let merged = [...orgList, ...projectList].filter((r: { id?: string }) => r && r.id);
+                // Preserve kg_version_sha from decisions panel when API doesn't return it (single-commit path)
+                if (decisionsWithVersionSha?.length) {
+                    const byId = new Map(decisionsWithVersionSha.map((d) => [d.id, d]));
+                    merged = merged.map((r: { id?: string; kg_version_sha?: string; proposed_kg_version_sha?: string }) => {
+                        const local = byId.get(r.id ?? "");
+                        if (!local) return r;
+                        const hasKg = local.kg_version_sha && (r.kg_version_sha == null || r.kg_version_sha === "");
+                        const hasProposed = local.proposed_kg_version_sha && (r.proposed_kg_version_sha == null || r.proposed_kg_version_sha === "");
+                        if (!hasKg && !hasProposed) return r;
+                        return {
+                            ...r,
+                            ...(hasKg ? { kg_version_sha: local.kg_version_sha } : {}),
+                            ...(hasProposed ? { proposed_kg_version_sha: local.proposed_kg_version_sha } : {}),
+                        };
+                    });
+                }
                 setKgDecisions(merged);
             }
         } catch (e) { console.error('Decisions fetch error:', e); }
@@ -1578,7 +1620,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                 {v.source === "project" && (
                                                     <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
                                                 )}
-                                                {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                {kgDecisions.some((d: any) => (d.kg_version_sha ?? d.proposed_kg_version_sha) === v.id) && (
                                                     <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
                                                 )}
                                                 <span className="text-[9px] text-muted-foreground">Clone: {v.source === "organization" ? "Org" : "—"}</span>
@@ -1646,7 +1688,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                 {v.source === "project" && (
                                                     <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
                                                 )}
-                                                {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                {kgDecisions.some((d: any) => (d.kg_version_sha ?? d.proposed_kg_version_sha) === v.id) && (
                                                     <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
                                                 )}
                                                 <span className="text-[9px] text-muted-foreground">Clone: {v.source === "organization" ? "Org" : "—"}</span>
@@ -1745,7 +1787,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
 
                             {kgHistory.versions.map((v: any) => {
-                                const isDecision = kgDecisions.some((d: any) => d.kg_version_sha === v.id);
+                                const isDecision = kgDecisions.some((d: any) => (d.kg_version_sha ?? d.proposed_kg_version_sha) === v.id);
                                 const phase = v.source === "organization" ? "Organization" : (v.source === "project" ? "Project" : (v.source ?? "Project"));
                                 const cloneLabel = v.source === "organization" ? "Org" : "—";
                                 return (

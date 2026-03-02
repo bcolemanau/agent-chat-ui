@@ -13,6 +13,8 @@ const WORKFLOW_NODE_COLORS: Record<string, string> = {
     requirements: `hsl(${WORKFLOW_BRAND_HUE}, 50%, 58%)`,
     architecture: `hsl(${WORKFLOW_BRAND_HUE}, 55%, 48%)`,
     design: `hsl(${WORKFLOW_BRAND_HUE}, 55%, 38%)`,
+    implementation: `hsl(${WORKFLOW_BRAND_HUE}, 52%, 35%)`,
+    commercial: `hsl(${WORKFLOW_BRAND_HUE}, 50%, 28%)`,
     administration: 'hsl(215, 15%, 45%)',
 };
 

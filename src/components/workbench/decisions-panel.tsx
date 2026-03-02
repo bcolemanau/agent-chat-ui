@@ -46,7 +46,7 @@ function getTypeLabel(type: string): string {
     organization_onboarding: "Organization Onboarding",
     propose_project: "Project Proposal",
     classify_intent: "Project Classification",  // legacy; kept for backward compat
-    project_from_upload: "Project from Document",
+    phase_artifact_from_upload: "Phase artifact from upload",
     generate_project_configuration_summary: "Project Configuration",
     propose_hydration_complete: "Hydration Complete",
     hydration_complete_trim: "Hydration Complete",
@@ -517,7 +517,17 @@ export function DecisionsPanel() {
                   </div>
                 }
               >
-                <WorldMapView key={scopeProjectId ?? "no-project"} embeddedInDecisions />
+                <WorldMapView
+                  key={scopeProjectId ?? "no-project"}
+                  embeddedInDecisions
+                  decisionsWithVersionSha={allRows
+                    .filter((r) => r.kg_version_sha ?? r.proposed_kg_version_sha)
+                    .map((r) => ({
+                      id: r.id,
+                      kg_version_sha: r.kg_version_sha,
+                      proposed_kg_version_sha: r.proposed_kg_version_sha,
+                    }))}
+                />
               </ErrorBoundary>
             </div>
           )}
