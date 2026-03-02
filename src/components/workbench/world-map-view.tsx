@@ -308,12 +308,13 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
     }, [data?.nodes, focusedNodeId]);
 
     // Fetch workflow strip for bottom panel (same as header, left-to-right flow).
-    // Scope from URL: pass project_id so backend returns project-level pack (e.g. IOT).
+    // Scope from URL: pass project_id + org_id so backend returns project-level pack (e.g. IOT).
     useEffect(() => {
         if (!scopeProjectId || embeddedInDecisions) return;
         let cancelled = false;
         const params = new URLSearchParams();
         if (scopeProjectId) params.set('project_id', scopeProjectId);
+        if (scopeOrgId) params.set('org_id', scopeOrgId);
         const activeAgent = (stream as any)?.values?.active_agent;
         if (activeAgent) params.set('active_node', activeAgent);
         // #region agent log
@@ -327,7 +328,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             })
             .catch(() => { if (!cancelled) setWorkflowStrip(null); });
         return () => { cancelled = true; };
-    }, [scopeProjectId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
+    }, [scopeProjectId, scopeOrgId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
 
     // Fetch project risk summary (project + phase + artifact aggregates) for map context pane
     useEffect(() => {
