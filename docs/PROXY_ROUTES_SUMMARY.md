@@ -47,6 +47,7 @@ These use `getBackendBaseUrl()` from `@/lib/backend-proxy` (or `LANGGRAPH_API_UR
 | /api/projects | GET, DELETE | /kg/projects, /kg/projects/{id} | `@app.get("/kg/projects")`, `@app.delete("/kg/projects/{project_id}")` | ✓ |
 | /api/projects/[projectId] | PATCH | /kg/projects/{id} | `@app.patch("/kg/projects/{project_id}")` | ✓ |
 | /api/kg-data | GET | /kg/data | `@app.get("/kg/data")` | ✓ |
+| /api/demo/kg | GET | /kg/data/base | `@app.get("/kg/data/base")` — base NPD only, no auth | ✓ |
 | /api/artifact/content | GET | /artifact/content | `@app.get("/artifact/content")` | ✓ |
 | /api/artifact/history | GET | /artifact/history | `@app.get("/artifact/history")` | ✓ |
 | /api/artifact/draft-content | GET, POST | /artifact/draft-content | `@app.get`, `@app.post("/artifact/draft-content")` | ✓ |

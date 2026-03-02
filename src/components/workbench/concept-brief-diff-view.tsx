@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ConceptBriefDiffView as ConceptBriefDiffViewType } from "@/lib/diff-types";
+import { useRouteScope } from "@/hooks/use-route-scope";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -44,6 +45,7 @@ export function ConceptBriefDiffView({
   isLoading = false,
   threadId,
 }: ConceptBriefDiffViewProps) {
+  const { projectId: scopeProjectId, orgId: scopeOrgId } = useRouteScope();
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [draftViewState, setDraftViewState] = useState<{
     artifactId: string | null;
@@ -90,9 +92,11 @@ export function ConceptBriefDiffView({
           const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
           const headers: Record<string, string> = {};
           if (orgContext) headers["X-Organization-Context"] = orgContext;
-          let url = `/api/artifact/content?node_id=${encodeURIComponent(artifactId)}`;
-          if (threadId) url += `&thread_id=${encodeURIComponent(threadId)}`;
-          const res = await fetch(url, { headers });
+          const params = new URLSearchParams({ node_id: artifactId });
+          if (threadId) params.set("thread_id", threadId);
+          if (scopeProjectId) params.set("project_id", scopeProjectId);
+          if (scopeOrgId) params.set("org_id", scopeOrgId);
+          const res = await fetch(`/api/artifact/content?${params.toString()}`, { headers });
           if (!res.ok) throw new Error(await getErrorMessage(res));
           const data = await res.json();
           if (!cancelled) {
@@ -122,6 +126,8 @@ export function ConceptBriefDiffView({
           if (orgContext) headers["X-Organization-Context"] = orgContext;
           const params = new URLSearchParams({ cache_key: cacheKey, option_index: String(optionIndex) });
           if (threadId) params.set("thread_id", threadId);
+          if (scopeProjectId) params.set("project_id", scopeProjectId);
+          if (scopeOrgId) params.set("org_id", scopeOrgId);
           const url = `/api/artifact/draft-content?${params.toString()}`;
           const res = await fetch(url, { headers });
           if (!res.ok) throw new Error(await getErrorMessage(res));
@@ -163,7 +169,14 @@ export function ConceptBriefDiffView({
       const res = await fetch("/api/artifact/draft-content", {
         method: "POST",
         headers,
-        body: JSON.stringify({ cache_key: cacheKey, thread_id: threadId ?? undefined, content }),
+        body: JSON.stringify({
+          cache_key: cacheKey,
+          thread_id: threadId ?? undefined,
+          content,
+          project_id: scopeProjectId ?? undefined,
+          phase_id: scopeProjectId ?? undefined,
+          org_id: scopeOrgId ?? undefined,
+        }),
       });
       if (!res.ok) throw new Error("Failed to save draft");
     } catch (e) {

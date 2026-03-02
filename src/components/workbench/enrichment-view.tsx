@@ -229,13 +229,23 @@ export function EnrichmentView() {
         headers["X-Organization-Context"] = orgContext;
       }
 
-      const url = `${apiUrl}/artifacts/${artifactId}/enrichment/${proposal.cycle_id}/approve`;
-      const res = await fetch(url, {
+      const res = await fetch("/api/decisions/apply", {
         method: "POST",
         headers,
         body: JSON.stringify({
-          artifact_types: selected,
-          thread_id: threadId,
+          proposal_type: "enrichment",
+          action: "approve",
+          artifact_id: artifactId,
+          cycle_id: proposal.cycle_id,
+          decision_id: proposal.cycle_id || `enrichment-${artifactId}-${proposal.cycle_id}`,
+          thread_id: threadId ?? undefined,
+          project_id: threadId ?? undefined,
+          payload: {
+            artifact_types: selected,
+            thread_id: threadId,
+            project_id: threadId,
+            decision_id: proposal.cycle_id || `enrichment-${artifactId}-${proposal.cycle_id}`,
+          },
         }),
       });
 
@@ -297,11 +307,17 @@ export function EnrichmentView() {
         headers["X-Organization-Context"] = orgContext;
       }
 
-      const url = `${apiUrl}/artifacts/${artifactId}/enrichment/${proposal.cycle_id}/reject`;
-      const res = await fetch(url, {
+      const res = await fetch("/api/decisions/apply", {
         method: "POST",
         headers,
-        body: JSON.stringify({ thread_id: threadId }),
+        body: JSON.stringify({
+          proposal_type: "enrichment",
+          action: "reject",
+          artifact_id: artifactId,
+          cycle_id: proposal.cycle_id,
+          payload: { thread_id: threadId },
+          thread_id: threadId ?? undefined,
+        }),
       });
 
       if (res.ok) {

@@ -1,0 +1,63 @@
+diff --git a/dist/index.js b/dist/index.js
+index d731db92f375a904b7246b10b646cc6625534eeb..36a7596164801e3c1066aaf41e20fd627f82a020 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -3960,7 +3960,7 @@ var CopilotResolver = class {
+       component: "CopilotResolver.availableAgents"
+     });
+     logger2.debug("Processing");
+-    const agentsWithEndpoints = [];
++    const agentsWithEndpoints = ctx._copilotkit?.serviceAdapter ? [{ name: "default", id: "default" }] : [];
+     logger2.debug("Event source created, creating response");
+     return {
+       agents: agentsWithEndpoints.map(({ endpoint, ...agentWithoutEndpoint }) => agentWithoutEndpoint)
+@@ -4576,7 +4576,7 @@ function _ts_param2(paramIndex, decorator) {
+ __name(_ts_param2, "_ts_param");
+ var StateResolver = class {
+   async loadAgentState(ctx, data) {
+-    const agents = [];
++    const agents = ctx._copilotkit?.serviceAdapter ? [{ name: "default", id: "default" }] : [];
+     const hasAgent = agents.some((agent) => agent.name === data.agentName);
+     if (!hasAgent) {
+       throw new shared.CopilotKitAgentDiscoveryError({
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 5ca5ce2eed4179243b316b9cfd6042affaba4717..ab28c53174d8711f70d6384355a89be072d0b84d 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -3953,7 +3953,7 @@ var CopilotResolver = class {
+       component: "CopilotResolver.availableAgents"
+     });
+     logger2.debug("Processing");
+-    const agentsWithEndpoints = [];
++    const agentsWithEndpoints = ctx._copilotkit?.serviceAdapter ? [{ name: "default", id: "default" }] : [];
+     logger2.debug("Event source created, creating response");
+     return {
+       agents: agentsWithEndpoints.map(({ endpoint, ...agentWithoutEndpoint }) => agentWithoutEndpoint)
+@@ -4569,7 +4569,7 @@ function _ts_param2(paramIndex, decorator) {
+ __name(_ts_param2, "_ts_param");
+ var StateResolver = class {
+   async loadAgentState(ctx, data) {
+-    const agents = [];
++    const agents = ctx._copilotkit?.serviceAdapter ? [{ name: "default", id: "default" }] : [];
+     const hasAgent = agents.some((agent) => agent.name === data.agentName);
+     if (!hasAgent) {
+       throw new shared.CopilotKitAgentDiscoveryError({
+@@ -4669,7 +4669,7 @@ var StateResolver = class {
+   }
+   telemetry.setGlobalProperties({
+     runtime: {
+-      serviceAdapter: options.serviceAdapter.constructor.name
++      serviceAdapter: options.serviceAdapter?.constructor?.name ?? "BuiltInAgent"
+     }
+   });
+diff --git a/dist/index.mjs b/dist/index.mjs
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -4662,7 +4662,7 @@ var StateResolver = class {
+   }
+   telemetry_client_default.setGlobalProperties({
+     runtime: {
+-      serviceAdapter: options.serviceAdapter.constructor.name
++      serviceAdapter: options.serviceAdapter?.constructor?.name ?? "BuiltInAgent"
+     }
+   });

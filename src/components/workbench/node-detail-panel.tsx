@@ -1,17 +1,23 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { ZoomOut, Activity, Loader2, Pencil, CheckCircle2, Link2, Eye, FileCode } from "lucide-react";
+import { useSession } from "next-auth/react";
+import { ZoomOut, Activity, Loader2, Pencil, CheckCircle2, Link2, Eye, FileCode, Settings2 } from "lucide-react";
 import { Button as UIButton } from "@/components/ui/button";
 import { contentRendererRegistry } from "./content-renderers";
 // Import renderers to ensure they register themselves
 import "./content-renderers/markdown-renderer";
 import "./content-renderers/text-renderer";
 import "./content-renderers/binary-renderer";
+import { BacklogRenderer } from "./content-renderers/backlog-renderer";
+import { ConnectorConfigModal } from "./connector-config";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useStreamContext } from "@/providers/Stream";
 import { useArtifactContext } from "@/components/thread/artifact";
+import { apiFetch } from "@/lib/api-fetch";
+import { useOrgContext } from "@/hooks/use-org-context";
+import { useRouteScope } from "@/hooks/use-route-scope";
 
 interface Node {
   id: string;
@@ -22,11 +28,18 @@ interface Node {
   metadata?: Record<string, any>;
 }
 
+/**
+ * Shared detail view for a single node: used when selecting a node on the map view
+ * or in the artifacts list (artifact pane). Shows content, history, and an Edit
+ * button for editable ARTIFACT nodes (draft or accepted with artifact_id).
+ */
 interface NodeDetailPanelProps {
   node: Node | null;
   onClose: () => void;
   position?: "left" | "right" | "bottom";
   threadId?: string | null;
+  /** When the map is showing a specific KG version (timeline/compare), pass it so content is loaded from that version. */
+  contentVersion?: string | null;
 }
 
 interface ArtifactContent {
@@ -40,9 +53,14 @@ export function NodeDetailPanel({
   node, 
   onClose, 
   position = "right",
-  threadId 
+  threadId,
+  contentVersion,
 }: NodeDetailPanelProps) {
   const stream = useStreamContext();
+  const { orgId: orgContextId } = useOrgContext();
+  const { projectId: projectIdFromRoute, orgId: orgIdFromRoute } = useRouteScope();
+  const scopeProjectId = projectIdFromRoute ?? undefined;
+  const scopeOrgId = orgIdFromRoute ?? undefined;
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -67,7 +85,14 @@ export function NodeDetailPanel({
   const [pickerNodes, setPickerNodes] = useState<Array<{ id: string; type: string; label: string; snippet?: string | null }>>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerLinking, setPickerLinking] = useState(false);
+  const [connectorConfigOpen, setConnectorConfigOpen] = useState(false);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const { data: session } = useSession();
+  const isAdmin =
+    session?.user?.role === "reflexion_admin" ||
+    session?.user?.role === "admin" ||
+    session?.user?.role === "newco_admin" ||
+    (session?.user?.role as string)?.toLowerCase() === "customeradministrator";
   const pendingCursorRef = useRef<number | null>(null);
   const lastAppliedReviseIdRef = useRef<string | null>(null);
 
@@ -86,19 +111,24 @@ export function NodeDetailPanel({
       setLoading(true);
       setError(null);
       try {
-        const orgContext = localStorage.getItem('reflexion_org_context');
-        const headers: Record<string, string> = {};
-        if (orgContext) headers['X-Organization-Context'] = orgContext;
-
-        let url = `/api/artifact/content?node_id=${node.id}`;
-        if (threadId) url += `&thread_id=${threadId}`;
-        if (selectedVersion) url += `&version=${selectedVersion}`;
+        const params = new URLSearchParams({ node_id: node.id });
+        if (threadId) params.set("thread_id", threadId);
+        // Prefer panel history selection; else use map's active KG version so content matches the versioned view
+        const versionToSend = selectedVersion ?? contentVersion ?? undefined;
+        if (versionToSend) params.set("version", versionToSend);
+        if (scopeProjectId) params.set("project_id", scopeProjectId);
+        if (scopeOrgId) params.set("org_id", scopeOrgId);
+        // Backend requires project_id or phase_id for scope; when on org-only map pass phase_id=orgId
+        if (!scopeProjectId && scopeOrgId) params.set("phase_id", scopeOrgId);
+        const url = `/api/artifact/content?${params.toString()}`;
 
         console.log("[NodeDetailPanel] [BRANCH] Fetching content from URL:", url);
-        const res = await fetch(url, { headers });
+        const res = await apiFetch(url);
         if (!res.ok) {
-          console.error("[NodeDetailPanel] [BRANCH] Fetch failed:", res.status, res.statusText);
-          throw new Error(`Failed to fetch content: ${res.statusText}`);
+          const errBody = await res.json().catch(() => ({}));
+          const detail = (errBody as { detail?: string }).detail ?? (errBody as { error?: string }).error ?? res.statusText;
+          console.error("[NodeDetailPanel] [BRANCH] Fetch failed:", res.status, detail);
+          throw new Error(detail || `Failed to fetch content: ${res.statusText}`);
         }
 
         const data = await res.json();
@@ -107,6 +137,9 @@ export function NodeDetailPanel({
           contentLength: data.content?.length || 0,
           hasMetadata: !!data.metadata 
         });
+        // #region agent log
+        fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9026f6'},body:JSON.stringify({sessionId:'9026f6',location:'node-detail-panel.tsx:fetchContent',message:'Content fetch result',data:{node_id:node.id,threadId:threadId??null,scopeProjectId:scopeProjectId??null,contentLength:data.content?.length??0,contentType:data.content_type,hasContent:!!(data.content&&String(data.content).trim())},hypothesisId:'H1,H2,H3',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         setContent(data);
         console.log("[NodeDetailPanel] EXIT fetchContent: SUCCESS");
       } catch (err: any) {
@@ -119,7 +152,7 @@ export function NodeDetailPanel({
     };
 
     fetchContent();
-  }, [node, threadId, selectedVersion]);
+  }, [node, threadId, selectedVersion, contentVersion, scopeProjectId, scopeOrgId]);
 
   // Fetch artifact history for ARTIFACT nodes
   useEffect(() => {
@@ -134,15 +167,14 @@ export function NodeDetailPanel({
       console.log("[NodeDetailPanel] [BRANCH] Starting fetchHistory", { nodeId: node.id });
       setLoadingHistory(true);
       try {
-        const orgContext = localStorage.getItem('reflexion_org_context');
-        const headers: Record<string, string> = {};
-        if (orgContext) headers['X-Organization-Context'] = orgContext;
-
-        let url = `/api/artifact/history?node_id=${node.id}`;
-        if (threadId) url += `&thread_id=${threadId}`;
+        const params = new URLSearchParams({ node_id: node.id });
+        if (threadId) params.set("thread_id", threadId);
+        if (scopeProjectId) params.set("project_id", scopeProjectId);
+        if (scopeOrgId) params.set("org_id", scopeOrgId);
+        const url = `/api/artifact/history?${params.toString()}`;
 
         console.log("[NodeDetailPanel] [BRANCH] Fetching history from URL:", url);
-        const res = await fetch(url, { headers });
+        const res = await apiFetch(url);
         if (res.ok) {
           const json = await res.json();
           const versions = json.versions || [];
@@ -161,21 +193,20 @@ export function NodeDetailPanel({
     };
 
     fetchHistory();
-  }, [node, threadId]);
+  }, [node, threadId, scopeProjectId, scopeOrgId]);
 
   // Fetch nodes for reference picker (edit mode) — hooks must be before any early return
   const fetchPickerNodes = useCallback(async () => {
     setPickerLoading(true);
     try {
-      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-      const headers: Record<string, string> = {};
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
       const params = new URLSearchParams();
       if (threadId) params.set("thread_id", threadId);
+      if (scopeProjectId) params.set("project_id", scopeProjectId);
+      if (scopeOrgId) params.set("org_id", scopeOrgId);
       if (node?.id) params.set("source_node_id", node.id);
       if (pickerSearch.trim()) params.set("search", pickerSearch.trim());
       const url = `/api/kg/nodes-for-picker?${params.toString()}`;
-      const res = await fetch(url, { headers });
+      const res = await apiFetch(url);
       if (!res.ok) throw new Error("Failed to load nodes");
       const data = (await res.json()) as { nodes?: Array<{ id: string; type: string; label: string; snippet?: string | null }> };
       setPickerNodes(data.nodes ?? []);
@@ -185,7 +216,7 @@ export function NodeDetailPanel({
     } finally {
       setPickerLoading(false);
     }
-  }, [threadId, node?.id, pickerSearch]);
+  }, [threadId, scopeProjectId, scopeOrgId, node?.id, pickerSearch]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -253,22 +284,29 @@ export function NodeDetailPanel({
   const metadata = (node as Node & { metadata?: Record<string, unknown> }).metadata || {};
   const artifactTypes = (metadata.artifact_types as string[] | undefined) || [];
   const status = (metadata.status as string | undefined) ?? "accepted";
-  const hasArtifactId = !!(metadata.artifact_id as string | undefined);
+  const isArtifactType = (t: string | undefined) => !!(t && String(t).toUpperCase() === "ARTIFACT");
+  // Show Edit when we have loadable content and the node is an ARTIFACT that can be edited (draft or accepted).
+  // Treat type case-insensitively; also allow when we have artifact_types (in case type field differs).
   const isEditableArtifact =
-    node.type === "ARTIFACT" &&
-    ((status === "accepted" && hasArtifactId) || status === "draft");
+    (isArtifactType(node.type) || artifactTypes.length > 0) &&
+    content != null &&
+    !error &&
+    (status === "draft" || status === "accepted");
 
   const handleStartEdit = async () => {
     if (!node) return;
     setEditLoading(true);
     try {
-      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
-      const res = await fetch("/api/artifact/draft-from-existing", {
+      const res = await apiFetch("/api/artifact/draft-from-existing", {
         method: "POST",
-        headers,
-        body: JSON.stringify({ node_id: node.id, thread_id: threadId ?? undefined }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          node_id: node.id,
+          thread_id: threadId ?? undefined,
+          project_id: scopeProjectId ?? undefined,
+          phase_id: scopeProjectId ?? undefined,
+          org_id: scopeOrgId ?? undefined,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -305,7 +343,14 @@ export function NodeDetailPanel({
       const res = await fetch("/api/artifact/draft-content", {
         method: "POST",
         headers,
-        body: JSON.stringify({ cache_key: editCacheKey, thread_id: threadId ?? undefined, content: editDraftContent }),
+        body: JSON.stringify({
+          cache_key: editCacheKey,
+          thread_id: threadId ?? undefined,
+          content: editDraftContent,
+          project_id: scopeProjectId ?? undefined,
+          phase_id: scopeProjectId ?? undefined,
+          org_id: scopeOrgId ?? undefined,
+        }),
       });
       if (!res.ok) throw new Error("Failed to save draft");
       toast.success("Draft saved");
@@ -330,17 +375,14 @@ export function NodeDetailPanel({
     if (!node || !editCacheKey) return;
     setEditApplying(true);
     try {
-      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
-      const res = await fetch("/api/artifact/apply", {
+      const res = await apiFetch("/api/artifact/apply", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cache_key: editCacheKey,
           option_index: 0,
           thread_id: threadId ?? undefined,
-          project_id: threadId ?? undefined,
+          project_id: scopeProjectId ?? undefined,
           artifact_type: artifactTypeForApply(),
           source_node_id: node.id,
           draft_content: editDraftContent,
@@ -384,17 +426,16 @@ export function NodeDetailPanel({
     // Create KG link: artifact (source) -> selected node (target)
     if (node?.id && selected.id !== node.id) {
       setPickerLinking(true);
-      const orgContext = typeof localStorage !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (orgContext) headers["X-Organization-Context"] = orgContext;
-      fetch("/api/kg/link-nodes", {
+      apiFetch("/api/kg/link-nodes", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_id: node.id,
           target_id: selected.id,
           link_type: "REFERENCES",
           thread_id: threadId ?? undefined,
+          project_id: scopeProjectId ?? undefined,
+          org_id: scopeOrgId ?? undefined,
         }),
       })
         .then((res) => {
@@ -471,6 +512,17 @@ export function NodeDetailPanel({
             >
               {editLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
               Edit
+            </UIButton>
+          )}
+          {isAdmin && (
+            <UIButton
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs shrink-0"
+              onClick={() => setConnectorConfigOpen(true)}
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Configure connector
             </UIButton>
           )}
           {editModalOpen && (
@@ -614,8 +666,13 @@ export function NodeDetailPanel({
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : error ? (
-          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg space-y-2">
             <p className="text-sm text-destructive">{error}</p>
+            {(!scopeProjectId && !scopeOrgId) || /scope|project_id|phase_id/i.test(error) ? (
+              <p className="text-xs text-muted-foreground">
+                Open this project from the project map (e.g. org → project → map) so artifact content can load with the correct scope.
+              </p>
+            ) : null}
           </div>
         ) : historicalContent ? (
           <div className="space-y-4">
@@ -642,12 +699,18 @@ export function NodeDetailPanel({
         ) : content ? (
           <>
             {/* Render content using appropriate renderer (pass node name as filename fallback for binary) */}
-            <div className="content-renderer-wrapper min-h-0">
-              {renderer?.render(content.content, {
-                ...content.metadata,
-                filename: content.metadata?.filename || (node as { name?: string }).name,
-              })}
-            </div>
+            {content.content != null && String(content.content).trim() ? (
+              <div className="content-renderer-wrapper min-h-0">
+                {renderer?.render(content.content, {
+                  ...content.metadata,
+                  filename: content.metadata?.filename || (node as { name?: string }).name,
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                No content available for this artifact. The content may not have been stored yet, or the artifact may be metadata-only.
+              </p>
+            )}
 
             {/* Properties */}
             {node.properties && Object.keys(node.properties).length > 0 && (
@@ -681,16 +744,12 @@ export function NodeDetailPanel({
                       )}
                       onClick={async () => {
                         setSelectedVersion(v.id);
-                        // Fetch historical version content
                         try {
-                          const orgContext = localStorage.getItem('reflexion_org_context');
-                          const headers: Record<string, string> = {};
-                          if (orgContext) headers['X-Organization-Context'] = orgContext;
-
-                          let url = `/api/artifact/content?node_id=${node.id}&version=${v.id}`;
-                          if (threadId) url += `&thread_id=${threadId}`;
-
-                          const res = await fetch(url, { headers });
+                          const params = new URLSearchParams({ node_id: node.id, version: v.id });
+                          if (threadId) params.set("thread_id", threadId);
+                          if (scopeProjectId) params.set("project_id", scopeProjectId);
+                          if (scopeOrgId) params.set("org_id", scopeOrgId);
+                          const res = await apiFetch(`/api/artifact/content?${params.toString()}`);
                           if (res.ok) {
                             const data = await res.json();
                             setHistoricalContent(data.content);
@@ -712,6 +771,22 @@ export function NodeDetailPanel({
                 </div>
               </div>
             )}
+
+            {/* Backlog (connector-linked issues, Issue 154) */}
+            {node.type === "ARTIFACT" && content && (
+              <div className="space-y-2 pt-4 border-t border-border">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <BacklogRenderer
+                    artifactId={node.id}
+                    threadId={threadId}
+                    orgId={orgContextId}
+                    projectId={scopeProjectId}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <p className="text-xs text-muted-foreground leading-relaxed">
@@ -719,6 +794,20 @@ export function NodeDetailPanel({
           </p>
         )}
       </div>
+      {isAdmin && (
+        <ConnectorConfigModal
+          open={connectorConfigOpen}
+          onOpenChange={setConnectorConfigOpen}
+          artifactId={node.id}
+          threadId={threadId}
+          orgId={orgContextId}
+          projectId={scopeProjectId}
+          onSuccess={() => {
+            setConnectorConfigOpen(false);
+            (stream as { triggerWorkbenchRefresh?: () => void })?.triggerWorkbenchRefresh?.();
+          }}
+        />
+      )}
     </div>
   );
 }

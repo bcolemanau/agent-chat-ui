@@ -14,6 +14,9 @@ export async function GET(req: Request) {
         const nodeId = searchParams.get("node_id");
         const version = searchParams.get("version");
         const threadId = searchParams.get("thread_id") || "default";
+        const projectId = searchParams.get("project_id");
+        const phaseId = searchParams.get("phase_id");
+        const orgId = searchParams.get("org_id");
 
         if (!nodeId) {
             return NextResponse.json({ error: "Missing node_id" }, { status: 400 });
@@ -23,6 +26,9 @@ export async function GET(req: Request) {
 
         let targetUrl = `${backendUrl}/artifact/content?node_id=${nodeId}&thread_id=${threadId}`;
         if (version) targetUrl += `&version=${version}`;
+        if (projectId) targetUrl += `&project_id=${encodeURIComponent(projectId)}`;
+        if (phaseId) targetUrl += `&phase_id=${encodeURIComponent(phaseId)}`;
+        if (orgId) targetUrl += `&org_id=${encodeURIComponent(orgId)}`;
 
         const orgContext = req.headers.get("X-Organization-Context");
 
@@ -38,11 +44,22 @@ export async function GET(req: Request) {
         const resp = await fetch(targetUrl, { headers });
 
         if (!resp.ok) {
-            await resp.text();
-            return NextResponse.json({ error: "Backend error" }, { status: resp.status });
+            const text = await resp.text();
+            let body: { error?: string; detail?: string } = { error: "Backend error" };
+            try {
+                const parsed = JSON.parse(text) as { detail?: string; error?: string };
+                if (parsed.detail) body = { error: parsed.detail, detail: parsed.detail };
+                else if (parsed.error) body = { error: parsed.error };
+            } catch {
+                if (text) body = { error: text.slice(0, 200) };
+            }
+            return NextResponse.json(body, { status: resp.status });
         }
 
         const data = await resp.json();
+        // #region agent log
+        fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9026f6'},body:JSON.stringify({sessionId:'9026f6',location:'api/artifact/content/route.ts:GET',message:'Backend content response',data:{nodeId,threadId:threadId||'default',phaseIdPassed:!!searchParams.get("phase_id"),contentLength:data?.content?.length??0,hasContent:!!(data?.content&&String(data.content).trim())},hypothesisId:'H1,H2,H3',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         return NextResponse.json(data);
 
     } catch (error: any) {

@@ -269,19 +269,25 @@ export function EnrichmentApproval({
         headers["X-Organization-Context"] = orgContext;
       }
 
-      const response = await fetch(
-        `${apiUrl}/artifacts/${artifactId}/enrichment/approve`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            cycle_id: proposal.cycle_id,
+      const response = await fetch("/api/decisions/apply", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          proposal_type: "enrichment",
+          action: "approve",
+          artifact_id: artifactId,
+          cycle_id: proposal.cycle_id,
+          decision_id: proposal.cycle_id || `enrichment-${artifactId}-${proposal.cycle_id}`,
+          thread_id: threadId ?? undefined,
+          project_id: threadId ?? undefined,
+          payload: {
             artifact_types: types,
             thread_id: threadId,
             project_id: threadId,
-          }),
-        }
-      );
+            decision_id: proposal.cycle_id || `enrichment-${artifactId}-${proposal.cycle_id}`,
+          },
+        }),
+      });
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({
@@ -352,17 +358,19 @@ export function EnrichmentApproval({
         headers["X-Organization-Context"] = orgContext;
       }
 
-      const response = await fetch(
-        `${apiUrl}/artifacts/${artifactId}/enrichment/reject`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            cycle_id: proposal.cycle_id,
-            project_id: threadId,
-          }),
-        }
-      );
+      const response = await fetch("/api/decisions/apply", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          proposal_type: "enrichment",
+          action: "reject",
+          artifact_id: artifactId,
+          cycle_id: proposal.cycle_id,
+          payload: { thread_id: threadId, project_id: threadId },
+          thread_id: threadId ?? undefined,
+          project_id: threadId ?? undefined,
+        }),
+      });
 
       if (!response.ok) {
         throw new Error(`Rejection failed: ${response.statusText}`);

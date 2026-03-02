@@ -13,9 +13,15 @@ export async function GET(req: Request) {
         const threadId = searchParams.get("thread_id") || "default";
         const version = searchParams.get("version");
         const versionSource = searchParams.get("version_source");
+        const projectId = searchParams.get("project_id");
+        const phaseId = searchParams.get("phase_id");
+        const orgId = searchParams.get("org_id");
         const params = new URLSearchParams({ thread_id: threadId });
         if (version) params.set("version", version);
         if (versionSource) params.set("version_source", versionSource);
+        if (projectId) params.set("project_id", projectId);
+        if (phaseId) params.set("phase_id", phaseId);
+        if (orgId) params.set("org_id", orgId);
         const baseUrl = getBackendBaseUrl();
         const targetUrl = `${baseUrl}/kg/data?${params.toString()}`;
         const headers = getProxyHeaders(session, req);

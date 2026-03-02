@@ -17,6 +17,7 @@ const HOME_VALUE = '__home__';
 interface Organization {
     id: string;
     name: string;
+    slug?: string;
 }
 
 export function OrgSwitcher() {
@@ -91,15 +92,19 @@ export function OrgSwitcher() {
         return () => window.removeEventListener('organizationsUpdated', handleCustomEvent);
     }, [fetchOrganizations]);
 
-    // Selecting an org = work in that existing cloned branch (no clone; branch already exists).
+    // Selecting an org: navigate to canonical URL /org/[orgName]/[orgId] then reload to clear stream.
     const handleValueChange = (orgId: string) => {
         setSelectedOrgId(orgId);
         if (orgId && orgId !== HOME_VALUE) {
             localStorage.setItem('reflexion_org_context', orgId);
-        } else {
-            localStorage.removeItem('reflexion_org_context');
+            const org = organizations.find((o) => o.id === orgId);
+            const slug = org?.slug ?? orgId;
+            sessionStorage.setItem('reflexion_clear_thread_for_org_switch', '1');
+            window.dispatchEvent(new CustomEvent('orgContextChanged'));
+            window.location.href = `/org/${encodeURIComponent(slug)}/${encodeURIComponent(orgId)}/map`;
+            return;
         }
-        // So Stream provider clears threadId on next load (thread from previous org is invalid)
+        localStorage.removeItem('reflexion_org_context');
         sessionStorage.setItem('reflexion_clear_thread_for_org_switch', '1');
         window.dispatchEvent(new CustomEvent('orgContextChanged'));
         window.location.reload();

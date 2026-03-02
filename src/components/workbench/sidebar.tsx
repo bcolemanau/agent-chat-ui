@@ -11,7 +11,8 @@ import {
     Search,
     Trash2,
     Clock,
-    Pencil
+    Pencil,
+    Cloud
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryState } from "nuqs";
@@ -21,17 +22,18 @@ import { Plus, Search as SearchIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { useStreamContext } from "@/providers/Stream";
+import { apiFetch } from "@/lib/api-fetch";
 
 interface Project {
     id: string;
     name: string;
+    slug?: string;
     thread_id?: string;
     updated_at?: string;
 }
 
-/** URL segment for a project: use thread_id so LangGraph/backend get the real thread; fallback to id (slug) for backwards compat. */
-function projectSegment(project: Project): string {
-    return project.thread_id ?? project.id;
+function projectSlug(project: Project): string {
+    return project.slug ?? project.id;
 }
 
 // Generate a more meaningful project name from thread ID
@@ -54,6 +56,7 @@ function formatProjectName(project: Project): string {
 const PRODUCT_LINKS = [
     { name: "Integrations", href: "/integrations", icon: Plug },
     { name: "Discovery", href: "/discovery", icon: Search },
+    { name: "GCP Chat", href: "/gcp-chat", icon: Cloud },
     { name: "System Settings", href: "/settings", icon: Settings },
 ];
 
@@ -61,16 +64,18 @@ export function Sidebar() {
     const { data: session } = useSession();
     const pathname = usePathname();
     const router = useRouter();
-    const { orgId, projectId } = useRouteScope();
+    const { orgId, projectId, orgName } = useRouteScope();
+    const orgSlug = orgName ?? orgId ?? "";
     const userRole = session?.user?.role;
 
     const [threadId, setThreadId] = useQueryState("threadId");
-    const effectiveProjectId = projectId ?? threadId ?? undefined;
+    // Scope from URL only; no thread-as-scope fallback
+    const effectiveProjectId = projectId ?? undefined;
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(false);
     const [creatingProject, setCreatingProject] = useState(false);
     const stream = useStreamContext();
-    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: () => Promise<string | null> })?.createNewThreadWithContext;
+    const createNewThreadWithContext = (stream as { createNewThreadWithContext?: (orgId?: string) => Promise<string | null> })?.createNewThreadWithContext;
     const [searchQuery, setSearchQuery] = useState("");
     const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState("");
@@ -78,25 +83,21 @@ export function Sidebar() {
     // Check if user is Reflexion Admin (keys are reflexion_admin or admin)
     const isAdmin = userRole === "reflexion_admin" || userRole === "admin";
 
-    const fetchProjects = useCallback(async () => {
+    const fetchProjects = useCallback(async (): Promise<Project[]> => {
         try {
             setLoading(true);
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) {
-                headers['X-Organization-Context'] = orgContext;
-            }
-
-            const res = await fetch('/api/projects', { headers });
+            const res = await apiFetch('/api/projects');
             if (res.ok) {
                 const data = await res.json();
                 setProjects(data);
+                return data;
             }
         } catch (error) {
             console.error("Failed to fetch projects:", error);
         } finally {
             setLoading(false);
         }
+        return [];
     }, []);
 
     const startEditing = (e: React.MouseEvent, project: Project) => {
@@ -117,13 +118,9 @@ export function Sidebar() {
         }
         const name = editingName.trim();
         try {
-            const orgContext = localStorage.getItem("reflexion_org_context");
-            const headers: Record<string, string> = { "Content-Type": "application/json" };
-            if (orgContext) headers["X-Organization-Context"] = orgContext;
-
-            const res = await fetch(`/api/projects/${encodeURIComponent(editingProjectId)}`, {
+            const res = await apiFetch(`/api/projects/${encodeURIComponent(editingProjectId)}`, {
                 method: "PATCH",
-                headers,
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name }),
             });
 
@@ -152,22 +149,15 @@ export function Sidebar() {
         }
 
         try {
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) {
-                headers['X-Organization-Context'] = orgContext;
-            }
-
-            const res = await fetch(`/api/projects?projectId=${encodeURIComponent(project.id)}`, {
+            const res = await apiFetch(`/api/projects?projectId=${encodeURIComponent(project.id)}`, {
                 method: 'DELETE',
-                headers
             });
 
             if (res.ok) {
                 toast.success("Project deleted successfully");
-                if (effectiveProjectId === projectSegment(project)) {
+                if (effectiveProjectId === projectSlug(project)) {
                     setThreadId(null);
-                    if (orgId) router.push(`/org/${encodeURIComponent(orgId)}/map`);
+                    if (orgId) router.push(`/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/map`);
                 }
                 fetchProjects();
             } else {
@@ -264,17 +254,16 @@ export function Sidebar() {
                             </div>
                         ) : (
                             filteredProjects.map((project) => {
-                                const segment = projectSegment(project);
-                                const isActive = effectiveProjectId === segment;
+                                const pslug = projectSlug(project);
+                                const isActive = effectiveProjectId === project.id || effectiveProjectId === project.thread_id;
                                 const isEditing = editingProjectId === project.id;
                                 return (
                                     <div key={project.id} className="group relative">
-                                        {/* Select existing project: put thread_id in URL so effectiveThreadId is the real LangGraph thread. */}
                                         <button
                                             onClick={() => {
                                                 if (isEditing) return;
-                                                if (orgId) router.push(`/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(segment)}/map`);
-                                                else setThreadId(segment);
+                                                if (orgId) router.push(`/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(pslug)}/${encodeURIComponent(project.id)}/map`);
+                                                else setThreadId(project.id);
                                             }}
                                             className={cn(
                                                 "w-full text-left flex flex-col rounded-md px-3 py-2.5 text-sm font-medium transition-all",
@@ -347,9 +336,15 @@ export function Sidebar() {
                                 if (createNewThreadWithContext) {
                                     setCreatingProject(true);
                                     try {
-                                        const newId = await createNewThreadWithContext();
+                                        const returnedId = await createNewThreadWithContext(orgId ?? undefined);
                                         window.dispatchEvent(new CustomEvent("orgContextChanged"));
-                                        if (newId && orgId) router.push(`/org/${encodeURIComponent(orgId)}/project/${encodeURIComponent(newId)}/map`);
+                                        if (returnedId && orgId) {
+                                            const list = await fetchProjects();
+                                            const proj = list.find((p: Project) => p.thread_id === returnedId || p.id === returnedId);
+                                            const pid = proj?.id ?? returnedId;
+                                            const pslug = proj ? projectSlug(proj) : returnedId;
+                                            router.push(`/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}/project/${encodeURIComponent(pslug)}/${encodeURIComponent(pid)}/map`);
+                                        }
                                     } finally {
                                         setCreatingProject(false);
                                     }
@@ -373,7 +368,7 @@ export function Sidebar() {
                         <div className="space-y-1">
                             {PRODUCT_LINKS.map((link) => {
                                 const Icon = link.icon;
-                                const href = orgId ? `/org/${encodeURIComponent(orgId)}${link.href}` : link.href;
+                                const href = orgId ? `/org/${encodeURIComponent(orgSlug)}/${encodeURIComponent(orgId)}${link.href}` : link.href;
                                 const isActive = pathname === href || pathname === link.href;
                                 return (
                                     <Link

@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- layout exports metadata + component */
 import type { Metadata } from "next";
 import "./globals.css";
+import "@copilotkit/react-ui/styles.css";
 import { Inter } from "next/font/google";
 import React from "react";
 import { NuqsAdapter } from "nuqs/adapters/next/app";

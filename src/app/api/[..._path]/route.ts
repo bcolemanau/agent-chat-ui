@@ -19,11 +19,25 @@ function debugLog(msg: string) {
   process.stderr.write(line);
 }
 
+/** Paths that are handled by other Next.js API routes; do not proxy to backend. */
+const RESERVED_API_PATHS = ["copilotkit", "gcp-proxy-chat"];
+
 async function proxyRequest(req: NextRequest, method: string) {
   try {
     // Path: everything after /api/ (strip /api so backend gets /artifact/..., /threads/..., etc.)
     const rawPath = req.nextUrl.pathname.replace(/^\/api\/?/, "") || "";
     const path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+    const pathSegment = path.split("/")[0] ?? "";
+    if (RESERVED_API_PATHS.includes(pathSegment)) {
+      debugLog(`catch-all skip reserved path: ${path}`);
+      return new NextResponse(
+        JSON.stringify({
+          error: "NotFound",
+          message: `This path is handled by another route. For CopilotKit use POST /api/copilotkit.`,
+        }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
     // Debug: always log so we see output on every catch-all request (Docker/local)
     debugLog(`catch-all proxyRequest ${method} ${path}`);
 
@@ -121,6 +135,19 @@ async function proxyRequest(req: NextRequest, method: string) {
     if (method !== "GET" && method !== "HEAD") {
       try {
         body = await req.text();
+        // Trace approval persistence: log POST /decisions body identifiers
+        if (method === "POST" && path === "/decisions" && body) {
+          try {
+            const parsed = JSON.parse(body as string) as { thread_id?: string; decision?: { id?: string; status?: string } };
+            console.info("[PROXY] POST /decisions", {
+              bodyThreadId: parsed.thread_id ?? "(none)",
+              decisionId: parsed.decision?.id ?? "(none)",
+              status: parsed.decision?.status ?? "(none)",
+            });
+          } catch {
+            /* ignore parse errors */
+          }
+        }
       } catch {
         // No body
       }

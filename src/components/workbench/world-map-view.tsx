@@ -2,9 +2,11 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import { polygonHull as d3PolygonHull } from 'd3-polygon';
 import { Search, RefreshCw, ZoomIn, ZoomOut, Maximize, Globe, GitCompare, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { Button as UIButton } from '@/components/ui/button';
 import { useStreamContext } from '@/providers/Stream';
+import { useRouteScope } from '@/hooks/use-route-scope';
 import { useQueryState } from 'nuqs';
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
@@ -15,6 +17,7 @@ import { ArtifactsListView } from './artifacts-list-view';
 import { useUnifiedPreviews } from './hooks/use-unified-previews';
 import { useThreadUpdates } from './hooks/use-thread-updates';
 import { KgDiffDiagramView } from './kg-diff-diagram-view';
+import { apiFetch } from '@/lib/api-fetch';
 
 interface Node extends d3.SimulationNodeDatum {
     id: string;
@@ -159,6 +162,17 @@ const typeToAgentId: Record<string, string> = (() => {
     return out;
 })();
 
+/** Template id (e.g. T-CONCEPT) → agent id for constellation layout. */
+const templateIdToAgentId: Record<string, string> = (() => {
+    const out: Record<string, string> = {};
+    for (const agent of MAP_LEGEND_AGENT_HIERARCHY) {
+        for (const t of agent.templates) {
+            if (t.templateId) out[t.templateId] = agent.agentId;
+        }
+    }
+    return out;
+})();
+
 /** Brand hue (customer brand); light → dark = start → finish. */
 const MAP_LEGEND_BRAND_HUE = 217;
 /** Agent-level colours: same hue, light (start) → dark (finish). */
@@ -175,12 +189,17 @@ function getAgentColorForNodeType(nodeType: string): string {
     return agentId ? agentColors[agentId] ?? '#888' : '#888';
 }
 
+/** Row shape for decisions list used by map (version badge, diff). */
+type KgDecisionRow = { id: string; type: string; title: string; status?: string; kg_version_sha?: string; proposed_kg_version_sha?: string };
+
 export interface WorldMapViewProps {
     /** When true, the decisions table on the left is the timeline; hide the built-in timeline panel. */
     embeddedInDecisions?: boolean;
+    /** When provided (e.g. from decisions panel), merge kg_version_sha/proposed_kg_version_sha so map shows "Decision" badge for single-commit-applied decisions. */
+    decisionsWithVersionSha?: { id: string; kg_version_sha?: string; proposed_kg_version_sha?: string }[];
 }
 
-export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps = {}) {
+export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersionSha }: WorldMapViewProps = {}) {
     const stream = useStreamContext();
     const [viewMode, setViewMode] = useQueryState("view", { defaultValue: "map" });
     const [compareParam] = useQueryState("compare"); // When "1" or "true", open timeline (header "Compare on map")
@@ -197,9 +216,12 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const [selectedNode, setSelectedNode] = useState<Node | null>(null);
     const [threadIdFromUrl] = useQueryState("threadId");
     const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
+    const { projectId: projectIdFromRoute, orgId: orgIdFromRoute } = useRouteScope();
+    const scopeProjectId = projectIdFromRoute ?? undefined;
+    const scopeOrgId = orgIdFromRoute ?? undefined;
 
     const [kgHistory, setKgHistory] = useState<{ versions: any[], total: number } | null>(null);
-    const [kgDecisions, setKgDecisions] = useState<{ id: string; type: string; title: string; status?: string; kg_version_sha?: string }[]>([]);
+    const [kgDecisions, setKgDecisions] = useState<KgDecisionRow[]>([]);
     const [_historyOpen, _setHistoryOpen] = useState(false);
 
     const [showHistory, setShowHistory] = useState(false);
@@ -241,7 +263,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             fetchDiffForTimelineVersion(versionParam);
         }
         fetchData(versionParam);
-    }, [versionParam, threadId, kgHistory]);
+    }, [versionParam, scopeProjectId, kgHistory]);
     const [compareVersion1, setCompareVersion1] = useState<string | null>(null);
     const [compareVersion2, setCompareVersion2] = useState<string | null>(null);
     const [diffData, setDiffData] = useState<any>(null);
@@ -285,14 +307,19 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
     }, [data?.nodes, focusedNodeId]);
 
-    // Fetch workflow strip for bottom panel (same as header, left-to-right flow)
+    // Fetch workflow strip for bottom panel (same as header, left-to-right flow).
+    // Scope from URL: pass project_id so backend returns project-level pack (e.g. IOT).
     useEffect(() => {
-        if (!threadId || embeddedInDecisions) return;
+        if (!scopeProjectId || embeddedInDecisions) return;
         let cancelled = false;
         const params = new URLSearchParams();
+        if (scopeProjectId) params.set('project_id', scopeProjectId);
         const activeAgent = (stream as any)?.values?.active_agent;
         if (activeAgent) params.set('active_node', activeAgent);
-        fetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ''}`)
+        // #region agent log
+        fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1fd1dd'},body:JSON.stringify({sessionId:'1fd1dd',location:'world-map-view.tsx:workflowFetch',message:'Map workflow fetch params',data:{scopeProjectId,scopeOrgId,hasProjectIdInParams:params.has('project_id'),paramsString:params.toString()},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        apiFetch(`/api/workflow${params.toString() ? `?${params.toString()}` : ''}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: { nodes?: { id: string; label: string }[]; active_node?: string } | null) => {
                 if (!cancelled && data?.nodes) setWorkflowStrip({ nodes: data.nodes, active_node: data.active_node });
@@ -300,21 +327,18 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             })
             .catch(() => { if (!cancelled) setWorkflowStrip(null); });
         return () => { cancelled = true; };
-    }, [threadId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
+    }, [scopeProjectId, embeddedInDecisions, (stream as any)?.values?.active_agent]);
 
     // Fetch project risk summary (project + phase + artifact aggregates) for map context pane
     useEffect(() => {
-        if (!threadId || embeddedInDecisions) {
+        if (!scopeProjectId || embeddedInDecisions) {
             setRiskSummary(null);
             return;
         }
         let cancelled = false;
         setLoadingRiskSummary(true);
-        const params = new URLSearchParams({ thread_id: threadId });
-        const headers: Record<string, string> = {};
-        const orgContext = localStorage.getItem('reflexion_org_context');
-        if (orgContext) headers['X-Organization-Context'] = orgContext;
-        fetch(`/api/project/risk-summary?${params.toString()}`, { headers })
+        const params = new URLSearchParams({ project_id: scopeProjectId });
+        apiFetch(`/api/project/risk-summary?${params.toString()}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((data: { in_scope?: number; covered?: number; uncovered?: number; phase_aggregates?: { phase_id: string; in_scope: number; covered: number; uncovered: number }[]; artifact_aggregates?: { art_node_id: string; template_id?: string; covered: number; covered_crit_ids: string[] }[] } | null) => {
                 if (cancelled) return;
@@ -337,7 +361,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             .catch(() => { if (!cancelled) setRiskSummary(null); })
             .finally(() => { if (!cancelled) setLoadingRiskSummary(false); });
         return () => { cancelled = true; };
-    }, [threadId, embeddedInDecisions]);
+    }, [scopeProjectId, embeddedInDecisions]);
 
     useEffect(() => {
         if (selectedTimelineVersionId) {
@@ -350,6 +374,27 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             });
         }
     }, [selectedTimelineVersionId, timelineVersionDiff, loadingTimelineDiff]);
+
+    // When decisions panel passes SHAs (e.g. after apply), merge into kgDecisions so "Decision" badge and diff work
+    useEffect(() => {
+        if (!decisionsWithVersionSha?.length) return;
+        setKgDecisions((prev) => {
+            if (!prev.length) return prev;
+            const byId = new Map(decisionsWithVersionSha.map((d) => [d.id, d]));
+            return prev.map((r): KgDecisionRow => {
+                const local = byId.get(r.id ?? "");
+                if (!local) return r;
+                const hasKg = local.kg_version_sha && (r.kg_version_sha == null || r.kg_version_sha === "");
+                const hasProposed = local.proposed_kg_version_sha && (r.proposed_kg_version_sha == null || r.proposed_kg_version_sha === "");
+                if (!hasKg && !hasProposed) return r;
+                return {
+                    ...r,
+                    ...(hasKg ? { kg_version_sha: local.kg_version_sha } : {}),
+                    ...(hasProposed ? { proposed_kg_version_sha: local.proposed_kg_version_sha } : {}),
+                };
+            });
+        });
+    }, [decisionsWithVersionSha]);
 
     /** ART node ids by template id (CONTRIBUTES_TO: ART → T-*) for focus-from-hierarchy. */
     const artNodeIdsByTemplateId = useMemo(() => {
@@ -406,28 +451,47 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     const fetchKgHistory = async () => {
         try {
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const url = threadId ? `/api/project/history?thread_id=${threadId}` : '/api/project/history';
-            const res = await fetch(url, { headers });
+            // Scope from URL: use project_id (org/project layout). Fallback to thread_id for legacy URLs.
+            const url = scopeProjectId
+                ? `/api/project/history?project_id=${encodeURIComponent(scopeProjectId)}`
+                : threadId
+                    ? `/api/project/history?project_id=${encodeURIComponent(threadId)}`
+                    : '/api/project/history';
+            const res = await apiFetch(url);
             if (res.ok) setKgHistory(await res.json());
         } catch (e) { console.error('History fetch error:', e); }
     };
 
     const fetchKgDecisions = async () => {
-        if (!threadId) return;
+        if (!scopeProjectId || !scopeOrgId) return;
         try {
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const res = await fetch(`/api/decisions?thread_id=${encodeURIComponent(threadId)}`, { headers });
+            console.info("[WorldMapView] GET /api/decisions", {
+                scopeProjectId,
+                scopeOrgId,
+            });
+            const res = await apiFetch(`/api/decisions?project_id=${encodeURIComponent(scopeProjectId)}&org_id=${encodeURIComponent(scopeOrgId)}`);
             if (res.ok) {
                 const data = await res.json();
                 // Backend returns { decisions, org_phase } when org has NPDDecision; otherwise a plain array
                 const projectList = Array.isArray(data) ? data : (data?.decisions ?? []);
                 const orgList = data?.org_phase?.decisions ?? [];
-                const merged = [...orgList, ...projectList].filter((r: { id?: string }) => r && r.id);
+                let merged = [...orgList, ...projectList].filter((r: { id?: string }) => r && r.id);
+                // Preserve kg_version_sha from decisions panel when API doesn't return it (single-commit path)
+                if (decisionsWithVersionSha?.length) {
+                    const byId = new Map(decisionsWithVersionSha.map((d) => [d.id, d]));
+                    merged = merged.map((r: { id?: string; kg_version_sha?: string; proposed_kg_version_sha?: string }) => {
+                        const local = byId.get(r.id ?? "");
+                        if (!local) return r;
+                        const hasKg = local.kg_version_sha && (r.kg_version_sha == null || r.kg_version_sha === "");
+                        const hasProposed = local.proposed_kg_version_sha && (r.proposed_kg_version_sha == null || r.proposed_kg_version_sha === "");
+                        if (!hasKg && !hasProposed) return r;
+                        return {
+                            ...r,
+                            ...(hasKg ? { kg_version_sha: local.kg_version_sha } : {}),
+                            ...(hasProposed ? { proposed_kg_version_sha: local.proposed_kg_version_sha } : {}),
+                        };
+                    });
+                }
                 setKgDecisions(merged);
             }
         } catch (e) { console.error('Decisions fetch error:', e); }
@@ -438,7 +502,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
     const resolveVersion = (v: string) => (v === "current" ? (latestVersionSha ?? v) : v);
 
     const fetchDiff = async (v1: string, v2: string) => {
-        if (!v1 || !v2 || !threadId) return;
+        if (!v1 || !v2 || !scopeProjectId) return;
         try {
             setLoadingDiff(true);
             const v1Resolved = resolveVersion(v1);
@@ -447,17 +511,14 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             const v1Source = v1 === "current" ? undefined : versions.find((x) => x.id === v1Resolved)?.source;
             const v2Source = v2 === "current" ? undefined : versions.find((x) => x.id === v2Resolved)?.source;
             const params = new URLSearchParams({
-                thread_id: threadId,
+                project_id: scopeProjectId,
                 version1: v1Resolved,
                 version2: v2Resolved,
             });
             if (v1Source === "organization") params.set("version1_source", "organization");
             if (v2Source === "organization") params.set("version2_source", "organization");
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
             const url = `/api/project/diff?${params.toString()}`;
-            const res = await fetch(url, { headers });
+            const res = await apiFetch(url);
             if (res.ok) {
                 const diff = await res.json();
                 const apiSummary = diff.summary ?? diff.diff?.summary ?? {};
@@ -488,8 +549,8 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
 
     /** Fetch diff for a single timeline version (versionBefore → versionId). Used in timeline view for decision versions. */
     const fetchDiffForTimelineVersion = async (versionId: string) => {
-        if (!threadId || !kgHistory?.versions?.length) {
-            console.log('[WorldMapView] Timeline diff fetch skipped: no threadId or kgHistory', { threadId: !!threadId, versionsLength: kgHistory?.versions?.length ?? 0 });
+        if (!scopeProjectId || !kgHistory?.versions?.length) {
+            console.log('[WorldMapView] Timeline diff fetch skipped: no project or kgHistory', { scopeProjectId: !!scopeProjectId, versionsLength: kgHistory?.versions?.length ?? 0 });
             return;
         }
         const versions = kgHistory.versions as { id?: string; source?: string }[];
@@ -499,11 +560,11 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             console.log('[WorldMapView] Timeline diff fetch skipped: no versionBefore', { versionId, idx, versionsLength: versions.length });
             return;
         }
-        const params = new URLSearchParams({
-            thread_id: threadId,
-            version1: versionBefore,
-            version2: versionId,
-        });
+            const params = new URLSearchParams({
+                project_id: scopeProjectId,
+                version1: versionBefore,
+                version2: versionId,
+            });
         const v1Source = versions.find((v) => v.id === versionBefore)?.source;
         const v2Source = versions.find((v) => v.id === versionId)?.source;
         if (v1Source === "organization") params.set("version1_source", "organization");
@@ -512,10 +573,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         console.log('[WorldMapView] Timeline diff fetch start', { versionId, versionBefore, url });
         try {
             setLoadingTimelineDiff(true);
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-            const res = await fetch(url, { headers });
+            const res = await apiFetch(url);
             if (res.ok) {
                 const diff = await res.json();
                 const hasDiff = !!diff?.diff;
@@ -541,10 +599,6 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 setLoading(true);
                 setError(null);
             }
-            const orgContext = localStorage.getItem('reflexion_org_context');
-            const headers: Record<string, string> = {};
-            if (orgContext) headers['X-Organization-Context'] = orgContext;
-
             const params = new URLSearchParams();
             if (threadId) params.set('thread_id', threadId);
             if (version) {
@@ -554,10 +608,12 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 setActiveVersion(null);
             }
             if (versionSource === 'organization') params.set('version_source', 'organization');
+            if (scopeProjectId) params.set('project_id', scopeProjectId);
+            if (scopeOrgId) params.set('org_id', scopeOrgId);
             const url = `/api/kg-data?${params.toString()}`;
 
             console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version, versionSource });
-            const res = await fetch(url, { headers });
+            const res = await apiFetch(url);
             if (!res.ok) throw new Error('Failed to fetch graph data');
             const json = await res.json();
             console.log('[WorldMapView] Fetched data:', {
@@ -622,26 +678,26 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
         fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchData/fetchKgHistory intentionally omitted to avoid re-run loops
-    }, [threadId, workbenchRefreshKey, activeVersion, filteredKg, compareMode, diffData]);
+    }, [threadId, scopeProjectId, scopeOrgId, workbenchRefreshKey, activeVersion, filteredKg, compareMode, diffData]);
 
     // After "Begin Enriching" we update thread state with current_trigger_id; refetch version list so the new commit shows.
     const currentTriggerId = (stream as any)?.values?.current_trigger_id;
     useEffect(() => {
-        if (threadId && currentTriggerId) fetchKgHistory();
+        if (scopeProjectId && currentTriggerId) fetchKgHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgHistory stable
-    }, [threadId, currentTriggerId]);
+    }, [scopeProjectId, currentTriggerId]);
 
     // Load decisions when we have history so we can show which decision produced each version
     useEffect(() => {
-        if (threadId && kgHistory) fetchKgDecisions();
+        if (scopeProjectId && kgHistory) fetchKgDecisions();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgDecisions stable
-    }, [threadId, kgHistory]);
+    }, [scopeProjectId, kgHistory]);
 
     // After workbench refresh (e.g. after applying a proposal), refetch decisions so artifact list can hide applied drafts
     useEffect(() => {
-        if (threadId && workbenchRefreshKey > 0) fetchKgDecisions();
+        if (scopeProjectId && workbenchRefreshKey > 0) fetchKgDecisions();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchKgDecisions stable
-    }, [threadId, workbenchRefreshKey]);
+    }, [scopeProjectId, workbenchRefreshKey]);
 
     useEffect(() => {
         if (!data || !svgRef.current || !containerRef.current) return;
@@ -704,8 +760,10 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 .filter((n: { changeType?: string; diff_status?: string }) => (n.changeType ?? n.diff_status) !== 'removed')
                 .map((n) => ({ ...n })) as Node[];
             const seen = new Set<string>();
+            const sampleEdgeChangeTypes: string[] = [];
             for (const e of diffEdges) {
                 if (e.changeType === 'removed') continue;
+                if (sampleEdgeChangeTypes.length < 5) sampleEdgeChangeTypes.push((e as any).changeType ?? (e as any).diff_status ?? 'none');
                 const src = typeof e.source === 'object' && e.source && 'id' in e.source ? e.source.id : e.source;
                 const tgt = typeof e.target === 'object' && e.target && 'id' in e.target ? e.target.id : e.target;
                 const srcStr = src != null ? String(src) : '';
@@ -716,6 +774,10 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 seen.add(key);
                 links.push({ source: srcStr, target: tgtStr, type: e.type } as Link);
             }
+            // #region agent log
+            const firstLinksHaveChangeType = links.slice(0, 3).map((l: any) => !!l.changeType || !!l.diff_status);
+            fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9026f6'},body:JSON.stringify({sessionId:'9026f6',location:'world-map-view.tsx:diffEdges',message:'Diff edges and link changeType',data:{useDiffPayload:true,diffEdgeSampleChangeTypes:sampleEdgeChangeTypes,linkCount:links.length,firstLinksHaveChangeType},hypothesisId:'H4,H5',timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
             console.log('[WorldMapView] Using diff payload for graph: nodes=', nodes.length, 'links=', links.length);
         } else {
             nodes = data.nodes.map(d => ({ ...d }));
@@ -744,7 +806,12 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
         }
 
         // If we have diff data but didn't use diff payload (e.g. no edges), merge diff_status into nodes for coloring.
+        const diffEdgesForH5 = (effectiveDiff?.diff?.links ?? effectiveDiff?.diff?.edges) as Array<{ changeType?: string }> | undefined;
         if (effectiveDiff && effectiveDiff.diff && effectiveDiff.diff.nodes && !useDiffPayload) {
+            // #region agent log
+            const edgeSample = diffEdgesForH5?.slice(0, 3).map((e: any) => e?.changeType ?? e?.diff_status ?? 'none') ?? [];
+            fetch('http://127.0.0.1:7258/ingest/16055c50-e65a-4462-80f9-391ad899946b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9026f6'},body:JSON.stringify({sessionId:'9026f6',location:'world-map-view.tsx:mergeDiffNodesOnly',message:'useDiffPayload=false: merging nodes only, not edges',data:{useDiffPayload:false,diffEdgesCount:diffEdgesForH5?.length??0,diffEdgeSampleChangeTypes:edgeSample,linksMergedWithDiffStatus:false},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
             console.log('[WorldMapView] Applying diff visualization (data nodes + diff status):', {
                 diffDataStructure: {
                     hasDiff: !!effectiveDiff.diff,
@@ -1054,16 +1121,101 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                 effectiveNodeIds.has((l.target as Node).id)
         );
 
+        // Constellation layout: ART nodes as centers per phase, satellites (REFERENCES) around them; phase hulls.
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const phaseRadius = Math.min(width, height) * 0.32;
+        const artNodeIdsByTemplateId: Record<string, string[]> = {};
+        for (const l of data?.links ?? []) {
+            const typ = (l.type ?? '').toString().trim();
+            if (typ !== 'CONTRIBUTES_TO') continue;
+            const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+            const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+            if (!src || !tgt || !String(tgt).startsWith('T-')) continue;
+            if (!artNodeIdsByTemplateId[tgt]) artNodeIdsByTemplateId[tgt] = [];
+            artNodeIdsByTemplateId[tgt].push(src);
+        }
+        const artIdToAgentId: Record<string, string> = {};
+        for (const [tplId, artIds] of Object.entries(artNodeIdsByTemplateId)) {
+            const agentId = templateIdToAgentId[tplId];
+            if (!agentId) continue;
+            for (const id of artIds) {
+                if (!(id in artIdToAgentId)) artIdToAgentId[id] = agentId;
+            }
+        }
+        const getAgentIdForNode = (n: Node) => artIdToAgentId[n.id] ?? typeToAgentId[n.type] ?? 'system';
+        let agentIdsInGraph = Array.from(new Set(effectiveNodes.map(getAgentIdForNode)));
+        if (agentIdsInGraph.length === 0) agentIdsInGraph = ['system'];
+        const phaseCenterByAgent: Record<string, { x: number; y: number }> = {};
+        agentIdsInGraph.forEach((agentId, i) => {
+            const angle = (i / Math.max(1, agentIdsInGraph.length)) * 2 * Math.PI - Math.PI / 2;
+            phaseCenterByAgent[agentId] = {
+                x: centerX + phaseRadius * Math.cos(angle),
+                y: centerY + phaseRadius * Math.sin(angle),
+            };
+        });
+        const artPositionByNodeId: Record<string, { x: number; y: number }> = {};
+        const artRadius = 55;
+        agentIdsInGraph.forEach((agentId) => {
+            const artsInPhase = effectiveNodes.filter((n) => artIdToAgentId[n.id] === agentId);
+            const phaseCenter = phaseCenterByAgent[agentId] ?? { x: centerX, y: centerY };
+            artsInPhase.forEach((n, j) => {
+                const angle = (j / Math.max(1, artsInPhase.length)) * 2 * Math.PI - Math.PI / 2;
+                artPositionByNodeId[n.id] = {
+                    x: phaseCenter.x + artRadius * Math.cos(angle),
+                    y: phaseCenter.y + artRadius * Math.sin(angle),
+                };
+            });
+        });
+        const nodeIdToOwnerArtId: Record<string, string> = {};
+        const artIdsSet = new Set(Object.keys(artIdToAgentId));
+        for (const l of effectiveValidLinks) {
+            const typ = (l.type ?? '').toString().trim();
+            if (typ !== 'REFERENCES') continue;
+            const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+            const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+            if (src && tgt && artIdsSet.has(src)) nodeIdToOwnerArtId[tgt] = src;
+        }
+        effectiveNodes.forEach((n) => {
+            const pos = artPositionByNodeId[n.id];
+            if (pos) {
+                n.fx = pos.x;
+                n.fy = pos.y;
+            } else {
+                const ownerArtId = nodeIdToOwnerArtId[n.id];
+                const target = ownerArtId ? artPositionByNodeId[ownerArtId] : phaseCenterByAgent[getAgentIdForNode(n)];
+                if (target) {
+                    n.x = target.x + (Math.random() - 0.5) * 40;
+                    n.y = target.y + (Math.random() - 0.5) * 40;
+                }
+                n.fx = null;
+                n.fy = null;
+            }
+        });
+
         const simulation = d3.forceSimulation<Node>(effectiveNodes)
-            .force('link', d3.forceLink<Node, Link>(effectiveValidLinks).id(d => d.id).distance(150))
-            .force('charge', d3.forceManyBody().strength(-800))
-            .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collide', d3.forceCollide().radius(60));
+            .force('link', d3.forceLink<Node, Link>(effectiveValidLinks).id(d => d.id).distance(120))
+            .force('charge', d3.forceManyBody().strength(-400))
+            .force('center', d3.forceCenter(centerX, centerY))
+            .force('collide', d3.forceCollide().radius(50))
+            .force('constellation-x', d3.forceX((d: Node) => {
+                if (d.fx != null) return d.fx;
+                const ownerArtId = nodeIdToOwnerArtId[d.id];
+                const target = ownerArtId ? artPositionByNodeId[ownerArtId] : phaseCenterByAgent[getAgentIdForNode(d)];
+                return target?.x ?? centerX;
+            }).strength(0.07))
+            .force('constellation-y', d3.forceY((d: Node) => {
+                if (d.fy != null) return d.fy;
+                const ownerArtId = nodeIdToOwnerArtId[d.id];
+                const target = ownerArtId ? artPositionByNodeId[ownerArtId] : phaseCenterByAgent[getAgentIdForNode(d)];
+                return target?.y ?? centerY;
+            }).strength(0.07));
         simulationRef.current = simulation;
 
         const linkKgStatus = (d: Link) => ((d as any).metadata?.status ?? 'active') as string;
         const linkIsPendingOrRejected = (d: Link) => statusFilter === 'all' && (linkKgStatus(d) === 'pending' || linkKgStatus(d) === 'rejected');
 
+        const hullGroup = g.append('g').attr('class', 'phase-hulls');
         const link = g.append('g')
             .attr('class', 'links')
             .selectAll('line')
@@ -1196,6 +1348,30 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
             const targetId = (d: Link) => typeof d.target === 'string' ? d.target : (d.target as Node)?.id;
             const linkTouchesFocus = (d: Link) => inFocusNodeIds.has(sourceId(d)) || inFocusNodeIds.has(targetId(d));
             const linkHighlighted = (d: Link) => focusedNodeId && linkTouchesFocus(d) && (isContentTraceLink(d) || isReferencesFromFocus(d));
+
+            // Update phase hulls (convex hull per agent)
+            const hullData = agentIdsInGraph.map((agentId) => {
+                const points = effectiveNodes
+                    .filter((n) => getAgentIdForNode(n) === agentId && n.x != null && n.y != null)
+                    .map((n) => [n.x!, n.y!] as [number, number]);
+                const polygon = points.length >= 3 ? d3PolygonHull(points) : null;
+                return { agentId, polygon };
+            });
+            const hullPaths = hullGroup.selectAll<SVGPathElement, { agentId: string; polygon: [number, number][] | null }>('path').data(hullData, (d) => d.agentId);
+            hullPaths.join(
+                (enter) => enter.append('path')
+                    .attr('fill', (d) => (agentColors[d.agentId] ?? '#888'))
+                    .attr('fill-opacity', 0.08)
+                    .attr('stroke', (d) => agentColors[d.agentId] ?? '#888')
+                    .attr('stroke-opacity', 0.35)
+                    .attr('stroke-width', 1.5)
+                    .attr('pointer-events', 'none'),
+                (update) => update,
+                (exit) => exit.remove()
+            ).attr('d', (d) => {
+                if (!d.polygon || d.polygon.length < 2) return '';
+                return 'M' + d.polygon.join('L') + 'Z';
+            });
 
             link
                 .attr('x1', d => (d.source as Node).x!)
@@ -1444,7 +1620,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                 {v.source === "project" && (
                                                     <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
                                                 )}
-                                                {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                {kgDecisions.some((d: any) => (d.kg_version_sha ?? d.proposed_kg_version_sha) === v.id) && (
                                                     <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
                                                 )}
                                                 <span className="text-[9px] text-muted-foreground">Clone: {v.source === "organization" ? "Org" : "—"}</span>
@@ -1512,7 +1688,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                                                 {v.source === "project" && (
                                                     <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">Project</span>
                                                 )}
-                                                {kgDecisions.some((d: any) => d.kg_version_sha === v.id) && (
+                                                {kgDecisions.some((d: any) => (d.kg_version_sha ?? d.proposed_kg_version_sha) === v.id) && (
                                                     <span className="text-[9px] text-purple-600 dark:text-purple-400">Decision</span>
                                                 )}
                                                 <span className="text-[9px] text-muted-foreground">Clone: {v.source === "organization" ? "Org" : "—"}</span>
@@ -1611,7 +1787,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             </div>
 
                             {kgHistory.versions.map((v: any) => {
-                                const isDecision = kgDecisions.some((d: any) => d.kg_version_sha === v.id);
+                                const isDecision = kgDecisions.some((d: any) => (d.kg_version_sha ?? d.proposed_kg_version_sha) === v.id);
                                 const phase = v.source === "organization" ? "Organization" : (v.source === "project" ? "Project" : (v.source ?? "Project"));
                                 const cloneLabel = v.source === "organization" ? "Org" : "—";
                                 return (
@@ -1874,6 +2050,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                             onClose={() => setSelectedNode(null)}
                             position="bottom"
                             threadId={threadId}
+                            contentVersion={activeVersion}
                         />
                     </div>
                 </div>
@@ -1969,7 +2146,7 @@ export function WorldMapView({ embeddedInDecisions = false }: WorldMapViewProps 
                         )}
                         <div className="h-4 w-px bg-border shrink-0" />
                         {/* Project risk summary (Epic #143 — map context pane) */}
-                        {threadId && (loadingRiskSummary || riskSummary !== null) && (
+                        {scopeProjectId && (loadingRiskSummary || riskSummary !== null) && (
                             <div className="flex items-center gap-1.5 shrink-0 px-2 py-1 rounded-md border border-border bg-background/50">
                                 <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider shrink-0">Risks</span>
                                 {loadingRiskSummary ? (

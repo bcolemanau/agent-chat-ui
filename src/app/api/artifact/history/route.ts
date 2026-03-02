@@ -13,14 +13,20 @@ export async function GET(req: Request) {
         const { searchParams } = new URL(req.url);
         const nodeId = searchParams.get("node_id");
         const threadId = searchParams.get("thread_id") || "default";
+        const projectId = searchParams.get("project_id");
+        const phaseId = searchParams.get("phase_id");
+        const orgId = searchParams.get("org_id");
 
         if (!nodeId) {
             return NextResponse.json({ error: "Missing node_id" }, { status: 400 });
         }
 
         const backendUrl = getBackendBaseUrl();
-
-        const targetUrl = `${backendUrl}/artifact/history?node_id=${nodeId}&thread_id=${threadId}`;
+        const params = new URLSearchParams({ node_id: nodeId, thread_id: threadId });
+        if (projectId) params.set("project_id", projectId);
+        if (phaseId) params.set("phase_id", phaseId);
+        if (orgId) params.set("org_id", orgId);
+        const targetUrl = `${backendUrl}/artifact/history?${params.toString()}`;
 
         const orgContext = req.headers.get("X-Organization-Context");
 

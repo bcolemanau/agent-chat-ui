@@ -4,6 +4,7 @@ import { ContentBlock } from "@langchain/core/messages";
 import { fileToContentBlock } from "@/lib/multimodal-utils";
 import { useSession } from "next-auth/react";
 import { getApiKey } from "@/lib/api-key";
+import { orgContextRef } from "@/lib/api-fetch";
 
 // Image types that are processed as content blocks (inline in messages)
 export const SUPPORTED_IMAGE_TYPES = [
@@ -58,6 +59,8 @@ interface UseFileUploadOptions {
   initialBlocks?: ContentBlock.Multimodal.Data[];
   apiUrl?: string;
   threadId?: string | null;
+  /** Project or org slug for storage scope. Use projectId when available; fallback to threadId when no project yet. Backend requires phase_id. */
+  phaseId?: string | null;
 }
 
 /**
@@ -144,6 +147,7 @@ export function useFileUpload({
   initialBlocks = [],
   apiUrl = "http://localhost:8080",
   threadId = null,
+  phaseId = null,
 }: UseFileUploadOptions = {}) {
   const { data: session } = useSession();
   // Separate images (content blocks) from PDFs (documents)
@@ -182,6 +186,8 @@ export function useFileUpload({
       if (threadId) {
         formData.append("thread_id", threadId);
       }
+      // phase_id: project slug for storage scope (required by backend). Use phaseId when available, else threadId.
+      formData.append("phase_id", phaseId || threadId || "default");
       // Pass document type as text so backend can create link decision with correct artifact_type
       const documentType = inferDocumentTypeFromFilename(file.name);
       if (documentType) {
@@ -201,8 +207,7 @@ export function useFileUpload({
         console.warn("[FileUpload] ⚠️ No authentication token available");
       }
       
-      // Add organization context if available
-      const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+      const orgContext = orgContextRef.current;
       if (orgContext) {
         headers['X-Organization-Context'] = orgContext;
         console.log("[FileUpload] Organization context: Present");
@@ -317,6 +322,8 @@ export function useFileUpload({
       if (threadId) {
         formData.append("thread_id", threadId);
       }
+      // phase_id: project slug for storage scope (required by backend). Use phaseId when available, else threadId.
+      formData.append("phase_id", phaseId || threadId || "default");
 
       // Build authentication headers
       const headers: Record<string, string> = {};
@@ -330,7 +337,7 @@ export function useFileUpload({
         console.warn("[FileUpload] ⚠️ No authentication token available for folder upload");
       }
       
-      const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
+      const orgContext = orgContextRef.current;
       if (orgContext) {
         headers['X-Organization-Context'] = orgContext;
         console.log("[FileUpload] Organization context: Present");

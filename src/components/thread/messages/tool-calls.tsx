@@ -41,8 +41,14 @@ function getProposalTitle(toolName: string, proposal: Record<string, any>): stri
       return `Link Artifact: ${args.filename || preview.filename || args.document_id || "Unknown"}`;
     case "propose_organization":
       return `Create organization: ${args.name || preview.name || args.org_id || "Unknown"}`;
-    case "organization_from_upload":
-      return `Create organization from document: ${args.name || preview.name || args.org_id || "Unknown"}`;
+    case "phase_artifact_from_upload": {
+      const artifactType = (args.artifact_type as string)?.toLowerCase();
+      if (artifactType === "organization")
+        return `Create organization from document: ${args.name || preview.name || args.org_id || "Unknown"}`;
+      if (artifactType === "project")
+        return `Create project from document: ${args.project_name || preview.project_name || args.project_id || "Unknown"}`;
+      return proposal.model_summary || "Phase artifact from upload";
+    }
     case "propose_user_add":
       return `Add user: ${args.email || preview.email || "Unknown"} to ${args.org_id || preview.org_id || "org"}`;
     case "propose_user_edit":

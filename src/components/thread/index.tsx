@@ -2,6 +2,7 @@
 
 import { v4 as uuidv4 } from "uuid";
 import { ReactNode, useEffect, useMemo, useRef, useState, FormEvent } from "react";
+import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
@@ -35,6 +36,8 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
 import { useFileUpload } from "@/hooks/use-file-upload";
+import { useRouteScope, isUuid } from "@/hooks/use-route-scope";
+import { useOrgContext } from "@/hooks/use-org-context";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import {
   useArtifactOpen,
@@ -43,7 +46,14 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { ThemeToggle } from "../theme-toggle";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Link2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 import { UserMenu } from "./user-menu";
 import { RunComparisonModal } from "./run-comparison-modal";
@@ -102,10 +112,18 @@ interface ThreadProps {
 
 export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {}) {
   const { branding } = useBranding();
+  const { orgId: orgContextId } = useOrgContext();
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
+  const [connectorHelpOpen, setConnectorHelpOpen] = useState(false);
+  const { data: session } = useSession();
+  const isAdmin =
+    session?.user?.role === "reflexion_admin" ||
+    session?.user?.role === "admin" ||
+    session?.user?.role === "newco_admin" ||
+    (session?.user?.role as string)?.toLowerCase() === "customeradministrator";
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
@@ -124,6 +142,14 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   } = stream;
   // Use stream's threadId when URL hasn't updated yet (avoids enrichment going to "default" on new threads)
   const effectiveThreadIdForUpload = (stream as { threadId?: string | null })?.threadId ?? threadId;
+  const { projectId: projectIdFromRoute, orgId: orgIdFromRoute } = useRouteScope();
+  // phase_id: use project slug when available (not UUID); else org slug; else threadId (backend bootstraps)
+  const effectivePhaseId =
+    projectIdFromRoute && !isUuid(projectIdFromRoute)
+      ? projectIdFromRoute
+      : orgIdFromRoute && !isUuid(orgIdFromRoute)
+        ? orgIdFromRoute
+        : effectiveThreadIdForUpload;
   const {
     contentBlocks,
     setContentBlocks,
@@ -139,7 +165,11 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
     resetBlocks: _resetBlocks,
     dragOver,
     handlePaste,
-  } = useFileUpload({ apiUrl, threadId: effectiveThreadIdForUpload });
+  } = useFileUpload({
+    apiUrl,
+    threadId: effectiveThreadIdForUpload,
+    phaseId: effectivePhaseId,
+  });
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const [processedArtifactIds, setProcessedArtifactIds] = useState<Set<string>>(new Set());
   const [compareModalOpen, setCompareModalOpen] = useState(false);
@@ -231,9 +261,8 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
           },
         ],
       };
-      const orgContext = typeof window !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
       const context: Record<string, unknown> = {
-        ...(orgContext ? { user_id: orgContext } : {}),
+        ...(orgContextId ? { user_id: orgContextId } : {}),
         pending_document_ids: uploadedDocuments.map((d) => d.document_id),
       };
       (stream as any).submit(
@@ -256,7 +285,7 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
         return () => clearTimeout(t);
       }
     }
-  }, [uploadedDocuments, processedArtifactIds, stream]);
+  }, [uploadedDocuments, processedArtifactIds, stream, orgContextId]);
 
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   const safeMessages = useMemo(() => messages ?? [], [messages]);
@@ -363,10 +392,9 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
 
     const toolMessages = ensureToolCallsHaveResponses(safeMessages);
 
-    const orgContext = typeof window !== 'undefined' ? localStorage.getItem('reflexion_org_context') : null;
     const context = {
       ...(Object.keys(artifactContext).length > 0 ? artifactContext : {}),
-      ...(orgContext ? { user_id: orgContext } : {}),
+      ...(orgContextId ? { user_id: orgContextId } : {}),
       // Include uploaded document IDs for Hydration agent to process
       ...(uploadedDocuments.length > 0 ? { 
         pending_document_ids: uploadedDocuments.map(d => d.document_id) 
@@ -783,6 +811,39 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                             accept=".zip,application/zip"
                             className="hidden"
                           />
+                          {isAdmin && (
+                            <>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="flex items-center gap-2 text-gray-600"
+                                onClick={() => setConnectorHelpOpen(true)}
+                              >
+                                <Link2 className="size-5" />
+                                <span className="text-sm">Connect GitHub Issues</span>
+                              </Button>
+                              <Dialog open={connectorHelpOpen} onOpenChange={setConnectorHelpOpen}>
+                                <DialogContent className="sm:max-w-md">
+                                  <DialogHeader>
+                                    <DialogTitle>Connect GitHub Issues</DialogTitle>
+                                  </DialogHeader>
+                                  <p className="text-sm text-muted-foreground">
+                                    To connect a GitHub Issues backlog to an artifact, open the Workbench, select an
+                                    artifact node, and use &quot;Configure connector&quot; in the Backlog section.
+                                  </p>
+                                  <DialogFooter>
+                                    <Button variant="outline" onClick={() => setConnectorHelpOpen(false)}>
+                                      Close
+                                    </Button>
+                                    <Button onClick={() => { setConnectorHelpOpen(false); window.location.href = "/map"; }}>
+                                      Open workbench
+                                    </Button>
+                                  </DialogFooter>
+                                </DialogContent>
+                              </Dialog>
+                            </>
+                          )}
                         </div>
                         {folderUploading && folderUploadProgress && (
                           <div className="text-xs text-muted-foreground">

@@ -11,7 +11,7 @@ export default function AppPage() {
     useEffect(() => {
         const org = typeof window !== "undefined" ? localStorage.getItem("reflexion_org_context") : null;
         if (org?.trim()) {
-            router.replace(`/org/${encodeURIComponent(org)}/map`);
+            router.replace(`/org/${encodeURIComponent(org)}/${encodeURIComponent(org)}/map`);
         } else {
             router.replace("/map");
         }

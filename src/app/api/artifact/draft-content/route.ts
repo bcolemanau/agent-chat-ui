@@ -29,6 +29,9 @@ export async function GET(req: Request) {
         }
 
         const threadId = searchParams.get("thread_id");
+        const projectId = searchParams.get("project_id");
+        const phaseId = searchParams.get("phase_id");
+        const orgId = searchParams.get("org_id");
 
         const backendUrl = getBackendBaseUrl();
 
@@ -37,6 +40,9 @@ export async function GET(req: Request) {
             option_index: String(optionIndexNum),
         });
         if (threadId) params.set("thread_id", threadId);
+        if (projectId) params.set("project_id", projectId);
+        if (phaseId) params.set("phase_id", phaseId);
+        if (orgId) params.set("org_id", orgId);
         const targetUrl = `${backendUrl}/artifact/draft-content?${params.toString()}`;
 
         const orgContext = req.headers.get("X-Organization-Context");
@@ -86,6 +92,9 @@ export async function POST(req: Request) {
         }
 
         const threadId = body?.thread_id ?? null;
+        const projectId = body?.project_id ?? null;
+        const phaseId = body?.phase_id ?? null;
+        const orgId = body?.org_id ?? null;
         const backendUrl = getBackendBaseUrl();
         const targetUrl = `${backendUrl}/artifact/draft-content`;
 
@@ -100,10 +109,15 @@ export async function POST(req: Request) {
             headers["X-Organization-Context"] = orgContext;
         }
 
+        const payload: Record<string, unknown> = { cache_key: cacheKey, thread_id: threadId, content };
+        if (projectId != null) payload.project_id = projectId;
+        if (phaseId != null) payload.phase_id = phaseId;
+        if (orgId != null) payload.org_id = orgId;
+
         const resp = await fetch(targetUrl, {
             method: "POST",
             headers,
-            body: JSON.stringify({ cache_key: cacheKey, thread_id: threadId, content }),
+            body: JSON.stringify(payload),
         });
 
         if (!resp.ok) {

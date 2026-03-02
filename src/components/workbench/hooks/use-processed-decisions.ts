@@ -162,14 +162,21 @@ export interface OrgPhaseLineage {
 }
 
 async function loadFromApi(
-  projectId: string | undefined
+  projectId: string | undefined,
+  orgId: string | undefined
 ): Promise<{ processed: ProcessedDecision[]; orgPhase: OrgPhaseLineage | null } | null> {
-  if (typeof window === "undefined" || !projectId) return null;
+  if (typeof window === "undefined" || !projectId || !orgId) return null;
   try {
-    const params = new URLSearchParams({ thread_id: projectId });
+    const params = new URLSearchParams({ project_id: projectId, org_id: orgId });
     const headers: Record<string, string> = {};
     const orgContext = localStorage.getItem("reflexion_org_context");
     if (orgContext) headers["X-Organization-Context"] = orgContext;
+    console.info("[useProcessedDecisions] GET /api/decisions", {
+      project_id: projectId,
+      org_id: orgId,
+      orgContext: orgContext ?? "(none)",
+      url: `/api/decisions?${params}`,
+    });
     const res = await fetchWithTimeout(`/api/decisions?${params}`, { headers });
     if (!res.ok) return null;
     const data = await res.json();
@@ -198,7 +205,8 @@ async function loadFromApi(
   }
 }
 
-export function useProcessedDecisions(threadId: string | undefined): {
+/** Scope from URL only (projectId, orgId). No thread-as-scope fallback. */
+export function useProcessedDecisions(projectId: string | undefined, orgId: string | undefined): {
   processed: ProcessedDecision[];
   orgPhase: OrgPhaseLineage | null;
   addProcessed: (decision: ProcessedDecision) => void;
@@ -212,7 +220,7 @@ export function useProcessedDecisions(threadId: string | undefined): {
   const [resolvedId, setResolvedId] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
-    if (!threadId) {
+    if (!projectId) {
       setResolvedId(undefined);
       setProcessed(loadFromStorage(undefined));
       setOrgPhase(null);
@@ -220,18 +228,35 @@ export function useProcessedDecisions(threadId: string | undefined): {
       return;
     }
     setIsLoading(true);
-    const projectId = await resolveThreadIdToProjectId(threadId);
     setResolvedId(projectId);
-    const fromApi = await loadFromApi(projectId);
+    const fromApi = await loadFromApi(projectId, orgId);
     if (fromApi !== null) {
-      setProcessed(fromApi.processed);
       setOrgPhase(fromApi.orgPhase);
+      // Preserve kg_version_sha from local/apply response when API doesn't return it (single-commit path)
+      setProcessed((prev) => {
+        const prevById = new Map(prev.map((p) => [p.id, p]));
+        return fromApi.processed.map((r) => {
+          const existing = prevById.get(r.id);
+          if (!existing) return r;
+          const keepKg =
+            existing.kg_version_sha && (r.kg_version_sha == null || r.kg_version_sha === "");
+          const keepProposed =
+            existing.proposed_kg_version_sha &&
+            (r.proposed_kg_version_sha == null || r.proposed_kg_version_sha === "");
+          if (!keepKg && !keepProposed) return r;
+          return {
+            ...r,
+            ...(keepKg ? { kg_version_sha: existing.kg_version_sha } : {}),
+            ...(keepProposed ? { proposed_kg_version_sha: existing.proposed_kg_version_sha } : {}),
+          };
+        });
+      });
     } else {
       setProcessed(loadFromStorage(projectId));
       setOrgPhase(null);
     }
     setIsLoading(false);
-  }, [threadId]);
+  }, [projectId, orgId]);
 
   useEffect(() => {
     load();
@@ -245,22 +270,22 @@ export function useProcessedDecisions(threadId: string | undefined): {
       };
       setProcessed((prev) => {
         const next = [entry, ...prev.filter((p) => p.id !== entry.id)].slice(0, MAX_ITEMS);
-        persistToStorage(resolvedId ?? threadId, next);
+        persistToStorage(resolvedId ?? projectId, next);
         return next;
       });
     },
-    [resolvedId, threadId]
+    [resolvedId, projectId]
   );
 
   const clearProcessed = useCallback(() => {
     setProcessed([]);
     try {
-      const keyId = resolvedId ?? threadId;
+      const keyId = resolvedId ?? projectId;
       localStorage.removeItem(getStorageKey(keyId));
     } catch (e) {
       console.warn("[useProcessedDecisions] localStorage removeItem failed", e);
     }
-  }, [resolvedId, threadId]);
+  }, [resolvedId, projectId]);
 
   return { processed, orgPhase, addProcessed, clearProcessed, isLoading, refetch: load };
 }
