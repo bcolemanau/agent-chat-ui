@@ -91,20 +91,15 @@ export function RewriteFocusedFieldButton({ className }: { className?: string })
     if (!el) return;
     const input = el as HTMLInputElement | HTMLTextAreaElement;
     if (input.tagName !== "INPUT" && input.tagName !== "TEXTAREA") return;
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? 0;
     const hasSelection =
-      "selectionStart" in input &&
-      input.selectionStart != null &&
-      input.selectionEnd != null &&
-      input.selectionStart !== input.selectionEnd;
-    const text = hasSelection
-      ? input.value.slice(input.selectionStart, input.selectionEnd)
-      : input.value;
+      "selectionStart" in input && start !== end;
+    const text = hasSelection ? input.value.slice(start, end) : input.value;
     if (!text.trim()) return;
     const result = await rewrite(text, preset);
     if (result == null) return;
     if (hasSelection && "setSelectionRange" in input) {
-      const start = input.selectionStart ?? 0;
-      const end = input.selectionEnd ?? 0;
       const before = input.value.slice(0, start);
       const after = input.value.slice(end);
       input.value = before + result + after;
