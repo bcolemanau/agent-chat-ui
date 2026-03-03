@@ -234,7 +234,9 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
     const [data, setData] = useState<GraphData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+    const [selectedNodes, setSelectedNodes] = useState<Node[]>([]);
+    const selectedNode = selectedNodes.length > 0 ? selectedNodes[selectedNodes.length - 1]! : null;
+    const selectedNodeIds = useMemo(() => new Set(selectedNodes.map((n) => n.id)), [selectedNodes]);
     const [threadIdFromUrl] = useQueryState("threadId");
     const threadId = (stream as any)?.threadId ?? threadIdFromUrl ?? undefined;
     const { projectId: projectIdFromRoute, orgId: orgIdFromRoute } = useRouteScope();
@@ -1064,8 +1066,20 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             for (const l of resolvedLinks) {
                 const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
                 const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
-                const linkType = (l.type ?? '').toString().trim();
-                if (linkType === 'REFERENCES' && src === focusedNodeId && tgt) inFocusNodeIds.add(tgt);
+                const typ = (l.type ?? '').toString().trim().toUpperCase();
+                if (typ === 'REFERENCES' && src === focusedNodeId && tgt) inFocusNodeIds.add(tgt);
+            }
+        }
+        // Multi-select: selected nodes + their REFERENCES neighbours (constellation for each selected).
+        const inSelectedOrNeighbourIds = new Set<string>(selectedNodeIds);
+        if (selectedNodeIds.size > 0) {
+            for (const l of resolvedLinks) {
+                const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
+                const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
+                const typ = (l.type ?? '').toString().trim().toUpperCase();
+                if (typ !== 'REFERENCES') continue;
+                if (src && selectedNodeIds.has(src)) inSelectedOrNeighbourIds.add(tgt);
+                if (tgt && selectedNodeIds.has(tgt)) inSelectedOrNeighbourIds.add(src);
             }
         }
 
@@ -1132,8 +1146,8 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             ? visibleByType.filter((n) => matchesSearch(n, query))
             : visibleByType;
 
-        if (searchMatches.length === 1 && searchMatches[0].id !== selectedNode?.id) {
-            setSelectedNode(searchMatches[0]);
+        if (searchMatches.length === 1 && !selectedNodeIds.has(searchMatches[0].id)) {
+            setSelectedNodes([searchMatches[0]]);
         }
 
         const effectiveNodeIds =
@@ -1151,9 +1165,10 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
         const centerX = width / 2;
         const centerY = height / 2;
         const phaseRadius = Math.min(width, height) * 0.32;
+        const linkTypeNorm = (t: string | undefined) => (t ?? '').toString().trim().toUpperCase();
         const artNodeIdsByTemplateId: Record<string, string[]> = {};
         for (const l of data?.links ?? []) {
-            const typ = (l.type ?? '').toString().trim();
+            const typ = linkTypeNorm(l.type);
             if (typ !== 'CONTRIBUTES_TO') continue;
             const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
             const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
@@ -1181,7 +1196,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
         const nodeIdToOwnerArtId: Record<string, string> = {};
         const artIdsSet = new Set(Object.keys(artIdToAgentId));
         for (const l of effectiveValidLinks) {
-            const typ = (l.type ?? '').toString().trim();
+            const typ = linkTypeNorm(l.type);
             if (typ !== 'REFERENCES') continue;
             const src = typeof l.source === 'string' ? l.source : (l.source as Node)?.id;
             const tgt = typeof l.target === 'string' ? l.target : (l.target as Node)?.id;
@@ -1245,22 +1260,64 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             }
         });
         if (useConstellationLayout) {
-            effectiveNodes.forEach((n) => {
-                const pos = artPositionByNodeId[n.id];
-                if (pos) {
-                    n.fx = pos.x;
-                    n.fy = pos.y;
-                } else {
+            if (useLinearLayout) {
+                // Beat 3: preserve each constellation shape (artifact + nearest neighbours), translate whole cluster into linear position.
+                const constellationByArtId: Record<string, Set<string>> = {};
+                artIdsSet.forEach((artId) => {
+                    constellationByArtId[artId] = new Set([artId]);
+                });
+                effectiveNodes.forEach((n) => {
                     const ownerArtId = nodeIdToOwnerArtId[n.id];
-                    const target = ownerArtId ? artPositionByNodeId[ownerArtId] : phaseCenterByAgent[getAgentIdForNode(n)];
-                    if (target) {
-                        n.x = target.x + (Math.random() - 0.5) * 40;
-                        n.y = target.y + (Math.random() - 0.5) * 40;
+                    if (ownerArtId && constellationByArtId[ownerArtId]) {
+                        constellationByArtId[ownerArtId].add(n.id);
                     }
-                    n.fx = null;
-                    n.fy = null;
-                }
-            });
+                });
+                const constellationTranslation: Record<string, { dx: number; dy: number }> = {};
+                Object.entries(constellationByArtId).forEach(([artId, ids]) => {
+                    const target = artPositionByNodeId[artId];
+                    if (!target) return;
+                    const artNode = effectiveNodes.find((m) => m.id === artId);
+                    const artX = artNode?.x ?? centerX;
+                    const artY = artNode?.y ?? centerY;
+                    constellationTranslation[artId] = { dx: target.x - artX, dy: target.y - artY };
+                });
+                const nodeIdToConstellationArtId: Record<string, string> = {};
+                Object.entries(constellationByArtId).forEach(([artId, ids]) => {
+                    ids.forEach((id) => {
+                        nodeIdToConstellationArtId[id] = artId;
+                    });
+                });
+                effectiveNodes.forEach((n) => {
+                    const artId = nodeIdToConstellationArtId[n.id];
+                    const trans = artId ? constellationTranslation[artId] : undefined;
+                    if (trans) {
+                        n.fx = (n.x ?? centerX) + trans.dx;
+                        n.fy = (n.y ?? centerY) + trans.dy;
+                    } else {
+                        const agentId = getAgentIdForNode(n);
+                        const phaseCenter = phaseCenterByAgent[agentId] ?? { x: centerX, y: centerY };
+                        n.fx = (n.x ?? centerX) + (phaseCenter.x - centerX);
+                        n.fy = (n.y ?? centerY) + (phaseCenter.y - centerY);
+                    }
+                });
+            } else {
+                effectiveNodes.forEach((n) => {
+                    const pos = artPositionByNodeId[n.id];
+                    if (pos) {
+                        n.fx = pos.x;
+                        n.fy = pos.y;
+                    } else {
+                        const ownerArtId = nodeIdToOwnerArtId[n.id];
+                        const target = ownerArtId ? artPositionByNodeId[ownerArtId] : phaseCenterByAgent[getAgentIdForNode(n)];
+                        if (target) {
+                            n.x = target.x + (Math.random() - 0.5) * 40;
+                            n.y = target.y + (Math.random() - 0.5) * 40;
+                        }
+                        n.fx = null;
+                        n.fy = null;
+                    }
+                });
+            }
         } else {
             effectiveNodes.forEach((n) => {
                 n.fx = null;
@@ -1318,7 +1375,13 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             .style('filter', 'none')
             .on('click', (event, d) => {
                 setFocusedNodeId(d.id);
-                setSelectedNode(d);
+                if (event.ctrlKey || event.metaKey) {
+                    setSelectedNodes((prev) =>
+                        prev.some((n) => n.id === d.id) ? prev.filter((n) => n.id !== d.id) : [...prev, d]
+                    );
+                } else {
+                    setSelectedNodes([d]);
+                }
                 event.stopPropagation();
             })
             .call(d3.drag<SVGGElement, Node>()
@@ -1341,7 +1404,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
         node.append('circle')
             .attr('class', 'selection-glow')
             .attr('r', d => {
-                if (selectedNode && d.id === selectedNode.id) return 24;
+                if (selectedNodeIds.has(d.id)) return 24;
                 return 0;
             })
             .attr('fill', 'none')
@@ -1350,7 +1413,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             .attr('opacity', 0.6)
             .style('pointer-events', 'none')
             .style('filter', 'drop-shadow(0 0 8px #3b82f6)')
-            .style('animation', d => selectedNode && d.id === selectedNode.id ? 'node-pulse 2s ease-in-out infinite' : 'none');
+            .style('animation', d => selectedNodeIds.has(d.id) ? 'node-pulse 2s ease-in-out infinite' : 'none');
 
         // When statusFilter === 'all', style pending/rejected by metadata.status (decision lineage)
         const nodeKgStatus = (d: Node) => (d.metadata?.status ?? 'active') as string;
@@ -1358,11 +1421,11 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
 
         node.append('circle')
             .attr('r', d => {
-                if (selectedNode && d.id === selectedNode.id) return 20;
+                if (selectedNodeIds.has(d.id)) return 20;
                 return d.id === data.metadata.active_trigger ? 18 : 12;
             })
             .attr('fill', d => {
-                if (selectedNode && d.id === selectedNode.id) return '#3b82f6';
+                if (selectedNodeIds.has(d.id)) return '#3b82f6';
                 if (isPendingOrRejected(d)) {
                     return nodeKgStatus(d) === 'pending' ? '#fef3c7' : '#fecaca'; // amber-100 / red-200
                 }
@@ -1380,7 +1443,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                 return d.id === data.metadata.active_trigger ? '#fff' : '#000';
             })
             .attr('stroke-width', d => {
-                if (selectedNode && d.id === selectedNode.id) return 4;
+                if (selectedNodeIds.has(d.id)) return 4;
                 if (isPendingOrRejected(d)) return 2;
                 const status = (d as any).diff_status ?? (d as any).changeType;
                 if (status) return 2;
@@ -1388,7 +1451,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             })
             .attr('stroke-dasharray', d => (isPendingOrRejected(d) ? '4,2' : null))
             .style('filter', d => {
-                if (selectedNode && d.id === selectedNode.id) return 'drop-shadow(0 0 12px #3b82f6)';
+                if (selectedNodeIds.has(d.id)) return 'drop-shadow(0 0 12px #3b82f6)';
                 const status = (d as any).diff_status ?? (d as any).changeType;
                 if (status && KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]) return `drop-shadow(0 0 6px ${KG_DIFF_COLORS[status as keyof typeof KG_DIFF_COLORS]})`;
                 return d.id === data.metadata.active_trigger ? 'drop-shadow(0 0 8px #fbbf24)' : 'none';
@@ -1416,7 +1479,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             .style('pointer-events', 'none');
 
         simulation.on('tick', () => {
-            const linkType = (d: Link) => (d.type ?? '').toString().trim();
+            const linkType = (d: Link) => linkTypeNorm((d.type ?? '').toString().trim());
             const isContentTraceLink = (d: Link) => CONTENT_TRACE_LINK_TYPES.has(linkType(d));
             const isReferencesFromFocus = (d: Link) => linkType(d) === 'REFERENCES' && (typeof d.source === 'string' ? d.source : (d.source as Node)?.id) === focusedNodeId;
             const sourceId = (d: Link) => typeof d.source === 'string' ? d.source : (d.source as Node)?.id;
@@ -1424,9 +1487,9 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             const linkTouchesFocus = (d: Link) => inFocusNodeIds.has(sourceId(d)) || inFocusNodeIds.has(targetId(d));
             const linkHighlighted = (d: Link) => focusedNodeId && linkTouchesFocus(d) && (isContentTraceLink(d) || isReferencesFromFocus(d));
 
-            // Update phase hulls: Beat 1/2 = per-template (artifact constellations); else per-agent
+            // Update phase hulls: Beat 1/2 = per-template (artifact constellations) when we have ART→template data; else per-agent
             const beat = viewMode === 'simulate' ? simulateBeatRef.current : -1;
-            const useTemplateHulls = viewMode === 'simulate' && (beat === 1 || beat === 2);
+            const useTemplateHulls = viewMode === 'simulate' && (beat === 1 || beat === 2) && Object.keys(templateIdToNodeIds).length > 0;
             const hullData = useTemplateHulls
                 ? Object.entries(templateIdToNodeIds).map(([tplId, nodeIdSet]) => {
                     const points = effectiveNodes
@@ -1472,50 +1535,58 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                         if (linkType(d) !== 'REFERENCES') return 0;
                         const srcId = sourceId(d);
                         const tgtId = targetId(d);
-                        if (!artIdsSet.has(srcId)) return 0;
-                        const tplId = artIdToTemplateId[srcId];
-                        const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
-                        const tgtNode = effectiveNodes.find((n) => n.id === tgtId);
-                        if (!allowedTypes || !tgtNode || !allowedTypes.has(tgtNode.type)) return 0;
+                        if (artIdsSet.size > 0) {
+                            if (!artIdsSet.has(srcId)) return 0;
+                            const tplId = artIdToTemplateId[srcId];
+                            const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
+                            const tgtNode = effectiveNodes.find((n) => n.id === tgtId);
+                            if (!allowedTypes || !tgtNode || !allowedTypes.has(tgtNode.type)) return 0;
+                        }
                         return 1;
                     }
                     if (focusedNodeId) {
                         if (linkHighlighted(d)) return 1;
                         return 0.2;
                     }
-                    if (selectedNode) {
-                        if (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id) return 1;
+                    if (selectedNodeIds.size > 0) {
+                        if (selectedNodeIds.has(sourceId(d)) || selectedNodeIds.has(targetId(d))) return 1;
                     }
                     return 0.5;
                 })
                 .style('stroke-width', d => {
                     const simBeat = viewMode === 'simulate' ? simulateBeatRef.current : -1;
-                    if (viewMode === 'simulate' && (simBeat === 1 || simBeat === 2) && linkType(d) === 'REFERENCES' && artIdsSet.has(sourceId(d))) {
-                        const tplId = artIdToTemplateId[sourceId(d)];
-                        const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
-                        const tgtNode = effectiveNodes.find((n) => n.id === targetId(d));
-                        if (allowedTypes && tgtNode && allowedTypes.has(tgtNode.type)) return 2.5;
+                    if (viewMode === 'simulate' && (simBeat === 1 || simBeat === 2) && linkType(d) === 'REFERENCES') {
+                        if (artIdsSet.size === 0) return 2.5;
+                        if (artIdsSet.has(sourceId(d))) {
+                            const tplId = artIdToTemplateId[sourceId(d)];
+                            const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
+                            const tgtNode = effectiveNodes.find((n) => n.id === targetId(d));
+                            if (allowedTypes && tgtNode && allowedTypes.has(tgtNode.type)) return 2.5;
+                        }
                     }
                     if (focusedNodeId) {
                         if (linkHighlighted(d)) return 2.5;
                         return 1;
                     }
-                    if (selectedNode && (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id)) return 2.5;
+                    if (selectedNodeIds.size > 0 && (selectedNodeIds.has(sourceId(d)) || selectedNodeIds.has(targetId(d)))) return 2.5;
                     return 1.5;
                 })
                 .style('stroke', d => {
                     const simBeat = viewMode === 'simulate' ? simulateBeatRef.current : -1;
-                    if (viewMode === 'simulate' && (simBeat === 1 || simBeat === 2) && linkType(d) === 'REFERENCES' && artIdsSet.has(sourceId(d))) {
-                        const tplId = artIdToTemplateId[sourceId(d)];
-                        const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
-                        const tgtNode = effectiveNodes.find((n) => n.id === targetId(d));
-                        if (allowedTypes && tgtNode && allowedTypes.has(tgtNode.type)) return '#3b82f6';
+                    if (viewMode === 'simulate' && (simBeat === 1 || simBeat === 2) && linkType(d) === 'REFERENCES') {
+                        if (artIdsSet.size === 0) return '#3b82f6';
+                        if (artIdsSet.has(sourceId(d))) {
+                            const tplId = artIdToTemplateId[sourceId(d)];
+                            const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
+                            const tgtNode = effectiveNodes.find((n) => n.id === targetId(d));
+                            if (allowedTypes && tgtNode && allowedTypes.has(tgtNode.type)) return '#3b82f6';
+                        }
                     }
                     if (focusedNodeId) {
                         if (linkHighlighted(d)) return '#3b82f6';
                         return '#888';
                     }
-                    if (selectedNode && (sourceId(d) === selectedNode.id || targetId(d) === selectedNode.id)) return '#3b82f6';
+                    if (selectedNodeIds.size > 0 && (selectedNodeIds.has(sourceId(d)) || selectedNodeIds.has(targetId(d)))) return '#3b82f6';
                     if (linkIsPendingOrRejected(d)) return linkKgStatus(d) === 'pending' ? '#f59e0b' : '#ef4444';
                     return '#888';
                 });
@@ -1524,14 +1595,14 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                 .attr('transform', d => `translate(${d.x},${d.y})`)
                 .style('opacity', d => {
                     if (focusedNodeId) return inFocusNodeIds.has(d.id) ? 1 : 0.35;
-                    if (selectedNode && d.id !== selectedNode.id) return 0.4;
+                    if (selectedNodeIds.size > 0) return inSelectedOrNeighbourIds.has(d.id) ? 1 : 0.4;
                     return 1;
                 });
             
             // Update selection glow position
             node.select('.selection-glow')
                 .attr('r', d => {
-                    if (selectedNode && d.id === selectedNode.id) return 24;
+                    if (selectedNodeIds.has(d.id)) return 24;
                     return 0;
                 });
         });
@@ -1565,7 +1636,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                 }
             }
         };
-    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNode, focusedNodeId, compareViewMode, mapSearchQuery, typeFilter, statusFilter, viewMode === 'simulate' && simulateBeat >= 2 ? simulateBeat : 0]);
+    }, [data, viewMode, diffData, selectedTimelineVersionId, timelineVersionDiff, selectedNodes, focusedNodeId, compareViewMode, mapSearchQuery, typeFilter, statusFilter, viewMode === 'simulate' && simulateBeat >= 2 ? simulateBeat : 0]);
 
     // Center map on selected node when it changes
     useEffect(() => {
@@ -1652,7 +1723,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             <ArtifactsListView
                 artifacts={artifacts}
                 threadId={threadId}
-                onNodeSelect={setSelectedNode}
+                onNodeSelect={(node) => setSelectedNodes(node ? [node] : [])}
                 selectedNode={selectedNode}
             />
         );
@@ -2041,7 +2112,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                     <div ref={containerRef} className="flex-1 relative overflow-hidden border-b border-border min-h-0" onClick={(e) => {
                         // Only close if clicking directly on the map background, not on nodes
                         if (e.target === e.currentTarget || (e.target as Element).closest('svg')) {
-                            setSelectedNode(null);
+                            setSelectedNodes([]);
                         }
                     }}>
                         {(() => {
@@ -2148,7 +2219,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                     <div className="h-96 relative overflow-hidden flex flex-col border-t border-border shrink-0" onClick={(e) => e.stopPropagation()}>
                         <NodeDetailPanel
                             node={selectedNode}
-                            onClose={() => setSelectedNode(null)}
+                            onClose={() => setSelectedNodes([])}
                             position="bottom"
                             threadId={threadId}
                             contentVersion={activeVersion}
@@ -2156,7 +2227,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                     </div>
                 </div>
             ) : (
-                <div ref={containerRef} className="flex-1 min-h-0 flex flex-col relative overflow-hidden" onClick={() => { setSelectedNode(null); setFocusedNodeId(null); }}>
+                <div ref={containerRef} className="flex-1 min-h-0 flex flex-col relative overflow-hidden" onClick={() => { setSelectedNodes([]); setFocusedNodeId(null); }}>
                     {(() => {
                         const graphContentSimple = (
                             <>
@@ -2360,7 +2431,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                                                                     <div className="flex items-center gap-1 mb-0.5">
                                                                         <span className="text-[9px] font-medium text-muted-foreground">{tpl.templateName}</span>
                                                                         {firstArtId != null ? (
-                                                                            <button type="button" onClick={(e) => { e.stopPropagation(); setFocusedNodeId(firstArtId); const node = data?.nodes?.find((n: Node) => n.id === firstArtId); if (node) setSelectedNode(node); }} className={cn("rounded px-1 py-0.5 text-[8px] font-medium border transition-colors", isFocused ? "border-primary bg-primary/20 text-primary" : "border-border bg-muted/30 hover:bg-muted/50 text-muted-foreground")} title="Focus map on this artifact (contained nodes + trace links)">Focus</button>
+                                                                            <button type="button" onClick={(e) => { e.stopPropagation(); setFocusedNodeId(firstArtId); const node = data?.nodes?.find((n: Node) => n.id === firstArtId); if (node) setSelectedNodes([node]); }} className={cn("rounded px-1 py-0.5 text-[8px] font-medium border transition-colors", isFocused ? "border-primary bg-primary/20 text-primary" : "border-border bg-muted/30 hover:bg-muted/50 text-muted-foreground")} title="Focus map on this artifact (contained nodes + trace links)">Focus</button>
                                                                         ) : null}
                                                                     </div>
                                                                     {risksAddressed > 0 ? (
