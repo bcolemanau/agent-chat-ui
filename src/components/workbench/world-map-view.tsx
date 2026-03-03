@@ -1299,6 +1299,9 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                         n.fx = (n.x ?? centerX) + (phaseCenter.x - centerX);
                         n.fy = (n.y ?? centerY) + (phaseCenter.y - centerY);
                     }
+                    // D3 does not update x,y for fixed nodes; set them so first paint and tick use linear position
+                    n.x = n.fx ?? n.x;
+                    n.y = n.fy ?? n.y;
                 });
             } else {
                 effectiveNodes.forEach((n) => {
