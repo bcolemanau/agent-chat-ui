@@ -145,6 +145,8 @@ const StreamSession = ({
   const { getThreads, setThreads } = useThreads();
   const prevThreadIdRef = useRef<string | null>(null);
   const reconnectProjectToNewThreadRef = useRef<() => void | Promise<void>>(() => {});
+  /** Thread ID we got 404 for; don't re-apply from resolve-project to avoid reconnect toast loop. */
+  const last404ThreadIdRef = useRef<string | null>(null);
 
   // Resolve project_id (slug) to thread_id when URL segment is not a UUID.
   useEffect(() => {
@@ -160,7 +162,11 @@ const StreamSession = ({
         );
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        if (data?.thread_id && !cancelled) setResolvedThreadId(data.thread_id);
+        const tid = data?.thread_id;
+        // Don't re-apply a thread we already got 404 for (avoids reconnect-toast loop).
+        if (tid && !cancelled && tid !== last404ThreadIdRef.current) {
+          setResolvedThreadId(tid);
+        }
       } catch {
         // ignore
       }
@@ -223,7 +229,9 @@ const StreamSession = ({
           duration: 8000,
           action: effectiveThreadId && apiUrl ? { label: "Reconnect to this project", onClick: () => reconnectProjectToNewThreadRef.current?.() } : undefined,
         });
+        if (effectiveThreadId) last404ThreadIdRef.current = effectiveThreadId;
         setThreadId(null);
+        setResolvedThreadId(null);
         window.dispatchEvent(new CustomEvent("threadNotFound", { detail: { threadId: effectiveThreadId } }));
       }
     },
@@ -294,6 +302,9 @@ const StreamSession = ({
         const is404 = (x: unknown) =>
           (x as Error)?.message?.includes?.("404") || (x as { status?: number })?.status === 404;
         if (is404(e)) {
+          if (effectiveThreadId) last404ThreadIdRef.current = effectiveThreadId;
+          setThreadId(null);
+          setResolvedThreadId(null);
           toast.error("Conversation state for this project isn’t available (e.g. after a server restart). You can still browse the map and decisions.", {
             duration: 8000,
             action: effectiveThreadId && apiUrl ? { label: "Reconnect to this project", onClick: () => reconnectProjectToNewThreadRef.current?.() } : undefined,
@@ -429,7 +440,10 @@ const StreamSession = ({
           console.debug("[Stream] Thread busy; workbench view will update when the run finishes.");
         }
         if (res.status === 404) {
-          // Don't clear threadId: map and decisions still work via backend (project resolved by thread_id).
+          if (effectiveThreadId) last404ThreadIdRef.current = effectiveThreadId;
+          setThreadId(null);
+          setResolvedThreadId(null);
+          // (cleared thread so we don't re-request the same dead thread and loop the toast)
           toast.error("Conversation state for this project isn’t available (e.g. after a server restart). You can still browse the map and decisions.", {
             duration: 8000,
             action: effectiveThreadId && apiUrl ? { label: "Reconnect to this project", onClick: () => reconnectProjectToNewThreadRef.current?.() } : undefined,
@@ -506,6 +520,7 @@ const StreamSession = ({
             body: JSON.stringify({ thread_id: fallbackData.thread_id }),
           });
           if (reconnectRes.ok) {
+            last404ThreadIdRef.current = null;
             setThreadId(fallbackData.thread_id);
             triggerWorkbenchRefresh();
             toast.success("Project reconnected. You can continue in this project.");
@@ -526,6 +541,7 @@ const StreamSession = ({
         toast.error(err?.detail ?? "Failed to reconnect project. Try “New Project” instead.");
         return;
       }
+      last404ThreadIdRef.current = null;
       setThreadId(newId);
       triggerWorkbenchRefresh();
       toast.success("Project reconnected. You can continue in this project.");

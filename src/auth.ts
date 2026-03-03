@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import type { Session } from "next-auth";
 import { NextAuthOptions, DefaultSession } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import CredentialsProvider from "next-auth/providers/credentials";
 import { getUserConfig, UserConfig } from "./config/users";
 import jwt from "jsonwebtoken";
 
@@ -72,20 +73,37 @@ export const authOptions: NextAuthOptions = {
             console.debug("[next-auth][debug]", code, safe);
         },
     },
-    // Google OAuth: set AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET in .env.local (from Google Cloud Console → Credentials → OAuth 2.0 Client).
-    // If either is missing you get: SIGNIN_OAUTH_ERROR { error: [TypeError: client_id is required], providerId: 'google' }
+    // Google OAuth when AUTH_GOOGLE_* set; otherwise Credentials (on-prem: no OAuth, sign in as onprem user).
     providers: [
-        GoogleProvider({
-            clientId: process.env.AUTH_GOOGLE_ID || "",
-            clientSecret: process.env.AUTH_GOOGLE_SECRET || "",
-            authorization: {
-                params: {
-                    prompt: "consent",
-                    access_type: "offline",
-                    response_type: "code"
-                }
-            }
-        })
+        ...(hasGoogleCreds
+            ? [
+                GoogleProvider({
+                    clientId: process.env.AUTH_GOOGLE_ID!,
+                    clientSecret: process.env.AUTH_GOOGLE_SECRET!,
+                    authorization: {
+                        params: {
+                            prompt: "consent",
+                            access_type: "offline",
+                            response_type: "code"
+                        }
+                    }
+                })
+            ]
+            : [
+                CredentialsProvider({
+                    name: "On-prem",
+                    credentials: {
+                        username: { label: "Username", type: "text" },
+                        password: { label: "Password", type: "password" }
+                    },
+                    async authorize(credentials) {
+                        const user = (credentials?.username ?? "").trim() || "onprem";
+                        const allowed = (process.env.AUTH_ONPREM_PASSWORD ?? "onprem").trim();
+                        if (credentials?.password !== allowed && allowed !== "") return null;
+                        return { id: "onprem", name: user, email: `${user}@onprem.local`, image: null };
+                    }
+                })
+            ]),
     ],
     session: { strategy: "jwt" },
     callbacks: {

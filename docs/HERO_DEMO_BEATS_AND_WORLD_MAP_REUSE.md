@@ -6,6 +6,8 @@ This document is the source of truth for the Reflexion/OrchSync hero demo (8 bea
 
 **Local demo (real KG, force-directed from Beat 1):** The first beat uses the real KG’s links for layout (force-directed, links not drawn — “Chaos”). If you see 401 or synthetic/unconnected dots, the UI is calling a backend that requires auth for `/kg/data/base`. Point the UI at your local Reflexion API: set `LANGGRAPH_API_URL=http://localhost:8080` in the agent-chat-ui env (e.g. `.env.local`) when running the UI (e.g. `npm run dev`), and ensure the Reflexion API is running with the allowlist that permits unauthenticated `GET /kg/data/base`.
 
+**Demo with project KG (same as map):** To show the same graph as the Map tab in the demo, open `/demo?phase_id=<project_id>` while logged in (e.g. `/demo?phase_id=e2e-pack-pipeline-project`). Optional query params: `thread_id`, `project_id`, `org_id`. The demo then fetches `GET /kg/data` with auth instead of `GET /kg/data/base`.
+
 ---
 
 ## 1. Consolidated beats (8)

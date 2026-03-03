@@ -74,8 +74,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const [isMounted, setIsMounted] = useState(false);
     const agentPanelRef = useRef<HTMLDivElement>(null);
 
-    // Workflow strip in workbench pane: name, version, mini diagram (from GET /api/workflow)
-    type WorkflowDiagramStrip = { workflow_id: string; name?: string; version?: string; nodes: { id: string; label: string }[]; active_node?: string };
+    // Workflow strip in workbench pane: name, version, mini diagram (from GET /api/workflow). Issue 147: pack_type/pack_name for "current pack" display.
+    type WorkflowDiagramStrip = { workflow_id: string; name?: string; version?: string; pack_type?: string; pack_name?: string; nodes: { id: string; label: string }[]; active_node?: string };
     const [workflowStrip, setWorkflowStrip] = useState<WorkflowDiagramStrip | null>(null);
     const [workflowStripLoading, setWorkflowStripLoading] = useState(false);
     const [workflowSelectOpen, setWorkflowSelectOpen] = useState(false);
@@ -114,6 +114,8 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                         workflow_id: data.workflow_id,
                         name: data.name,
                         version: data.version ?? data.workflow_id,
+                        pack_type: data.pack_type,
+                        pack_name: data.pack_name,
                         nodes: data.nodes,
                         active_node: data.active_node,
                     });
@@ -308,7 +310,7 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     // Fix: If on /decisions but viewMode is a map sub-view, navigate to /map
     // BUT only if we're not explicitly intending to stay on decisions (e.g. via tab selection)
     useEffect(() => {
-        if (pathname?.includes("/decisions") && ["map", "artifacts"].includes(viewMode)) {
+        if (pathname?.includes("/decisions") && ["map", "artifacts", "simulate"].includes(viewMode)) {
             // Check if this was a recent manual navigation to decisions
             const isManualDecisions = lastSyncedView.current === "decisions";
             if (!isManualDecisions) {
@@ -407,6 +409,11 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                             <div className="h-6 w-24 bg-muted animate-pulse rounded shrink-0" aria-hidden />
                         ) : workflowStrip && displayNodes.length > 0 ? (
                             <div className="flex items-center gap-1.5 shrink min-w-0 overflow-x-auto">
+                                {workflowStrip.pack_name && (
+                                    <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap" title="Current pack (methodology)">
+                                        Pack: {workflowStrip.pack_name}
+                                    </span>
+                                )}
                                 <span className="text-sm text-foreground/90 shrink-0 whitespace-nowrap font-medium">
                                     {workflowStrip.name ?? workflowStrip.workflow_id}
                                     <span className="text-muted-foreground font-normal"> ({workflowStrip.version ?? workflowStrip.workflow_id})</span>
@@ -654,6 +661,25 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                                     >
                                         <FileText className="w-3.5 h-3.5" />
                                         Artifacts
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className={cn(
+                                            "h-8 px-3 gap-2 text-xs font-medium transition-all",
+                                            pathname?.includes("/map") && viewMode === "simulate" ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                        )}
+                                        onClick={() => {
+                                            setViewMode("simulate");
+                                            closeArtifact();
+                                            stream.setWorkbenchView("simulate" as any);
+                                            if (!pathname?.includes("/map")) router.push(workbenchHref("/map"));
+                                            const mapHref = workbenchHref("/map");
+                                            router.push(`${mapHref}${mapHref.includes("?") ? "&" : "?"}view=simulate`);
+                                        }}
+                                    >
+                                        <Sparkles className="w-3.5 h-3.5" />
+                                        Simulate
                                     </Button>
                                     <Button
                                         variant="ghost"

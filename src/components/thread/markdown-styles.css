@@ -48,3 +48,21 @@
 .markdown-content tr:nth-child(even) {
   background-color: #f9f9f9;
 }
+
+/* Mermaid: scale diagram to container and keep text readable */
+.mermaid-diagram-wrapper {
+  width: 100%;
+}
+.mermaid-diagram-wrapper .mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+  min-width: 200px;
+}
+.mermaid-diagram-wrapper .mermaid-diagram svg .node rect,
+.mermaid-diagram-wrapper .mermaid-diagram svg .node circle {
+  stroke-width: 1.5px;
+}
+.mermaid-diagram-wrapper .mermaid-diagram .nodeLabel,
+.mermaid-diagram-wrapper .mermaid-diagram .edgeLabel {
+  font-size: 15px;
+}
