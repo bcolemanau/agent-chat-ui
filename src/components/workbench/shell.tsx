@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { Sidebar } from "./sidebar";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { UserMenu } from "@/components/thread/user-menu";
 import { Breadcrumbs } from "./breadcrumbs";
@@ -39,6 +39,17 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
     const rawAgent = values?.active_mode ?? values?.active_agent;
     /** Context mode from get_kg_context_for_turn: current | historical | draft. Shown in header and chat. */
     const contextMode = typeof values?.context_mode === "string" ? values.context_mode : undefined;
+    const searchParams = useSearchParams();
+    const versionInUrl = searchParams?.get("version") ?? undefined;
+    const compareInUrl = searchParams?.get("compare") ?? undefined;
+    const isMapRoute = pathname?.includes("/map");
+    /** When viewing a past version or compare on map, show Historical/Comparing in the pill even if stream says "current". */
+    const displayContextMode =
+        isMapRoute && versionInUrl
+            ? "historical"
+            : isMapRoute && (compareInUrl === "1" || compareInUrl === "true")
+              ? "comparing"
+              : contextMode;
     // Accept any mode string from backend; fallback to supervisor so we stay in sync when new phases are added
     const activeAgent: string =
         typeof rawAgent === "string" && rawAgent.trim() !== ""
@@ -487,18 +498,19 @@ export function WorkbenchShell({ children }: { children: React.ReactNode }) {
                         ) : (
                             <span className="text-sm text-muted-foreground italic">Workflow: —</span>
                         )}
-                        {/* Context mode pill: Current / Historical / Draft (from KG context for this turn) */}
-                        {contextMode && (
+                        {/* Context mode pill: Current / Historical / Draft / Comparing (stream or URL override on map) */}
+                        {displayContextMode && (
                             <span
                                 className={cn(
                                     "shrink-0 text-xs font-medium px-2 py-0.5 rounded-md border",
-                                    contextMode === "current" && "bg-primary/10 text-primary border-primary/30",
-                                    contextMode === "historical" && "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
-                                    contextMode === "draft" && "bg-muted text-muted-foreground border-border"
+                                    displayContextMode === "current" && "bg-primary/10 text-primary border-primary/30",
+                                    displayContextMode === "historical" && "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
+                                    displayContextMode === "draft" && "bg-muted text-muted-foreground border-border",
+                                    displayContextMode === "comparing" && "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30"
                                 )}
-                                title={`Context: ${contextMode} (repo + path for this conversation)`}
+                                title={displayContextMode === "comparing" ? "Comparing two versions on map" : `Context: ${displayContextMode} (repo + path for this conversation)`}
                             >
-                                {contextMode === "current" ? "Current" : contextMode === "historical" ? "Historical" : "Draft"}
+                                {displayContextMode === "current" ? "Current" : displayContextMode === "historical" ? "Historical" : displayContextMode === "comparing" ? "Comparing" : "Draft"}
                             </span>
                         )}
                     </div>

@@ -85,6 +85,32 @@ function getSection(properties?: Record<string, any>): string | undefined {
   return section ? `Section ${section}` : undefined;
 }
 
+/** Normalize name for grouping (strip " (draft)" so base and draft group together). */
+function normalizeArtifactName(name: string | undefined): string {
+  if (!name) return "";
+  return name.replace(/\s*\(draft\)\s*$/i, "").trim() || name;
+}
+
+/**
+ * Group key so the same logical artifact (base + draft, or multiple versions) shows as one row.
+ * Prefer artifact_id when present; else name + type so "Concept Brief" and "Concept Brief (draft)" group.
+ */
+function getArtifactGroupKey(artifact: ArtifactWithStatus): string {
+  const aid = artifact.metadata?.artifact_id;
+  if (aid != null && String(aid).trim() !== "") return `id:${String(aid).trim()}`;
+  const name = normalizeArtifactName(artifact.name);
+  const type = (artifact.artifactTypes?.[0] ?? artifact.type ?? "").trim();
+  return `name:${name}::${type}`;
+}
+
+/** One row = one logical artifact; primary is the representative node, versions are all nodes in the group. */
+type ArtifactGroupRow = {
+  groupKey: string;
+  primary: ArtifactWithStatus;
+  versions: ArtifactWithStatus[];
+  versionLabels: string[];
+};
+
 /**
  * Get artifact types from metadata or properties
  */
@@ -231,6 +257,36 @@ export function ArtifactsListView({ artifacts, threadId, onNodeSelect, selectedN
 
     return filtered;
   }, [enrichedArtifacts, searchQuery, statusFilter, sortField, sortDirection]);
+
+  // Group by logical artifact so "Concept Brief" and "Concept Brief (draft)" become one row with two versions
+  const groupedRows = useMemo<ArtifactGroupRow[]>(() => {
+    const byKey = new Map<string, ArtifactWithStatus[]>();
+    for (const a of filteredAndSorted) {
+      const key = getArtifactGroupKey(a);
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(a);
+    }
+    const rows: ArtifactGroupRow[] = [];
+    for (const [groupKey, group] of byKey) {
+      // Prefer non-draft as primary; then by version_number asc; then stable by id
+      const sorted = [...group].sort((a, b) => {
+        const aDraft = a.status === "draft" ? 1 : 0;
+        const bDraft = b.status === "draft" ? 1 : 0;
+        if (aDraft !== bDraft) return aDraft - bDraft;
+        const av = a.versionNumber ?? 0;
+        const bv = b.versionNumber ?? 0;
+        if (av !== bv) return av - bv;
+        return (a.id || "").localeCompare(b.id || "");
+      });
+      const primary = sorted[0]!;
+      const versionLabels = sorted.map((n) => {
+        const v = n.versionNumber != null && n.versionNumber >= 1 ? `v${n.versionNumber}` : n.hasDetails ? "v1" : "—";
+        return n.status === "draft" ? `${v} (draft)` : v;
+      });
+      rows.push({ groupKey, primary, versions: sorted, versionLabels });
+    }
+    return rows;
+  }, [filteredAndSorted]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {

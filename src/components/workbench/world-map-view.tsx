@@ -234,7 +234,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
     const simulateBeatRef = useRef(0);
     simulateBeatRef.current = simulateBeat;
     const [compareParam] = useQueryState("compare"); // When "1" or "true", open timeline (header "Compare on map")
-    const [versionParam] = useQueryState("version"); // Select this decision version in timeline and show its diff (per-decision "Compare on map")
+    const [versionParam, setVersionParam] = useQueryState("version"); // Select this decision version in timeline and show its diff (per-decision "Compare on map")
     /** Filtered KG streamed from backend when Project Configurator runs; use for map without extra /api/kg-data. */
     const filteredKg = (stream as any)?.values?.filtered_kg as { nodes: any[]; links: any[]; metadata?: any } | undefined;
 
@@ -271,10 +271,10 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
     useEffect(() => {
         if (viewMode === 'simulate') setSimulateBeat(0);
     }, [viewMode]);
-    // When version= in URL (per-decision "Compare on map"), open timeline, select that version, show its diff
+    // When version= in URL (per-decision "Compare on map" or timeline selection), open timeline, select that version, show its diff. No threadId required.
     const lastUrlVersion = useRef<string | null>(null);
     useEffect(() => {
-        if (!versionParam || !threadId) return;
+        if (!versionParam) return;
         if (!kgHistory?.versions?.length) {
             console.log('[WorldMapView] Timeline diff: version= in URL but no kgHistory yet, fetching history');
             fetchKgHistory();
@@ -285,7 +285,6 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
         const versionBefore = idx >= 0 && idx < versions.length - 1 ? versions[idx + 1]?.id : undefined;
         console.log('[WorldMapView] Timeline diff: version= in URL', {
             versionParam,
-            threadId,
             versionsCount: versions.length,
             idx,
             versionBefore: versionBefore ?? null,
@@ -1725,9 +1724,16 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
     );
 
     // Artifacts View Component: KG artifacts (accepted) + pending proposals (draft) — exclude drafts that were applied.
-    // Dedupe by metadata.artifact_id so the same document does not appear twice (e.g. base + enriched node for same file).
+    // Apply the same status filter (Active / All / Pending / Rejected) as the map so the list matches the filter.
     const ArtifactsView = () => {
-        const kgArtifacts = data?.nodes.filter(n => n.type === 'ARTIFACT') || [];
+        const nodeStatus = (n: Node) => (n.metadata?.status ?? 'active') as string;
+        const matchStatus = (n: Node) =>
+            statusFilter === 'all'
+                ? true
+                : statusFilter === 'active'
+                    ? [undefined, 'active', 'accepted'].includes(nodeStatus(n) as any)
+                    : nodeStatus(n) === statusFilter;
+        const kgArtifacts = (data?.nodes.filter(n => n.type === 'ARTIFACT') || []).filter(matchStatus);
         const enrichedKg = kgArtifacts.map(artifact => {
             const fullNode = data?.nodes.find(n => n.id === artifact.id);
             return {
@@ -1744,7 +1750,9 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             }
             return true;
         });
-        const artifacts = [...draftsToShow, ...dedupedKg];
+        // Include draft (pending) artifacts only when status filter is Pending or All
+        const draftsFiltered = (statusFilter === 'pending' || statusFilter === 'all') ? draftsToShow : [];
+        const artifacts = [...draftsFiltered, ...dedupedKg];
 
         return (
             <ArtifactsListView

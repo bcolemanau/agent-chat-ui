@@ -28,6 +28,7 @@ import {
   LayoutDashboard,
   GitCompare,
 } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
@@ -137,6 +138,17 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
   const stream = useStreamContext();
   const streamValues = (stream as { values?: { context_mode?: string; active_mode?: string; active_agent?: string } })?.values;
   const contextMode = typeof streamValues?.context_mode === "string" ? streamValues.context_mode : undefined;
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const versionInUrl = searchParams?.get("version") ?? undefined;
+  const compareInUrl = searchParams?.get("compare") ?? undefined;
+  const isMapRoute = pathname?.includes("/map");
+  const displayContextMode =
+    isMapRoute && versionInUrl
+      ? "historical"
+      : isMapRoute && (compareInUrl === "1" || compareInUrl === "true")
+        ? "comparing"
+        : contextMode;
   const rawAgent = streamValues?.active_mode ?? streamValues?.active_agent;
   const activeAgentLabel =
     typeof rawAgent === "string" && rawAgent.trim() !== ""
@@ -609,18 +621,19 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                     {activeAgentLabel}
                   </span>
                 )}
-                {/* Context mode from stream (current | historical | draft) — which repo+path the agent is using */}
-                {contextMode && (
+                {/* Context mode from stream or URL override on map (current | historical | draft | comparing) */}
+                {displayContextMode && (
                   <span
                     className={cn(
                       "text-xs font-medium px-2 py-0.5 rounded-md border shrink-0",
-                      contextMode === "current" && "bg-primary/10 text-primary border-primary/30",
-                      contextMode === "historical" && "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
-                      contextMode === "draft" && "bg-muted text-muted-foreground border-border"
+                      displayContextMode === "current" && "bg-primary/10 text-primary border-primary/30",
+                      displayContextMode === "historical" && "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
+                      displayContextMode === "draft" && "bg-muted text-muted-foreground border-border",
+                      displayContextMode === "comparing" && "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30"
                     )}
-                    title="Context: repo + path for this conversation"
+                    title={displayContextMode === "comparing" ? "Comparing two versions on map" : "Context: repo + path for this conversation"}
                   >
-                    {contextMode === "current" ? "Current" : contextMode === "historical" ? "Historical" : "Draft"}
+                    {displayContextMode === "current" ? "Current" : displayContextMode === "historical" ? "Historical" : displayContextMode === "comparing" ? "Comparing" : "Draft"}
                   </span>
                 )}
               </div>
