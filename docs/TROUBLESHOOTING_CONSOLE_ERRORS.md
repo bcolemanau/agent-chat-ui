@@ -6,7 +6,29 @@
 
 ---
 
-## 1b. `/api/threads/{id}/state` 409 (Conflict)
+## 1a. `/api/kg-data` 400 (Bad Request) — [WorldMapView] Failed to fetch graph data
+
+**Symptom:** `GET /api/kg-data?org_id=reflexion-orchsync:1` returns 400, console shows `[WorldMapView] Fetch error: Error: Failed to fetch graph data`.
+
+**Cause:** The backend requires a scope (phase_id or project_id). When you are at **org level** (no project selected), the UI was sending only `org_id`; the backend’s project branch then had no phase_id/project_id and raised `MissingScopeError` (400).
+
+**Fix (done):**
+- **Frontend:** When the map has org scope but no project (`scopeOrgId` set, `scopeProjectId` unset), the UI now also sends `version_source=organization` so the backend uses `org_id` as phase_id.
+- **Backend:** GET `/kg/data` now treats `org_id` as a fallback for phase_id when neither `phase_id` nor `project_id` is provided, so org-only requests work even without `version_source=organization`.
+
+---
+
+## 1b. `/api/threads/{id}/state` 400 — "Ambiguous update, specify as_node"
+
+**Symptom:** `PATCH/POST /api/threads/{id}/state` returns 400 with body `{"detail":"Ambiguous update, specify as_node"}` and `[Stream] Failed to update workbench view`.
+
+**Cause:** The LangGraph server requires an `as_node` in the state-update body when it cannot infer which graph node the update belongs to (e.g. after an interrupt or when multiple nodes could apply).
+
+**Fix (done):** The Reflexion proxy, when forwarding a thread state update to LangGraph, now injects `as_node: "supervisor"` in the request body if the client did not send it. This removes the ambiguity so the update is accepted.
+
+---
+
+## 1c. `/api/threads/{id}/state` 409 (Conflict)
 
 **Symptom:** `Failed to load resource: the server responded with a status of 409` when updating thread state (e.g. after applying a decision or syncing state).
 
@@ -16,7 +38,23 @@
 
 ---
 
-## 2. `/api/artifact/link/apply` 404 (Not Found)
+## 2a. `/api/artifact/content` and `/api/artifact/history` 500 (Internal Server Error)
+
+**Symptom:** `GET /api/artifact/content?node_id=ART-requirements_package_md&thread_id=...&project_id=...&org_id=...` or `/api/artifact/history` returns 500, and the NodeDetailPanel shows "Fetch failed: 500 Internal Server Error" or "History fetch failed: 500".
+
+**Cause:** The backend (Reflexion proxy_server) calls `get_artifact_content` / `list_artifact_history`, which can 500 when:
+- The artifact node is not in the project KG for the given scope (e.g. wrong or missing `project_id`).
+- The project model cannot be loaded (e.g. missing or invalid project, storage/GitHub error).
+- `require_phase_id_for_scope` fails when `project_id` is missing (scope required for security).
+
+**Fix:**
+- Ensure the request includes a valid `project_id` (and `org_id` when applicable) so the backend can resolve scope.
+- Check backend logs for `[HISTORY]` / `get_artifact_content` and the exact exception (e.g. "Artifact node '...' not found in project KG" or "Could not load project model").
+- If the node is an accepted artifact (e.g. `ART-requirements_package_md`), ensure the project has that node in its KG (e.g. after apply/hydration). Draft or tool-call IDs have no history and return a hint instead of 500.
+
+---
+
+## 2b. `/api/artifact/link/apply` 404 (Not Found)
 
 **Symptom:** `[ApprovalCard] Error applying artifact link: Error: Not Found` when approving a **link_uploaded_document** decision.
 
@@ -80,7 +118,11 @@
 
 | Error | Likely cause | Action |
 |-------|----------------|--------|
+| kg-data 400 | Missing scope when at org level (only org_id sent) | UI now sends version_source=organization; backend accepts org_id as phase_id fallback. |
+| threads/{id}/state 400 "Ambiguous update, specify as_node" | LangGraph needs as_node in state update body | Proxy now injects as_node=supervisor when client omits it. |
 | threads/{id}/state or /history 404 | Conversation state missing (restart, deleted, stale URL) | Map/decisions still work; use "New Project" to start a new conversation if needed |
+| threads/{id}/state 409 | Concurrent or stale state update | App retries; avoid rapid repeated updates. |
+| artifact/content or artifact/history 500 | Node not in project KG, or project scope/load failed | Send valid project_id/org_id; check backend logs and that artifact exists in project. |
 | link/apply 404 | Backend does not expose `/artifact/link/apply` | Deploy Reflexion proxy_server routes on the same backend or add a separate Reflexion API URL. |
 | classification/apply 422 | Missing `trigger_id` (or other required field) | Ensure decision has `trigger_id` in args or preview_data; UI now falls back to preview_data. |
 | project/diff 500/502 | Backend exception, or ECONNRESET/timeout (connection closed or too slow) | Proxy now returns 502 with clear message; increase backend timeout or retry; check backend logs and storage. |

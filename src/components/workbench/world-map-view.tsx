@@ -660,6 +660,8 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
             if (versionSource === 'organization') params.set('version_source', 'organization');
             if (scopeProjectId) params.set('project_id', scopeProjectId);
             if (scopeOrgId) params.set('org_id', scopeOrgId);
+            // When at org level (no project), backend needs version_source=organization so it uses org_id as phase_id
+            if (scopeOrgId && !scopeProjectId) params.set('version_source', 'organization');
             const url = `/api/kg-data?${params.toString()}`;
 
             console.log('[WorldMapView] Fetching data:', { url, preserveDiff, version, versionSource });
