@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ChromeRewriterToolbar } from "@/components/chrome-rewriter-toolbar";
 import { cn } from "@/lib/utils";
 
 type Message = { id: string; role: "user" | "assistant"; content: string };
@@ -163,6 +164,11 @@ export function GcpProxyChat() {
             }
           }}
           rows={2}
+          disabled={loading}
+        />
+        <ChromeRewriterToolbar
+          value={input}
+          onChange={setInput}
           disabled={loading}
         />
         <Button onClick={send} disabled={loading || !input.trim()}>

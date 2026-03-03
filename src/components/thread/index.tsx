@@ -58,6 +58,7 @@ import {
 import { UserMenu } from "./user-menu";
 import { RunComparisonModal } from "./run-comparison-modal";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { ChromeRewriterToolbar } from "@/components/chrome-rewriter-toolbar";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -794,6 +795,12 @@ export function Thread({ embedded, className, hideArtifacts }: ThreadProps = {})
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
+                          <ChromeRewriterToolbar
+                            value={input}
+                            onChange={setInput}
+                            disabled={isLoading}
+                            className="text-gray-600"
+                          />
                           <Label
                             htmlFor="file-input"
                             className="flex cursor-pointer items-center gap-2"

@@ -36,8 +36,19 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const chromeRewriterToken =
+    process.env.NEXT_PUBLIC_GOOGLE_CHROME_REWRITER_ORIGIN_TRIAL_TOKEN?.trim();
+
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {chromeRewriterToken ? (
+          <meta
+            httpEquiv="origin-trial"
+            content={chromeRewriterToken}
+          />
+        ) : null}
+      </head>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <NextAuthProvider>

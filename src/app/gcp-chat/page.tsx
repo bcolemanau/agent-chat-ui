@@ -2,6 +2,7 @@
 
 import { CopilotChat } from "@copilotkit/react-ui";
 import { GcpProxyChat } from "./gcp-proxy-chat";
+import { RewriteFocusedFieldButton } from "@/components/chrome-rewriter-toolbar";
 
 const instructions = `You are the Reflexion agent: the assistant for the Reflexion project (agentic coding, architecture, and GCP/Vertex integration).
 
@@ -14,10 +15,15 @@ const useProxyChat =
 export default function GcpChatPage() {
   return (
     <div className="flex h-full flex-col p-4">
-      <div className="mb-2 text-sm text-muted-foreground">
-        {useProxyChat
-          ? "GCP Chat → proxy → Vertex Agent Engine."
-          : "GCP / Agent Engine chat (CopilotKit → self-hosted runtime or Agent Engine AG-UI when configured)."}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-sm text-muted-foreground">
+          {useProxyChat
+            ? "GCP Chat → proxy → Vertex Agent Engine."
+            : "GCP / Agent Engine chat (CopilotKit → self-hosted runtime or Agent Engine AG-UI when configured)."}
+        </span>
+        {!useProxyChat && (
+          <RewriteFocusedFieldButton className="text-muted-foreground" />
+        )}
       </div>
       <div className="flex-1 min-h-0 rounded-lg border bg-card overflow-hidden">
         {useProxyChat ? (
