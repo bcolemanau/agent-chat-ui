@@ -1467,7 +1467,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                 .style('opacity', d => {
                     // Step 1: Simulate beat 0 = no edges (chaos — no connection)
                     if (viewMode === 'simulate' && simulateBeatRef.current === 0) return 0;
-                    // Beat 2/3: only REFERENCES from artifact to its contained node types (same hierarchy as context pane)
+                    // Beat 2/3: only each artifact's edges to nearest neighbour (ART→contained type) → series of disconnected constellations
                     if (viewMode === 'simulate' && (simulateBeatRef.current === 1 || simulateBeatRef.current === 2)) {
                         if (linkType(d) !== 'REFERENCES') return 0;
                         const srcId = sourceId(d);
@@ -1477,7 +1477,7 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                         const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
                         const tgtNode = effectiveNodes.find((n) => n.id === tgtId);
                         if (!allowedTypes || !tgtNode || !allowedTypes.has(tgtNode.type)) return 0;
-                        return 0.6;
+                        return 1;
                     }
                     if (focusedNodeId) {
                         if (linkHighlighted(d)) return 1;
@@ -1489,6 +1489,13 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                     return 0.5;
                 })
                 .style('stroke-width', d => {
+                    const simBeat = viewMode === 'simulate' ? simulateBeatRef.current : -1;
+                    if (viewMode === 'simulate' && (simBeat === 1 || simBeat === 2) && linkType(d) === 'REFERENCES' && artIdsSet.has(sourceId(d))) {
+                        const tplId = artIdToTemplateId[sourceId(d)];
+                        const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
+                        const tgtNode = effectiveNodes.find((n) => n.id === targetId(d));
+                        if (allowedTypes && tgtNode && allowedTypes.has(tgtNode.type)) return 2.5;
+                    }
                     if (focusedNodeId) {
                         if (linkHighlighted(d)) return 2.5;
                         return 1;
@@ -1497,6 +1504,13 @@ export function WorldMapView({ embeddedInDecisions = false, decisionsWithVersion
                     return 1.5;
                 })
                 .style('stroke', d => {
+                    const simBeat = viewMode === 'simulate' ? simulateBeatRef.current : -1;
+                    if (viewMode === 'simulate' && (simBeat === 1 || simBeat === 2) && linkType(d) === 'REFERENCES' && artIdsSet.has(sourceId(d))) {
+                        const tplId = artIdToTemplateId[sourceId(d)];
+                        const allowedTypes = tplId ? templateIdToTypes[tplId] : null;
+                        const tgtNode = effectiveNodes.find((n) => n.id === targetId(d));
+                        if (allowedTypes && tgtNode && allowedTypes.has(tgtNode.type)) return '#3b82f6';
+                    }
                     if (focusedNodeId) {
                         if (linkHighlighted(d)) return '#3b82f6';
                         return '#888';
