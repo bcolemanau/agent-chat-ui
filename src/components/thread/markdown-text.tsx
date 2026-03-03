@@ -276,6 +276,45 @@ const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
   );
 };
 
+// Theme variables for readable Mermaid charts: larger text, clear contrast, no tiny-on-black.
+const MERMAID_THEME_VARS_LIGHT = {
+  fontSize: "15px",
+  fontFamily: "inherit",
+  primaryColor: "#e2e8f0",
+  primaryTextColor: "#0f172a",
+  primaryBorderColor: "#94a3b8",
+  lineColor: "#64748b",
+  secondaryColor: "#f1f5f9",
+  tertiaryColor: "#f8fafc",
+  background: "#ffffff",
+  mainBkg: "#f1f5f9",
+  nodeBorder: "#94a3b8",
+  clusterBkg: "#e2e8f0",
+  titleColor: "#0f172a",
+  edgeLabelBackground: "#f8fafc",
+  nodeTextColor: "#0f172a",
+  textColor: "#0f172a",
+} as const;
+
+const MERMAID_THEME_VARS_DARK = {
+  fontSize: "15px",
+  fontFamily: "inherit",
+  primaryColor: "#475569",
+  primaryTextColor: "#f1f5f9",
+  primaryBorderColor: "#64748b",
+  lineColor: "#94a3b8",
+  secondaryColor: "#334155",
+  tertiaryColor: "#1e293b",
+  background: "#1e293b",
+  mainBkg: "#334155",
+  nodeBorder: "#64748b",
+  clusterBkg: "#475569",
+  titleColor: "#f1f5f9",
+  edgeLabelBackground: "#334155",
+  nodeTextColor: "#f1f5f9",
+  textColor: "#f1f5f9",
+} as const;
+
 // Mermaid diagram component. Only re-runs when code or theme actually change to avoid flicker (e.g. Strict Mode double-mount).
 const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
   const diagramRef = useRef<HTMLDivElement>(null);
@@ -289,7 +328,10 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
     if (!element.isConnected) return;
 
     const theme = resolvedTheme === "dark" ? "dark" : "default";
-    if (lastRunRef.current?.code === code && lastRunRef.current?.theme === theme) return;
+    const themeVariables =
+      theme === "dark" ? MERMAID_THEME_VARS_DARK : MERMAID_THEME_VARS_LIGHT;
+    if (lastRunRef.current?.code === code && lastRunRef.current?.theme === theme)
+      return;
 
     let cancelled = false;
     try {
@@ -306,6 +348,7 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
       startOnLoad: false,
       theme,
       securityLevel: "loose",
+      themeVariables: themeVariables as Record<string, string>,
     });
 
     mermaid
@@ -340,8 +383,8 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
   }
 
   return (
-    <div className="my-4 flex justify-center overflow-x-auto min-h-[120px]">
-      <div ref={diagramRef} className="mermaid" />
+    <div className="mermaid-diagram-wrapper my-4 flex justify-center overflow-x-auto overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800/80 p-4 min-h-[140px]">
+      <div ref={diagramRef} className="mermaid mermaid-diagram" />
     </div>
   );
 };
